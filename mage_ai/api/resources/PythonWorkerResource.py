@@ -12,17 +12,22 @@ class PythonWorkerResource(GenericResource):
     template adds a worker, locks it and prepares it, or with combine and pipeline_uuid
     writes one worker for those workers, moves the pipeline's blocks to it, locks it and
     prepares it; GET
-    /api/python_workers/<name> gives it with its prepare's state and every line uv printed.
+    /api/python_workers/<name> gives it with each package it locks, where it is used, its
+    last security check, and its prepare's state with every line uv printed; PUT changes
+    it and DELETE removes it (data_preparation/python_workers.py).
     """
 
     @classmethod
     async def collection(cls, query, meta, user, **kwargs):
-        from mage_ai.data_preparation import environments
+        from mage_ai.data_preparation import environments, python_workers
 
+        repo_path = get_repo_path(user=user)
         try:
-            workers = environments.describe_workers(get_repo_path(user=user))
+            workers = python_workers.overview(repo_path)
         except environments.PipelineEnvironmentError as error:
             raise ApiError(dict(code=400, message=str(error)))
+        # Missing or old security checks run in a thread: the list answers at once.
+        python_workers.audit_stale_in_background(repo_path)
         return cls.build_result_set(workers, user, **kwargs)
 
     @classmethod
@@ -66,18 +71,50 @@ class PythonWorkerResource(GenericResource):
 
     @classmethod
     async def member(cls, pk, user, **kwargs) -> 'PythonWorkerResource':
-        from mage_ai.data_preparation import environments
+        from mage_ai.data_preparation import environments, python_workers
 
         try:
-            workers = environments.describe_workers(get_repo_path(user=user))
+            worker = python_workers.detail(get_repo_path(user=user), pk)
+        except environments.PipelineEnvironmentError as error:
+            code = 404 if str(error).startswith('There is no Python worker') else 400
+            raise ApiError(dict(code=code, message=str(error)))
+        return cls(worker, user, **kwargs)
+
+    async def update(self, payload: Dict, **kwargs):
+        """
+        PUT /api/python_workers/<name>: dependencies (the full list), python, label,
+        description, combine. A change of packages or Python is locked in a copy first,
+        then prepared; the answer has the packages that moved and the prepare job.
+        """
+        import asyncio
+
+        from mage_ai.data_preparation import environments, python_workers
+
+        dependencies = payload.get('dependencies')
+        if dependencies is not None and (
+            not isinstance(dependencies, list) or
+            not all(isinstance(d, str) for d in dependencies)
+        ):
+            raise ApiError(dict(code=400, message='dependencies is a list of requirements.'))
+        repo_path = get_repo_path(user=self.current_user)
+        try:
+            result = await asyncio.to_thread(
+                python_workers.update, repo_path, self.model['name'],
+                dependencies=dependencies,
+                label=payload.get('label'),
+                description=payload.get('description'),
+                python=payload.get('python'),
+                combine=payload.get('combine'),
+            )
+            self.model = dict(python_workers.detail(repo_path, self.model['name']), **result)
         except environments.PipelineEnvironmentError as error:
             raise ApiError(dict(code=400, message=str(error)))
-        alias = environments.normalized_alias(pk)
-        for worker in workers:
-            if worker['name'] == alias:
-                return cls(worker, user, **kwargs)
-        raise ApiError(dict(
-            code=404,
-            message=f'There is no Python worker {pk}; workers: '
-                    f'{", ".join(w["name"] for w in workers) or "none"}.',
-        ))
+
+    async def delete(self, **kwargs):
+        """DELETE /api/python_workers/<name>: refused while a block runs in it."""
+        from mage_ai.data_preparation import environments, python_workers
+
+        try:
+            python_workers.delete(get_repo_path(user=self.current_user), self.model['name'])
+        except environments.PipelineEnvironmentError as error:
+            raise ApiError(dict(code=400, message=str(error)))

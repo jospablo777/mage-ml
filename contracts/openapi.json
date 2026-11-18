@@ -4828,6 +4828,9 @@
    },
    "PythonWorker": {
     "properties": {
+     "changes": {
+      "type": "null"
+     },
      "combine": {
       "type": "boolean"
      },
@@ -4848,13 +4851,16 @@
       "type": "null"
      },
      "label": {
-      "type": "string"
+      "type": "null"
      },
      "locked": {
       "type": "boolean"
      },
      "name": {
       "type": "string"
+     },
+     "notes": {
+      "type": "null"
      },
      "packages": {
       "items": {},
@@ -4865,7 +4871,38 @@
      },
      "python": {
       "type": "string"
+     },
+     "security": {
+      "properties": {
+       "reason": {
+        "type": "string"
+       },
+       "state": {
+        "type": "string"
+       }
+      },
+      "type": "object"
+     },
+     "size_bytes": {
+      "type": "null"
+     },
+     "used_by": {
+      "items": {},
+      "type": "array"
      }
+    },
+    "type": "object"
+   },
+   "PythonWorkerAudit": {
+    "properties": {
+     "advisories": {},
+     "checked_at": {},
+     "fixable": {},
+     "id": {},
+     "name": {},
+     "packages": {},
+     "reason": {},
+     "state": {}
     },
     "type": "object"
    },
@@ -4880,6 +4917,17 @@
      "sizes": {},
      "state": {},
      "workers": {}
+    },
+    "type": "object"
+   },
+   "PythonWorkerUpdate": {
+    "properties": {
+     "changes": {},
+     "held": {},
+     "id": {},
+     "job": {},
+     "message": {},
+     "name": {}
     },
     "type": "object"
    },
@@ -16055,6 +16103,42 @@
     ]
    }
   },
+  "/api/python_worker_audits/{id}": {
+   "get": {
+    "operationId": "detail_python_worker_audits",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker_audit": {
+           "$ref": "#/components/schemas/PythonWorkerAudit"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail python_worker_audits",
+    "tags": [
+     "python_worker_audits"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
+  },
   "/api/python_worker_combinations": {
    "post": {
     "operationId": "create_python_worker_combinations",
@@ -16092,6 +16176,120 @@
     "summary": "create python_worker_combinations",
     "tags": [
      "python_worker_combinations"
+    ]
+   }
+  },
+  "/api/python_worker_updates": {
+   "post": {
+    "operationId": "create_python_worker_updates",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "python_worker_update": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker_update": {
+           "$ref": "#/components/schemas/PythonWorkerUpdate"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create python_worker_updates",
+    "tags": [
+     "python_worker_updates"
+    ]
+   }
+  },
+  "/api/python_worker_updates/{id}": {
+   "get": {
+    "operationId": "detail_python_worker_updates",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker_update": {
+           "$ref": "#/components/schemas/PythonWorkerUpdate"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail python_worker_updates",
+    "tags": [
+     "python_worker_updates"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ],
+   "put": {
+    "operationId": "update_python_worker_updates",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "python_worker_update": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker_update": {
+           "$ref": "#/components/schemas/PythonWorkerUpdate"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "update python_worker_updates",
+    "tags": [
+     "python_worker_updates"
     ]
    }
   },
@@ -16166,6 +16364,30 @@
    }
   },
   "/api/python_workers/{id}": {
+   "delete": {
+    "operationId": "delete_python_workers",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker": {
+           "$ref": "#/components/schemas/PythonWorker"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "delete python_workers",
+    "tags": [
+     "python_workers"
+    ]
+   },
    "get": {
     "operationId": "detail_python_workers",
     "responses": {
@@ -16199,7 +16421,45 @@
       "type": "string"
      }
     }
-   ]
+   ],
+   "put": {
+    "operationId": "update_python_workers",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "python_worker": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker": {
+           "$ref": "#/components/schemas/PythonWorker"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "update python_workers",
+    "tags": [
+     "python_workers"
+    ]
+   }
   },
   "/api/role_permissions": {
    "get": {
@@ -21241,17 +21501,33 @@
    ],
    "schema": "PullRequest"
   },
+  "python_worker_audits": {
+   "operations": [
+    "detail"
+   ],
+   "schema": "PythonWorkerAudit"
+  },
   "python_worker_combinations": {
    "operations": [
     "create"
    ],
    "schema": "PythonWorkerCombination"
   },
+  "python_worker_updates": {
+   "operations": [
+    "create",
+    "detail",
+    "update"
+   ],
+   "schema": "PythonWorkerUpdate"
+  },
   "python_workers": {
    "operations": [
     "list",
     "create",
-    "detail"
+    "detail",
+    "update",
+    "delete"
    ],
    "schema": "PythonWorker"
   },
@@ -21594,7 +21870,9 @@
   "pipeline_triggers": "get /api/pipeline_triggers: error 400: Pipeline triggers belong to a pipeline: /api/pipelines/<uuid>/pipeline_triggers.",
   "project_archives": "no list or detail reached",
   "pull_requests": "no list or detail reached",
+  "python_worker_audits": "no list or detail reached",
   "python_worker_combinations": "no list or detail reached",
+  "python_worker_updates": "no list or detail reached",
   "role_permissions": "get /api/role_permissions: error 403: The list action is disabled for role_permissions.",
   "run_records": "no list or detail reached",
   "rust_checks": "no list or detail reached",

@@ -18,9 +18,10 @@ PythonWorkerPolicy.allow_actions(
     condition=lambda policy: policy.has_at_least_viewer_role(),
 )
 
-# Preparing installs packages on the server.
+# Preparing installs packages on the server; changing or removing a worker changes the
+# project's files.
 PythonWorkerPolicy.allow_actions(
-    [constants.CREATE],
+    [constants.CREATE, constants.DELETE, constants.UPDATE],
     scopes=[OauthScope.CLIENT_PRIVATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
 )
@@ -28,7 +29,8 @@ PythonWorkerPolicy.allow_actions(
 PythonWorkerPolicy.allow_read(
     PythonWorkerPresenter.default_attributes,
     scopes=[OauthScope.CLIENT_PRIVATE],
-    on_action=[constants.CREATE, constants.DETAIL, constants.LIST],
+    on_action=[constants.CREATE, constants.DELETE, constants.DETAIL, constants.LIST,
+               constants.UPDATE],
     condition=lambda policy: policy.has_at_least_viewer_role(),
 )
 
@@ -38,5 +40,12 @@ PythonWorkerPolicy.allow_write(
     ['combine', 'description', 'label', 'name', 'pipeline_uuid', 'template'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE],
+    condition=lambda policy: policy.has_at_least_editor_role(),
+)
+
+PythonWorkerPolicy.allow_write(
+    ['combine', 'dependencies', 'description', 'label', 'python'],
+    scopes=[OauthScope.CLIENT_PRIVATE],
+    on_action=[constants.UPDATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
 )
