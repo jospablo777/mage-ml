@@ -7,6 +7,7 @@ import asyncio
 import importlib.metadata
 import shutil
 import sys
+import subprocess
 import tempfile
 import textwrap
 import time
@@ -446,6 +447,41 @@ class NamedWorkerTest(DBTestCase):
                 environments.combine_check(self.repo_path, ['pack-tools', 'old-six'])['state'],
                 'same',
             )
+
+    def test_a_check_says_same_when_no_version_moves_and_unchecked_without_a_lock(self):
+        environments._combine_cache.clear()
+        self.worker('old-six', dependencies=['six==1.16.0'])
+        self.worker('pack-tools', dependencies=['packaging==24.1', 'six==1.16.0'])
+        real = subprocess.run
+
+        def pinned_fails(command, **kwargs):
+            # CI (cda7afdcc): the resolution at the locked versions failed and the free one
+            # moved nothing; the page said "can run as one worker if 0 packages change".
+            if 'compile' in command and '-c' in command:
+                return subprocess.CompletedProcess(command, 2, '', 'error: no reason')
+            return real(command, **kwargs)
+
+        with patch.object(environments.subprocess, 'run', side_effect=pinned_fails):
+            result = environments.combine_check(self.repo_path, ['old-six', 'pack-tools'])
+        self.assertEqual(result['state'], 'same')
+        self.assertEqual(result['changes'], {'old-six': [], 'pack-tools': []})
+        self.assertGreater(result['saved_bytes'], 0)
+
+        environments._combine_cache.clear()
+
+        def export_fails(command, **kwargs):
+            if 'export' in command:
+                return subprocess.CompletedProcess(
+                    command, 2, '', 'warning: x\nerror: The lockfile is not valid\n')
+            return real(command, **kwargs)
+
+        with patch.object(environments.subprocess, 'run', side_effect=export_fails):
+            result = environments.combine_check(self.repo_path, ['old-six', 'pack-tools'])
+        self.assertEqual(result['state'], 'unchecked')
+        self.assertEqual(result['reason'], 'uv could not read the uv.lock of old-six: '
+                                           'error: The lockfile is not valid')
+        # Not kept: the next check runs uv again.
+        self.assertFalse(environments._combine_cache)
 
     def test_the_api_answers_whether_workers_combine_for_editors(self):
         from mage_ai.api.operations.base import BaseOperation

@@ -34,6 +34,7 @@ import functools
 import hashlib
 import importlib.metadata
 import json
+import logging
 import os
 import platform
 import re
@@ -52,6 +53,8 @@ from mage_ai.shared.processes import (
     stop_process_group,
     supervised_command,
 )
+
+logger = logging.getLogger(__name__)
 
 ENVIRONMENTS_DIR_ENV = 'MAGE_ENVIRONMENTS_DIR'
 MARKER = 'mage-environment.json'
@@ -729,40 +732,61 @@ def combine_check(repo_path: str, aliases: List[str]) -> Dict:
         uv = _uv()
         with tempfile.TemporaryDirectory(prefix='mage_combine_') as directory:
             folder = Path(directory)
-            requirements, constraints = [], []
+            # uv runs in the scratch folder: the server's working directory and its
+            # pyproject.toml settings do not change the answer.
+            run = functools.partial(subprocess.run, capture_output=True, cwd=folder, text=True)
+            requirements, constraints, failed = [], [], None
             for worker in chosen:
                 project = tomllib.loads(
                     (Path(worker.definition) / 'pyproject.toml').read_text()).get('project') or {}
                 requirements += project.get('dependencies') or []
-                exported = subprocess.run(
+                exported = run(
                     [uv, 'export', '--frozen', '--no-hashes', '--no-emit-project', '--quiet',
                      '--project', worker.definition],
-                    capture_output=True, text=True, timeout=120,
+                    timeout=120,
                 )
+                if exported.returncode != 0:
+                    # Without its versions, a check would say "same" for any lock.
+                    failed = (worker, exported.stderr)
+                    break
                 path = folder / f'{worker.alias}.txt'
                 path.write_text(exported.stdout)
                 constraints += ['-c', str(path)]
-            (folder / 'combined.in').write_text('\n'.join(dict.fromkeys(requirements)) + '\n')
-            compile_ = [uv, 'pip', 'compile', '--quiet', '--universal', '--python-version',
-                        chosen[0].python, str(folder / 'combined.in'), '-o',
-                        str(folder / 'combined.txt')]
-            pinned = subprocess.run(compile_ + constraints, capture_output=True, text=True,
-                                    timeout=300)
-            if pinned.returncode == 0:
-                result.update(state='same', changes={})
+            if failed:
+                worker, stderr = failed
+                lines = [line for line in stderr.strip().splitlines() if line.strip()]
+                result.update(state='unchecked', reason=(
+                    f'uv could not read the uv.lock of {worker.display_name}: '
+                    f'{lines[-1] if lines else "no message"}'))
             else:
-                free = subprocess.run(compile_, capture_output=True, text=True, timeout=300)
-                if free.returncode == 0:
-                    resolved = (folder / 'combined.txt').read_text()
-                    result.update(state='changes', changes={
-                        alias: json.loads(column_atlas_native.worker_lock_changes(text, resolved))
-                        for alias, text in locks.items()
-                    })
-                elif _offline(free.stderr):
-                    result.update(state='unchecked', reason=(
-                        'uv could not reach the package index to check them.'))
+                (folder / 'combined.in').write_text('\n'.join(dict.fromkeys(requirements)) + '\n')
+                compile_ = [uv, 'pip', 'compile', '--quiet', '--universal', '--python-version',
+                            chosen[0].python, str(folder / 'combined.in'), '-o',
+                            str(folder / 'combined.txt')]
+                pinned = run(compile_ + constraints, timeout=300)
+                if pinned.returncode == 0:
+                    result.update(state='same', changes={})
                 else:
-                    result.update(state='conflict', reason=_resolver_reason(free.stderr))
+                    logger.info('Python workers %s do not resolve at their locked versions: %s',
+                                ', '.join(w.alias for w in chosen), pinned.stderr.strip())
+                    free = run(compile_, timeout=300)
+                    if free.returncode == 0:
+                        resolved = (folder / 'combined.txt').read_text()
+                        changes = {
+                            alias: json.loads(
+                                column_atlas_native.worker_lock_changes(text, resolved))
+                            for alias, text in locks.items()
+                        }
+                        # No lock's version moves: the versions are the same.
+                        result.update(
+                            state='changes' if any(changes.values()) else 'same',
+                            changes=changes,
+                        )
+                    elif _offline(free.stderr):
+                        result.update(state='unchecked', reason=(
+                            'uv could not reach the package index to check them.'))
+                    else:
+                        result.update(state='conflict', reason=_resolver_reason(free.stderr))
     if result['state'] == 'same':
         combined = json.loads(column_atlas_native.worker_locks_size(
             list(locks.values()), 'linux-x86_64', chosen[0].python))['bytes']
