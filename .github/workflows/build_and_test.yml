@@ -391,6 +391,12 @@ jobs:
       # has no build for the runner's Linux (arrow among them): 36 to 51 minutes a run
       # without a cache. Kept per lock, R version, rv version and runner image; rv sync
       # then only checks it.
+      # ImageOS (ubuntu24) is a runner variable, not in the env context: packages built from
+      # source link the image's system libraries.
+      - name: Name the runner image
+        if: matrix.r
+        id: runner-image
+        run: echo "os=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
       - name: Restore the R test environment
         if: matrix.r
         uses: actions/cache@v4
@@ -398,7 +404,7 @@ jobs:
           path: |
             integration_tests/r_env/rv/library
             ~/.cache/rv
-          key: r-env-${{ runner.os }}-${{ env.ImageOS }}-r4.6-rv${{ env.RV_VERSION }}-${{ hashFiles('integration_tests/r_env/rv.lock', 'integration_tests/r_env/rproject.toml') }}
+          key: r-env-${{ runner.os }}-${{ steps.runner-image.outputs.os }}-r4.6-rv${{ env.RV_VERSION }}-${{ hashFiles('integration_tests/r_env/rv.lock', 'integration_tests/r_env/rproject.toml') }}
       - name: Install the R test environment
         if: matrix.r
         run: make -C integration_tests r-env
