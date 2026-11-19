@@ -387,6 +387,18 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
           sudo apt-get update
           sudo apt-get install -y $(cat /tmp/r-sysdeps)
+      # The packages rv.lock pins, several built from source where the binary repository
+      # has no build for the runner's Linux (arrow among them): 36 to 51 minutes a run
+      # without a cache. Kept per lock, R version, rv version and runner image; rv sync
+      # then only checks it.
+      - name: Restore the R test environment
+        if: matrix.r
+        uses: actions/cache@v4
+        with:
+          path: |
+            integration_tests/r_env/rv/library
+            ~/.cache/rv
+          key: r-env-${{ runner.os }}-${{ env.ImageOS }}-r4.6-rv${{ env.RV_VERSION }}-${{ hashFiles('integration_tests/r_env/rv.lock', 'integration_tests/r_env/rproject.toml') }}
       - name: Install the R test environment
         if: matrix.r
         run: make -C integration_tests r-env
