@@ -264,8 +264,9 @@ def test_block_runs_read_from_the_database_equal_the_servers(ports, signed_in):
         if sum(added.values()) >= len(queries) or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    # Equal, at once or once read again after a run moved on between the two reads.
-    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+    # Equal, at once or once read again after a run moved on between the two reads. At
+    # least: a comparison of the test's own polling above can finish after the baseline.
+    assert added['equal'] + added['equal_after_reread'] >= len(queries), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == 0
 
@@ -457,7 +458,7 @@ def test_run_lists_read_from_the_database_equal_the_servers(ports, signed_in):
         if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+    assert added['equal'] + added['equal_after_reread'] >= len(queries), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == 0
     # A filter the gateway does not read yet is counted, not compared.
@@ -508,7 +509,7 @@ def test_monitor_stats_read_from_the_database_equal_the_servers(ports, signed_in
         if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+    assert added['equal'] + added['equal_after_reread'] >= len(queries), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == 0
     # A time the gateway does not read is counted, not compared.
@@ -571,7 +572,7 @@ def test_trigger_lists_read_from_the_database_equal_the_servers(ports, signed_in
         if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+    assert added['equal'] + added['equal_after_reread'] >= len(queries), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == 0
     assert added['unsupported'] == 1
@@ -656,7 +657,7 @@ def test_logs_read_from_disk_equal_the_servers(ports, signed_in):
         if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+    assert added['equal'] + added['equal_after_reread'] >= len(queries), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == 0
     assert added['unsupported'] == 1
@@ -719,7 +720,7 @@ def test_runs_grouped_with_their_retries_equal_the_servers(ports, signed_in):
         if sum(added.values()) >= len(queries) or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+    assert added['equal'] + added['equal_after_reread'] >= len(queries), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == added['unsupported'] == 0
     # Every run is on one page.

@@ -119,7 +119,7 @@ its own package versions (pandas 3 among them), which often clash with Airflow's
 block becomes its own task, without block chains or compiled Rust and R; and the workers
 need a shared `variables_dir`. Prefer the service path above.
 
-* First install MageML in the Airflow environment by adding `-r https://jospablo777.github.io/mage-ml/install/v0.3.0/base.txt` to your requirements.txt file (MageML needs Python 3.12).
+* First install MageML in the Airflow environment by adding `-r https://jospablo777.github.io/mage-ml/install/v0.4.0/base.txt` to your requirements.txt file (MageML needs Python 3.12).
 * Then download the MageML project code into your Airflow directory, for example with a git submodule.
 * In your MageML project's metadata.yaml file, please specify a variables_dir that you want to store the output of each block execution (You need to have write permission to the variables_dir). Example: `variables_dir: /tmp`.
 

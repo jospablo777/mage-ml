@@ -475,8 +475,12 @@ class PythonWorkersTest(DBTestCase):
                              log=lambda _: None)
         prepared = environments.named_workers(self.repo_path)['tools'].directory
         result = python_workers.delete(self.repo_path, 'tools')
-        self.assertEqual(result['environments_removed'], 1)
+        # Every environment of the worker, also those other tests of the class prepared.
+        self.assertGreaterEqual(result['environments_removed'], 1)
         self.assertFalse(folder.exists() or prepared.exists())
+        left = [m for m in environments.environments_dir().glob(f'*/{environments.MARKER}')
+                if json.loads(m.read_text()).get('source') == str(folder.resolve())]
+        self.assertEqual(left, [])
 
     def test_the_api_manages_workers_for_editors_and_shows_them_to_viewers(self):
         import asyncio

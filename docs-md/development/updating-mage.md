@@ -14,7 +14,7 @@ uv lock --upgrade-package mage-ml
 uv sync
 ```
 
-With an exact version in `pyproject.toml`, such as `mage-ml==0.1.1`, change the
+With an exact version in `pyproject.toml`, such as `mage-ml==0.4.0`, change the
 version first. Then restart MageML with `uv run mage start my_project`.
 
 </details>

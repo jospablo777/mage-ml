@@ -1,6 +1,10 @@
 # Release notes
 
-## Unreleased
+## MageML 0.4.0 (2026-11-19)
+
+Python workers become a part of MageML you manage in the app: a Workers page, warm
+processes, held-back packages caught before they break, and workers built into exported
+services. Services show their image size by part, and exports are reproducible.
 
 ### Security
 
@@ -22,6 +26,12 @@
   its database transaction open, and the server's thread kept reading the database as it
   was then. Each request now ends its transaction; a failed one rolls back.
 
+### R blocks
+
+- R reads a block's input tables into its own memory, not memory-mapped and not as ALTREP
+  vectors over Arrow's buffers: twice in CI a list column held garbage by the time the
+  block's output was written (a crash in `as_arrow_table`, then a corrupted environment).
+
 ### Behavior changes to check before upgrading
 
 - A Python worker is named by its folder, `python_workers/<name>/`, not by its project's
@@ -33,6 +43,11 @@
 - Consecutive Rust blocks with different connection profiles no longer compile into one
   chain in MageML runs; they compiled together while `mage compile` and exported services
   kept them apart, and one Rust process reads one profile. Each now runs with its own.
+- Workers made from the Empty template have no display name and show their folder name;
+  every one used to be called "Python worker".
+- Saving a worker's packages that would lock one below its newest release, because the
+  newest does not fit the others, asks first (the API answers with `confirm` and writes
+  nothing until `accept_older`). A worker that lists pandas gets pyarrow.
 
 ### Pipelines
 
