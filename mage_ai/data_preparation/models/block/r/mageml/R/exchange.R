@@ -94,7 +94,16 @@ read_input <- function(entry, job_dir) {
   if (!identical(entry$kind, "frame")) {
     return(read_json_file(path))
   }
-  df <- as.data.frame(arrow::read_ipc_file(path), stringsAsFactors = FALSE)
+  # Read into R's own memory: not mapped from the file (mmap) and without
+  # ALTREP vectors over Arrow's buffers. A list column of such vectors held
+  # garbage by the time the block's output was written (a crash in
+  # as_arrow_table, or "object 'super_enclos_env' not found"), now and then.
+  old <- options(arrow.use_altrep = FALSE)
+  on.exit(options(old), add = TRUE)
+  df <- as.data.frame(
+    arrow::read_ipc_file(path, mmap = FALSE),
+    stringsAsFactors = FALSE
+  )
   for (column in unlist(entry$json_columns)) {
     df[[column]] <- from_json_text(df[[column]])
   }

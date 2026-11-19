@@ -736,17 +736,26 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
     A trigger every minute: the gateway works out each execution date the scheduler should
     start a run for and finds the run the scheduler started (gateway_scheduler.rs).
     """
+    from datetime import datetime, timedelta, timezone
+
     gateway, _ = ports
     base = f'http://127.0.0.1:{gateway}/api'
     uuid = signed_in.post(f'{base}/pipelines', json=dict(pipeline=dict(
         name='gateway scheduler', type='python',
     )), timeout=60).json()['pipeline']['uuid']
+    # Today's landing time still ahead: one already passed today was before the trigger was
+    # enabled, so neither the scheduler nor the shadow starts a run for it (the test failed
+    # when CI ran between 22:00, the landing time it had, and midnight UTC). Ten minutes
+    # ahead can be tomorrow, near midnight: then no run is due either.
+    now = datetime.now(timezone.utc)
+    landing = now + timedelta(minutes=10)
+    runs_due = 3 if landing.date() == now.date() else 2
     for trigger in [
         dict(name='every minute', schedule_type='time', schedule_interval='* * * * *',
              start_time='2024-01-01T00:00:00', status='active'),
         # Evaluated: its run exists by the landing time.
         dict(name='landing daily', schedule_type='time', schedule_interval='@daily',
-             start_time='2024-01-01T22:00:00', status='active',
+             start_time=f'2024-01-01T{landing:%H:%M}:00', status='active',
              settings=dict(landing_time_enabled=True)),
         # One run, started at once.
         dict(name='once', schedule_type='time', schedule_interval='@once',
@@ -768,7 +777,7 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
     # The every-minute, landing-time and once triggers' runs: the first minute after the
     # trigger was enabled, a tick of the scheduler (10 s) and one of the shadow (15 s).
     deadline = time.monotonic() + 150
-    while scheduler()['counts']['on_time'] < before['on_time'] + 3:
+    while scheduler()['counts']['on_time'] < before['on_time'] + runs_due:
         assert time.monotonic() < deadline, scheduler()
         time.sleep(2)
     after = scheduler()
