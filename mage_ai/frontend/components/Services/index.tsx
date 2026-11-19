@@ -56,6 +56,7 @@ import {
   FONT_FAMILY_REGULAR,
   MONO_FONT_FAMILY_REGULAR,
 } from '@oracle/styles/fonts/primary';
+import ImageSize, { ImageBuildType } from '@components/PipelineServiceExport/ImageSize';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { initiateDownload } from '@utils/downloads';
 import { onSuccess } from '@api/utils/response';
@@ -97,6 +98,8 @@ export type ServiceDefinitionType = {
   deployments?: ServiceDeploymentType[];
   description?: string;
   exported_at?: string;
+  // The last image build measured on this server and the one before.
+  image_builds?: ImageBuildType[];
   include: string[];
   max_runs?: number;
   model_registry?: string;
@@ -1411,6 +1414,17 @@ function Workbench({
           </Section>
         </TwoColumnsStyle>
       </Spacing>
+
+      {!isNew && (saved.image_builds || []).length > 0 && (
+        <Spacing mt={2}>
+          <Section
+            subtitle="Measured from the image's layers after each build on this server. Next to it, the build before."
+            title="Image size"
+          >
+            <ImageSize latest={saved.image_builds[0]} previous={saved.image_builds[1]} />
+          </Section>
+        </Spacing>
+      )}
 
       <Spacing mt={2}>
         <Section

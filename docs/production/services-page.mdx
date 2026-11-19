@@ -470,6 +470,31 @@ registry you choose:
 The CLI does the same: `mage service build shop-live --image --platform
 linux/amd64,linux/arm64 --push --tag icr.io/ml-team/shop-live:1.0`.
 
+### Image size
+
+After a build that leaves the image on the machine (one platform, or pushed after a local
+build), MageML measures it from its layers: the base image, the service's Python
+packages, each Python worker, R, the MageML runtime, Rust blocks, models and the project's
+code. The service's page shows it as one bar next to the build before, with what each part
+weighs and how it changed, and the build commands print the same:
+
+<Frame>
+  <img className="block dark:hidden" src="/images/screenshots/services-image-size.light.png" alt="Image size: the image as one bar of its parts, the build before as a thinner bar, and each part's size and change" />
+  <img className="hidden dark:block" src="/images/screenshots/services-image-size.dark.png" alt="Image size: the image as one bar of its parts, the build before as a thinner bar, and each part's size and change" />
+</Frame>
+
+```text
+Image shop-live:1.0: 1,003 MB  (+215 MB)
+  Base image (python:3.12-slim-bookworm)     157 MB
+  Python packages                            532 MB  (-78 MB)
+  Worker feast                               214 MB  (+214 MB)
+  MageML runtime                              20 MB
+  Rust blocks                                 80 MB  (+80 MB)
+```
+
+A worker that grew the image a lot is the first place to look: workers with the same
+versions are built as one environment, and a worker's packages can often be trimmed.
+
 ## The export as a repository
 
 The export is a folder with everything the image needs, so it builds on any machine and in

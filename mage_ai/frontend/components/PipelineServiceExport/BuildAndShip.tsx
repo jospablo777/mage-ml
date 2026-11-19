@@ -9,6 +9,7 @@ import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
 import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
+import ImageSize from './ImageSize';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { AlertTriangle, Check } from '@oracle/icons';
@@ -152,9 +153,14 @@ function BuildAndShip({ name }: { name: string }) {
     const latest = dataJob?.pipeline_service_build;
     if (latest && running) {
       setJob(latest);
+      if (latest.state !== 'running') {
+        // The build measured: the service's builds have it now.
+        reloadService();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataJob]);
+  const builds = dataService?.pipeline_service?.image_builds || [];
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -343,6 +349,14 @@ function BuildAndShip({ name }: { name: string }) {
           {(job.problems || []).map(p => (
             <Spacing key={p} mt={0.5}><Text small>{p}</Text></Spacing>
           ))}
+          {job.state === 'completed' && job.image_size && (
+            <Spacing mt={1.5}>
+              <ImageSize
+                latest={job.image_size}
+                previous={builds.find(b => b.built_at !== job.image_size.built_at)}
+              />
+            </Spacing>
+          )}
           {Object.keys(progress).length >= 2 && (
             <Spacing mt={1}>
               {Object.entries(progress).map(([platform, { done, failed, total }]) => (

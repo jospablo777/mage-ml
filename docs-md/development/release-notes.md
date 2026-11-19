@@ -77,7 +77,8 @@
   shows it and does not change it: it is the environment the server runs in.
 - Built images are measured by part after a build (base image, Python packages, each
   worker, the MageML runtime, models, project code), with the change since the build
-  before; `mage service build --image` and `mage export service --build` print it.
+  before: the Services page shows it as one bar next to the build before, and `mage
+  service build --image` and `mage export service --build` print it.
 - uv's messages no longer show color escape codes when the server runs with
   `FORCE_COLOR`, and a `pyproject.toml` without a project name says so.
 - A Python worker can have a memory limit (`memory = "4 GiB"`, or its settings): a block
