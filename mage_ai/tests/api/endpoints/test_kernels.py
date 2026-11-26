@@ -7,7 +7,13 @@ from mage_ai.tests.api.endpoints.mixins import (
 
 
 class KernelAPIEndpointTest(BaseAPIEndpointTest):
-    pass
+    def setUp(self):
+        super().setUp()
+        # The list tests count no kernel: one an earlier test file in this process left
+        # running (unit tests share processes, -n 4 --dist loadfile) is shut down first.
+        for manager in kernel_managers.values():
+            if manager.has_kernel:
+                manager.shutdown_kernel(now=True)
 
 
 build_list_endpoint_tests(

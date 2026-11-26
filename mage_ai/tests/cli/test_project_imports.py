@@ -57,6 +57,8 @@ class ProjectImportsTest(unittest.TestCase):
         from mage_ai.settings.repo import add_project_to_sys_path
 
         before = list(sys.path)
+        # Another test in this process may have put /tmp on the path already.
+        sys.path[:] = [p for p in before if p not in ('/tmp', '/tmp/some_project')]
         try:
             add_project_to_sys_path('/tmp/some_project')
             self.assertEqual(sys.path[-2:], ['/tmp', '/tmp/some_project'])
