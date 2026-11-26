@@ -11,6 +11,11 @@
 //! it stopped between saving and committing; queues redeliver only what they did not
 //! acknowledge. A partition that moves to another reader drops its windows here; the state
 //! files are on this instance's volume.
+//!
+//! With exactly-once delivery, windows the file holds may be of a transaction that did not
+//! commit; skipping their messages would lose the outputs the transaction discarded. The file
+//! then also keeps the windows of the last committed transaction, and the first message read
+//! in a partition after a load picks which stand, as keyed state does (keyed_state.rs).
 
 use std::collections::BTreeMap;
 
@@ -30,6 +35,18 @@ struct PartitionState {
     /// The latest event time seen.
     latest: Option<i64>,
     windows: Windows,
+    /// Exactly-once: the windows as of the last committed transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    committed: Option<Box<PartitionState>>,
+}
+
+impl PartitionState {
+    fn alone(&self) -> PartitionState {
+        PartitionState {
+            committed: None,
+            ..self.clone()
+        }
+    }
 }
 
 pub struct WindowSession {
@@ -45,6 +62,12 @@ pub struct WindowSession {
     /// Events for windows already closed, and events without a time.
     pub late: u64,
     pub untimed: u64,
+    exactly_once: bool,
+    /// Exactly-once, per partition: the windows of the last committed transaction, the
+    /// windows last saved, and whether the first message since the load was looked at.
+    committed: BTreeMap<u32, PartitionState>,
+    last_saved: BTreeMap<u32, PartitionState>,
+    reconciled: std::collections::BTreeSet<u32>,
 }
 
 fn position_number(position: &Position) -> Option<i64> {
@@ -86,7 +109,45 @@ impl WindowSession {
             pending: BTreeMap::new(),
             late: 0,
             untimed: 0,
+            exactly_once: false,
+            committed: BTreeMap::new(),
+            last_saved: BTreeMap::new(),
+            reconciled: Default::default(),
         })
+    }
+
+    /// Exactly-once delivery: saved windows fall back to the last committed ones (module
+    /// docs).
+    pub fn exactly_once(mut self, on: bool) -> WindowSession {
+        self.exactly_once = on;
+        self
+    }
+
+    /// Exactly-once, at the partition's first message since the load: windows that already
+    /// hold it were saved for a transaction that did not commit, so the committed ones stand.
+    fn reconcile(&mut self, partition: u32, first: i64) -> Result<(), String> {
+        if !self.exactly_once || !self.reconciled.insert(partition) {
+            return Ok(());
+        }
+        let state = self.state(partition)?;
+        let committed = state.committed.take();
+        if state.applied.is_some_and(|applied| first <= applied) {
+            *state = committed.map(|c| c.alone()).unwrap_or_default();
+        }
+        let base = state.alone();
+        self.pending.remove(&partition);
+        self.committed.insert(partition, base);
+        Ok(())
+    }
+
+    /// Exactly-once: the transaction with these positions committed; the windows saved for
+    /// them are the committed ones now.
+    fn transaction_committed(&mut self, commits: &[Commit]) {
+        for commit in commits {
+            if let Some(saved) = self.last_saved.get(&commit.partition.0) {
+                self.committed.insert(commit.partition.0, saved.clone());
+            }
+        }
     }
 
     fn file(partition: u32) -> String {
@@ -119,6 +180,10 @@ impl WindowSession {
         let stable = self.stable_positions;
         let spec = self.spec.clone();
         let mut touched = Vec::new();
+        if let Some(first) = messages.iter().find_map(|m| m.position) {
+            let partition = messages[0].partition;
+            self.reconcile(partition, first)?;
+        }
         for message in &messages {
             let state = self.state(message.partition)?;
             if stable
@@ -197,8 +262,14 @@ impl WindowSession {
                 None => pending.len().checked_sub(1),
             };
             let Some(index) = chosen else { continue };
-            let (_, snapshot) = pending[index].clone();
+            let (_, mut snapshot) = pending[index].clone();
             pending.drain(..=index);
+            if self.exactly_once {
+                snapshot = snapshot.alone();
+                self.last_saved.insert(partition, snapshot.clone());
+                // Written with the new windows: the transaction may not commit.
+                snapshot.committed = self.committed.get(&partition).cloned().map(Box::new);
+            }
             let bytes = serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?;
             self.files.write(&Self::file(partition), &bytes)?;
         }
@@ -241,9 +312,16 @@ impl TransformSession for WindowSession {
         Box::pin(async move { self.save(commits) })
     }
 
+    fn transaction_committed(&mut self, commits: &[Commit]) {
+        WindowSession::transaction_committed(self, commits);
+    }
+
     fn revoked(&mut self, partition: PartitionId) {
         self.partitions.remove(&partition.0);
         self.pending.remove(&partition.0);
+        self.committed.remove(&partition.0);
+        self.last_saved.remove(&partition.0);
+        self.reconciled.remove(&partition.0);
     }
 
     fn keeps_state(&self) -> bool {
@@ -374,6 +452,58 @@ mod tests {
                 assert_eq!(closed[0]["n"], 2, "{closed:?}");
             })
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn exactly_once_windows_of_a_transaction_that_did_not_commit_are_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut windows = session(dir.path()).exactly_once(true);
+        windows.transform(batch(&[(0, 0, "a", 1.0)])).await.unwrap();
+        windows.committed(&[commit(0)]).await.unwrap();
+        TransformSession::transaction_committed(&mut windows, &[commit(0)]);
+        // Position 1 closes the window, and its output is in a transaction that is saved
+        // for but never commits: a crash.
+        let closing = windows
+            .transform(batch(&[(1, 70, "a", 1.0)]))
+            .await
+            .unwrap();
+        assert_eq!(results(&closing).len(), 1);
+        windows.committed(&[commit(1)]).await.unwrap();
+
+        // Read again from position 1: the committed windows stand, and the window closes
+        // again, so its output is not lost with the aborted transaction.
+        let mut restarted = session(dir.path()).exactly_once(true);
+        let again = restarted
+            .transform(batch(&[(1, 70, "a", 1.0)]))
+            .await
+            .unwrap();
+        let closed = results(&again);
+        assert_eq!(closed.len(), 1, "{closed:?}");
+        assert_eq!(closed[0]["n"], 1);
+    }
+
+    #[tokio::test]
+    async fn exactly_once_windows_of_a_committed_transaction_stand() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut windows = session(dir.path()).exactly_once(true);
+        windows.transform(batch(&[(0, 0, "a", 1.0)])).await.unwrap();
+        windows.committed(&[commit(0)]).await.unwrap();
+        TransformSession::transaction_committed(&mut windows, &[commit(0)]);
+        windows
+            .transform(batch(&[(1, 70, "a", 1.0)]))
+            .await
+            .unwrap();
+        windows.committed(&[commit(1)]).await.unwrap();
+        TransformSession::transaction_committed(&mut windows, &[commit(1)]);
+
+        // The source resumes after position 1: the closed window is not output twice.
+        let mut restarted = session(dir.path()).exactly_once(true);
+        let next = restarted
+            .transform(batch(&[(2, 80, "a", 1.0)]))
+            .await
+            .unwrap();
+        assert!(results(&next).is_empty());
+        assert_eq!(restarted.open_windows(), 1);
     }
 
     #[tokio::test]

@@ -1611,7 +1611,7 @@ def _event_hubs_connector(block, config: Dict, where: str, problems: List[str]) 
 
 
 def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optional[Dict],
-              blocks: List[Dict], capture_: Capture, problems: List[str]) -> Optional[str]:
+              capture_: Capture, problems: List[str]) -> Optional[str]:
     """
     The stream's delivery from its Kafka source's `delivery` setting: exactly_once commits
     the source's offsets with the sinks' writes in one Kafka transaction (I-36), so the
@@ -1632,13 +1632,6 @@ def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optiona
             f'{prefix}: delivery: exactly_once needs Kafka for the source and every sink, '
             f'dead letters included; {", ".join(others)} '
             f'{"is" if len(others) == 1 else "are"} not Kafka.'
-        )
-        return None
-    windows = [b.get('uuid') for b in blocks if b.get('window')]
-    if windows:
-        problems.append(
-            f'{prefix}: delivery: exactly_once does not keep windows yet, and '
-            f'{", ".join(windows)} keep{"s" if len(windows) == 1 else ""} them.'
         )
         return None
     capture_.notes.append(
@@ -1920,7 +1913,7 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     if not sink_entries and not problems:
         problems.append(f'{prefix} has only a dead-letter sink; it needs a sink for its messages.')
     stream = dict(source=source, sinks=sink_entries, batch=batch, errors=errors)
-    delivery = _delivery(prefix, source, sink_entries, errors.get('dead_letter'), blocks,
+    delivery = _delivery(prefix, source, sink_entries, errors.get('dead_letter'),
                          capture_, problems)
     if delivery:
         stream['delivery'] = delivery
@@ -4354,7 +4347,8 @@ def report(capture_: Capture) -> str:
         lines.append(f"{pipeline['uuid']}: {len(pipeline['blocks'])} blocks, "
                      f"at most {pipeline['max_concurrent_runs']} run(s) at once")
         for block in pipeline['blocks']:
-            retry = block['retry']['retries']
+            # Window blocks are computed by the engine and have no retries.
+            retry = (block.get('retry') or {}).get('retries')
             extra = f", {retry} retries" if retry else ''
             if block.get('conditions'):
                 extra += f", runs when {' and '.join(block['conditions'])} hold"

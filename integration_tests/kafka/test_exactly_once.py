@@ -2,7 +2,8 @@
 Kafka to Kafka exactly once (I-36, delivery: exactly_once): the engine is killed (SIGKILL)
 three times while it streams 100,000 messages, and a consumer that reads with read_committed
 finds each input message's output once, none lost and none twice; a block that counts per
-key with keyed state counts each message once. The test runs its own broker.
+key with keyed state counts each message once, and a window outputs each window once. The
+test runs its own broker.
 """
 import json
 import textwrap
@@ -117,13 +118,27 @@ def count(messages, *args, **kwargs):
 '''
 
 
-def counting_pipeline(project, topics, group):
-    """Kafka, a block that counts per key with keyed state, Kafka; exactly once."""
+WINDOW = '''
+window:
+  key: key
+  type: tumbling
+  size_seconds: 100
+  aggregate:
+    n: count
+    total: {sum: id}
+'''
+
+
+def counting_pipeline(project, topics, group, window=False):
+    """
+    Kafka, a block that counts per key with keyed state (or a window per key), Kafka;
+    exactly once.
+    """
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.constants import PipelineType
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
-    name = f'counting_{uuid.uuid4().hex[:8]}'
+    name = f'{"window" if window else "counting"}_{uuid.uuid4().hex[:8]}'
     pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING, repo_path=project)
 
     def add(suffix, kind, code, language, upstream=(), configuration=None):
@@ -142,9 +157,18 @@ def counting_pipeline(project, topics, group):
         batch_size: 100
         timeout_ms: 200
         delivery: exactly_once
-    ''', 'yaml')
-    counted = add('count', 'transformer', COUNT, 'python', [source],
-                  configuration=dict(state_key='key'))
+    ''' + ('''
+        event_time:
+          field: at
+          format: epoch_s
+          lateness_seconds: 0
+          on_late: pass
+    ''' if window else ''), 'yaml')
+    if window:
+        counted = add('per_key', 'transformer', WINDOW, 'yaml', [source])
+    else:
+        counted = add('count', 'transformer', COUNT, 'python', [source],
+                      configuration=dict(state_key='key'))
     add('kafka_out', 'data_exporter', f'''
         connector_type: kafka
         bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
@@ -153,18 +177,20 @@ def counting_pipeline(project, topics, group):
     return pipeline
 
 
-def test_keyed_state_counts_each_message_once_through_killed_engines(
-    broker, mage_project, tmp_path,  # noqa: F811
-):
+def crash_after_state_saves(mage_project, tmp_path, bootstrap, window=False):
+    """
+    Streams TOTAL messages (key k0 to k9, event time `at` = id seconds) through the counting
+    pipeline, with the engine ending itself right after its 5th state save, before that
+    transaction commits, KILLS times; then to the end. Returns the read_committed output.
+    """
     from kafka import KafkaProducer
 
-    _, bootstrap = broker
     topics = [f'it_in_{uuid.uuid4().hex[:10]}', f'it_out_{uuid.uuid4().hex[:10]}']
     admin = KafkaAdminClient(bootstrap_servers=bootstrap)
     admin.create_topics([NewTopic(t, num_partitions=2, replication_factor=1) for t in topics])
     admin.close()
     group = f'g_{uuid.uuid4().hex[:8]}'
-    pipeline = counting_pipeline(mage_project, topics, group)
+    pipeline = counting_pipeline(mage_project, topics, group, window=window)
     service = None
     try:
         directory = export_service(mage_project, pipeline.uuid, tmp_path)
@@ -174,7 +200,7 @@ def test_keyed_state_counts_each_message_once_through_killed_engines(
         for i in range(TOTAL):
             # One key per partition's worth of messages: a key's messages stay in order.
             key = f'k{i % 10}'
-            producer.send(topics[0], key=key, value=dict(id=i, key=key))
+            producer.send(topics[0], key=key, value=dict(id=i, key=key, at=i))
         producer.flush()
         producer.close()
         binary = stream_service_binary()
@@ -190,22 +216,12 @@ def test_keyed_state_counts_each_message_once_through_killed_engines(
             wait_for(lambda service=service: service.process.poll() is not None, timeout=300)
             reached = committed_now(bootstrap, group, topics[0])
             print(f'crashed {kill + 1}: {reached} of {TOTAL} committed')
+        assert reached < TOTAL, 'the last kill came after the stream had committed all'
         service = RunningService(binary, directory, tmp_path / 'data',
                                  KAFKA_BOOTSTRAP=bootstrap)
         service.start()
         wait_for(lambda: committed_now(bootstrap, group, topics[0]) == TOTAL, timeout=600)
-
-        out = read_committed(bootstrap, topics[1])
-        ids = [m['id'] for m in out]
-        assert sorted(set(ids)) == list(range(TOTAL)), 'a message was lost'
-        assert len(ids) == TOTAL, f'{len(ids) - TOTAL} messages written twice'
-        assert reached < TOTAL, 'the last kill came after the stream had committed all'
-        # Each key counted each of its messages once: 1, 2, ... with no gap and no repeat.
-        seen = defaultdict(list)
-        for m in out:
-            seen[m['key']].append(m['seen'])
-        for key, counts in seen.items():
-            assert sorted(counts) == list(range(1, len(counts) + 1)), key
+        return read_committed(bootstrap, topics[1])
     except AssertionError:
         if service:
             explain(service, bootstrap, group, topics[0])
@@ -214,3 +230,38 @@ def test_keyed_state_counts_each_message_once_through_killed_engines(
         if service and service.process and service.process.poll() is None:
             service.stop()
         pipeline.delete()
+
+
+def test_keyed_state_counts_each_message_once_through_killed_engines(
+    broker, mage_project, tmp_path,  # noqa: F811
+):
+    _, bootstrap = broker
+    out = crash_after_state_saves(mage_project, tmp_path, bootstrap)
+
+    ids = [m['id'] for m in out]
+    assert sorted(set(ids)) == list(range(TOTAL)), 'a message was lost'
+    assert len(ids) == TOTAL, f'{len(ids) - TOTAL} messages written twice'
+    # Each key counted each of its messages once: 1, 2, ... with no gap and no repeat.
+    seen = defaultdict(list)
+    for m in out:
+        seen[m['key']].append(m['seen'])
+    for key, counts in seen.items():
+        assert sorted(counts) == list(range(1, len(counts) + 1)), key
+
+
+def test_windows_are_output_once_through_killed_engines(
+    broker, mage_project, tmp_path,  # noqa: F811
+):
+    _, bootstrap = broker
+    out = crash_after_state_saves(mage_project, tmp_path, bootstrap, window=True)
+
+    # Key k<j> has ids j, j + 10, ...: 10 in each 100-second window. Every window but each
+    # key's last (no later event closes it) is output once, with its 10 messages.
+    windows = defaultdict(list)
+    for m in out:
+        windows[(m['key'], m['window_start'])].append(m)
+    twice = [w for w, ms in windows.items() if len(ms) > 1]
+    assert not twice, f'{len(twice)} windows output more than once, such as {twice[:3]}'
+    assert len(windows) == 10 * (TOTAL // 100 - 1), f'{len(windows)} windows output'
+    for (key, start), [m] in windows.items():
+        assert m['n'] == 10, (key, start, m)

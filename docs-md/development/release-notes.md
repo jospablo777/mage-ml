@@ -15,7 +15,8 @@
   each (at least once wrote 2,520 of 20,000 twice), at the throughput of at least once. The
   source and every sink must be Kafka on one cluster. Keyed state counts each message once
   too: after a crash, a state saved for a transaction that did not commit gives way to the
-  last committed one. Windows are refused for now.
+  last committed one, and windows work the same way (each window output once through
+  three crashes; 158 of 9,990 lost with the fallback off).
 
 ### Compiling
 
@@ -77,6 +78,11 @@
 - The Fault soak workflow runs each night: the scheduler soak for 30 minutes in Python,
   with block fusion and on the run engine, and a Kafka broker down for 330 s under a
   stream.
+
+### Fixed
+
+- Exporting a stream with a window block to a folder failed with `KeyError: 'retry'` while
+  writing `report.txt`; window blocks have no retries (I-531).
 
 ## MageML 0.4.0 (2026-11-19)
 

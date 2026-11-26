@@ -248,6 +248,18 @@ class ExactlyOnceExportTest(StreamExportTestCase):
         self.stream(source=SOURCE + '    delivery: exactly_once\n', sink=PRINT)
         self.assertIn('is not Kafka', self.problems())
 
+    def test_a_window_exports_exactly_once(self):
+        source = self.add('source', 'data_loader', SOURCE + '    delivery: exactly_once\n',
+                          language='yaml')
+        window = self.add('window', 'transformer', WindowExportTest.WINDOW, upstream=[source],
+                          language='yaml')
+        self.add('totals', 'data_exporter', SINK, upstream=[window], language='yaml')
+
+        [pipeline] = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines']
+
+        self.assertEqual(pipeline['stream']['delivery'], 'exactly_once')
+        self.assertEqual([b['language'] for b in pipeline['blocks']], ['window'])
+
     def test_an_unknown_delivery_is_refused(self):
         self.stream(source=SOURCE + '    delivery: once\n')
         self.assertIn("delivery is at_least_once or exactly_once, not 'once'", self.problems())
@@ -495,6 +507,14 @@ class WindowExportTest(StreamExportTestCase):
             aggregates=[['payments', 'count'], ['total', {'sum': 'amount'}],
                         ['shops', {'distinct': 'shop_id'}]],
         ))
+
+    def test_an_export_with_a_window_is_written(self):
+        window = self.windowed(self.WINDOW)
+        out = Path(self.repo_path, 'exported_window')
+
+        export.write(export.capture(self.repo_path, [self.pipeline.uuid]), str(out), force=True)
+
+        self.assertRegex((out / 'report.txt').read_text(), rf'window +transformer +{window.uuid}')
 
     def test_a_window_says_what_to_fix(self):
         self.windowed('''

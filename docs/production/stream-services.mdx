@@ -256,7 +256,10 @@ runs as fast as at least once (67,500 against 66,000 messages a second on a lapt
   next to it; after a crash, a state saved for a transaction that did not commit gives way
   to that one, so each message counts once. Tested by ending the engine right after a state
   save, before its transaction commits: each key's count came out 1, 2, ... with no gap or
-  repeat. Windows are refused for now.
+  repeat.
+- Windows keep their open windows the same way. Tested with 100,000 messages in 100-second
+  windows per key and the same three crashes: 9,990 windows, each output once with its 10
+  messages; with the fallback off, 158 windows were lost.
 - With several instances, keep state in an object store (`MAGE_SERVICE_STATE_URL`): a
   partition that moves to another instance then finds its state there.
 - Consumers that read with `read_uncommitted` (kafka-python's default, not librdkafka's)

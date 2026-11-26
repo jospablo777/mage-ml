@@ -612,21 +612,6 @@ fn exactly_once_parts(
     }
     let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
     let transform = transform_session(service, pipeline, log, tap)?;
-    // Keyed state falls back to its last committed state after a crash (keyed_state.rs);
-    // windows do not yet.
-    let windows: Vec<&str> = pipeline
-        .blocks
-        .iter()
-        .filter(|b| b.window.is_some())
-        .map(|b| b.uuid.as_str())
-        .collect();
-    if !windows.is_empty() {
-        return Err(format!(
-            "delivery: exactly_once does not keep windows yet, and {} keep{} them.",
-            windows.join(", "),
-            if windows.len() == 1 { "s" } else { "" },
-        ));
-    }
     let source =
         kafka_source(pipeline, settings(service, &stream.source)).map_err(|e| e.message)?;
     // Stable per instance: a restart fences the producer it replaces.
@@ -854,7 +839,8 @@ fn region_session(
                 dir,
                 stable,
             )
-            .map_err(|e| format!("window block {}: {e}", block.uuid))?,
+            .map_err(|e| format!("window block {}: {e}", block.uuid))?
+            .exactly_once(crate::stream_python::exactly_once(pipeline)),
         ));
     }
     let register = |views: Vec<(String, String, crate::keyed_state::StateView)>| {
