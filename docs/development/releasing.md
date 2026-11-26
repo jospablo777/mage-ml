@@ -51,8 +51,14 @@ how to reproduce each check locally.
 5. Run **Release** from the Actions tab with the tag and `publish` off. It builds every
    wheel from the tag and qualifies the install on Linux x86-64, Linux ARM64 and macOS
    Apple Silicon. Read the qualification reports in the run's artifacts.
-6. Run it again with `publish` on. After approval in the `release` environment it drafts
-   the release, uploads and verifies the assets, publishes it and deploys the index.
+6. Run it again with `publish` on. After approval in the `release` environment it attests
+   the build provenance of each new wheel, the index archive and the SBOMs, attests each
+   new wheel's SBOM (GitHub artifact attestations, signed with Sigstore), then drafts the
+   release, uploads and verifies the assets, publishes it and deploys the index. A failed
+   attestation stops it before the draft. The SBOMs come from the Software bill of
+   materials job: `uv export --format cyclonedx1.5` of `uv.lock` for mage-ml, base and with
+   every extra, and `cargo cyclonedx` for the engine and ColumnAtlas with the features
+   their wheels build with.
 7. Install from the public index in a fresh environment to confirm, then mark the release
    as latest.
 

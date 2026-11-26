@@ -1,5 +1,31 @@
 # Release notes
 
+## Unreleased
+
+### Python workers
+
+- A block that closes `sys.stdout` or `sys.stderr` no longer fails after it returned: the
+  worker wrote its end marker to the closed stream and exited.
+- A block in a warm process that replaces `sys.stdout` or `sys.stderr` no longer takes the
+  next block's output, which also made each block wait 5 s.
+- A block that adds a log handler each time it runs logs each line once in a warm
+  process, as in a new one, instead of once more per block.
+
+### Releases
+
+- Each wheel a release builds, the package index archive and the SBOMs carry a signed
+  build provenance attestation, and each wheel an attestation of its CycloneDX SBOM:
+  `gh attestation verify <wheel> --repo jospablo777/mage-ml` checks a download.
+
+### Tests
+
+- Faults around warm worker processes run on each push: a process killed while idle, its
+  supervisor killed, a run killed with SIGKILL or SIGTERM leaving no worker behind, and
+  what a block leaves in its process.
+- The Fault soak workflow runs each night: the scheduler soak for 30 minutes in Python,
+  with block fusion and on the run engine, and a Kafka broker down for 330 s under a
+  stream.
+
 ## MageML 0.4.0 (2026-11-19)
 
 Python workers become a part of MageML you manage in the app: a Workers page, warm

@@ -33,6 +33,7 @@ env:
   PYTHON_VERSION: '3.12'
   NODE_VERSION: '24'
   RUST_TOOLCHAIN: '1.98.0'
+  CARGO_CYCLONEDX_VERSION: '0.5.10'
   MACOSX_DEPLOYMENT_TARGET: '12.0'
 
 jobs:
@@ -221,6 +222,50 @@ jobs:
           path: packages/mageml-engine/dist/*.whl
           if-no-files-found: error
 
+  # CycloneDX SBOMs of what each wheel ships: mage-ml's locked Python dependencies (base
+  # and with every extra) and the crate graphs of the engine and ColumnAtlas, as built.
+  sbom:
+    name: Software bill of materials
+    needs: contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.contract.outputs.commit }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Set up Rust and cargo-cyclonedx
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+          cargo install --locked cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION"
+      - name: Write the SBOMs
+        env:
+          VERSION: ${{ needs.contract.outputs.version }}
+        run: |
+          mkdir sbom
+          uv export --frozen --no-dev --format cyclonedx1.5 -o "sbom/mage-ml-$VERSION.cdx.json"
+          uv export --frozen --no-dev --all-extras --format cyclonedx1.5 \
+            -o "sbom/mage-ml-$VERSION-all-extras.cdx.json"
+          engine=$(python3 -c "import tomllib; print(tomllib.load(open('packages/mageml-engine/pyproject.toml','rb'))['project']['version'])")
+          native=$(python3 -c "import tomllib; print(tomllib.load(open('rust/column_atlas/pyproject.toml','rb'))['project']['version'])")
+          # The features each wheel builds with (their pyproject.toml's [tool.maturin]).
+          cargo cyclonedx -q --manifest-path mage_ai/pipeline_services/service/crates/service/Cargo.toml \
+            -F full -f json --spec-version 1.5 --override-filename sbom
+          mv mage_ai/pipeline_services/service/crates/service/sbom.json "sbom/mageml-engine-$engine.cdx.json"
+          cargo cyclonedx -q --manifest-path rust/column_atlas/Cargo.toml \
+            -F extension-module,postgres -f json --spec-version 1.5 --override-filename sbom
+          mv rust/column_atlas/sbom.json "sbom/column-atlas-native-$native.cdx.json"
+          for file in sbom/*.json; do
+            python3 -c "import json, sys; d = json.load(open(sys.argv[1])); assert d['components'], sys.argv[1]; print(sys.argv[1], len(d['components']), 'components')" "$file"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom/
+
   qualify:
     name: Qualify (${{ matrix.id }})
     # The engine wheels too: publish takes every wheel, so they must be done.
@@ -275,11 +320,14 @@ jobs:
   publish:
     name: Publish the release
     if: inputs.publish
-    needs: [contract, qualify]
+    needs: [contract, qualify, sbom]
     runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: write
+      # Sigstore signing of the build provenance and SBOM attestations.
+      id-token: write
+      attestations: write
     outputs:
       site: ${{ steps.site.outputs.path }}
     steps:
@@ -297,6 +345,10 @@ jobs:
           pattern: '{qualification-*,build-receipt}'
           path: release-reports
           merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+          path: release-sbom
       - name: Build the package index and installer files
         id: site
         env:
@@ -328,8 +380,46 @@ jobs:
           mkdir -p release-assets
           cp release-wheels/*.whl release-site.tar.gz release-assets/
           cp release-reports/* release-assets/
+          cp release-sbom/*.cdx.json release-assets/
           (cd release-assets && sha256sum * > ../release-assets.sha256) && mv release-assets.sha256 release-assets/
           echo "path=site" >> "$GITHUB_OUTPUT"
+      # A wheel of an unchanged package keeps the published one (and its attestations), so
+      # only the wheels built and published now are attested.
+      - name: Name the attestation subjects
+        id: subjects
+        run: |
+          for name in mageml_engine column_atlas_native; do
+            if compgen -G "release-assets/$name-*.whl" > /dev/null; then
+              echo "$name=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+          echo "engine_sbom=$(ls release-sbom/mageml-engine-*.cdx.json)" >> "$GITHUB_OUTPUT"
+          echo "native_sbom=$(ls release-sbom/column-atlas-native-*.cdx.json)" >> "$GITHUB_OUTPUT"
+      # Checked with: gh attestation verify <file> --repo jospablo777/mage-ml
+      - name: Attest the build provenance of the assets
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/*.whl
+            release-assets/release-site.tar.gz
+            release-assets/*.cdx.json
+      - name: Attest the SBOM of mage-ml
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/mage_ml-*.whl
+          sbom-path: release-sbom/mage-ml-${{ needs.contract.outputs.version }}-all-extras.cdx.json
+      - name: Attest the SBOM of mageml-engine
+        if: steps.subjects.outputs.mageml_engine
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/mageml_engine-*.whl
+          sbom-path: ${{ steps.subjects.outputs.engine_sbom }}
+      - name: Attest the SBOM of column-atlas-native
+        if: steps.subjects.outputs.column_atlas_native
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/column_atlas_native-*.whl
+          sbom-path: ${{ steps.subjects.outputs.native_sbom }}
       - name: Draft the release, upload and verify the assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

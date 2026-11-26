@@ -171,6 +171,30 @@ class PublishWorkflowTest(unittest.TestCase):
         for action in uses:
             self.assertRegex(action, r'@[0-9a-f]{40}$', 'actions are pinned to commits')
 
+    def test_release_assets_are_attested_with_their_sboms(self):
+        _, workflow = self.workflow('release.yml')
+        publish = workflow['jobs']['publish']
+
+        self.assertIn('sbom', publish['needs'])
+        # Signing needs an OIDC token; nothing else is added to what publishing had.
+        self.assertEqual(publish['permissions'], {
+            'attestations': 'write', 'contents': 'write', 'id-token': 'write',
+        })
+        attests = [step for step in publish['steps'] if 'actions/attest@' in step.get('uses', '')]
+        subjects = [step['with']['subject-path'] for step in attests]
+        self.assertIn('release-assets/*.whl', subjects[0])
+        self.assertNotIn('sbom-path', attests[0]['with'])
+        self.assertEqual(
+            sorted(s for s in subjects[1:]),
+            ['release-assets/column_atlas_native-*.whl', 'release-assets/mage_ml-*.whl',
+             'release-assets/mageml_engine-*.whl'],
+        )
+        self.assertTrue(all('sbom-path' in step['with'] for step in attests[1:]))
+        # Attested before the draft: a failed attestation publishes nothing.
+        names = [step.get('name', step.get('uses')) for step in publish['steps']]
+        self.assertLess(names.index('Attest the build provenance of the assets'),
+                        names.index('Draft the release, upload and verify the assets'))
+
 
 class UvVersionTest(unittest.TestCase):
     """
@@ -185,7 +209,8 @@ class UvVersionTest(unittest.TestCase):
         self.assertIsNotNone(image_version)
         version = image_version.group('version')
 
-        for name in ['build_and_test.yml', 'dependency_audit.yml', 'release.yml']:
+        for name in ['build_and_test.yml', 'dependency_audit.yml', 'fault_soak.yml',
+                     'release.yml']:
             with self.subTest(workflow=name):
                 text = (REPO_ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
                 pins = set(re.findall(r'uv==(?P<version>[\d.]+)', text))
@@ -243,11 +268,15 @@ class RustVersionTest(unittest.TestCase):
         version = re.search(r'channel = "(?P<version>[\d.]+)"', toolchain).group('version')
         image = re.search(r'ARG RUST_VERSION=(?P<version>[\d.]+)', dockerfile)
         ci = re.search(r'RUST_VERSION: "(?P<version>[\d.]+)"', workflow)
+        soak = re.search(r'RUST_VERSION: "(?P<version>[\d.]+)"', (
+            REPO_ROOT / '.github/workflows/fault_soak.yml').read_text(encoding='utf-8'))
 
         self.assertIsNotNone(image)
         self.assertIsNotNone(ci)
+        self.assertIsNotNone(soak)
         self.assertEqual(image.group('version'), version)
         self.assertEqual(ci.group('version'), version)
+        self.assertEqual(soak.group('version'), version)
         # The image builds the extension next to the rest of the workspace.
         self.assertIn('COPY rust ./rust', dockerfile)
 

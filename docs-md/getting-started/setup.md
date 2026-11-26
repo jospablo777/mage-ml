@@ -262,6 +262,20 @@ Open http://localhost:6789 in your browser.
 
 </details>
 
+### Check a download
+
+In releases after 0.4.0, each wheel a release builds carries a signed attestation of the
+workflow run and commit that built it, and the release lists the packages each wheel ships
+as CycloneDX SBOMs (`mage-ml-X.Y.Z.cdx.json`, `mage-ml-X.Y.Z-all-extras.cdx.json`,
+`mageml-engine-X.Y.Z.cdx.json`, `column-atlas-native-X.Y.Z.cdx.json`). With the GitHub CLI:
+
+```bash
+gh release download vX.Y.Z --repo jospablo777/mage-ml --pattern 'mage_ml-*.whl'
+gh attestation verify mage_ml-X.Y.Z-py3-none-any.whl --repo jospablo777/mage-ml
+```
+
+A wheel changed after the build, or built anywhere else, fails the check.
+
 ## Default login credentials
 
 User authentication is on by default. When you first start MageML, the default login
