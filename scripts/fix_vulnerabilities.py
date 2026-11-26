@@ -257,6 +257,20 @@ def cargo_locked_version(lock: Path, name: str, old: str) -> str:
     return ', '.join(sorted(newer, key=version_key)) or 'removed'
 
 
+def _rust_workspace_module():
+    """
+    MageML's Rust workspace module, by its file: it needs only the standard library, and
+    its package imports all of MageML's dependencies, which the workflow does not install.
+    """
+    import importlib.util
+
+    path = ROOT / 'mage_ai/data_preparation/models/block/rust/workspace.py'
+    spec = importlib.util.spec_from_file_location('mageml_rust_workspace', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @contextmanager
 def generated_members(root: Path):
     """
@@ -274,8 +288,7 @@ def generated_members(root: Path):
     if '.mage/blocks/*' not in members or generated.exists():
         yield
         return
-    from mage_ai.data_preparation.models.block.rust import workspace as ws
-
+    ws = _rust_workspace_module()
     try:
         workspace = ws.Workspace(root)
         ws.sync_sdk(workspace)
