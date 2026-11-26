@@ -1,5 +1,6 @@
 import collections
 import os
+import time
 import traceback
 from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
@@ -788,6 +789,13 @@ class PipelineScheduler:
         block = self.pipeline.get_block(block_run.block_uuid)
         try:
             request = resources.request_of(block) if block else resources.Request()
+            if request.empty and block is not None:
+                # What it used in its last runs, when it declares nothing.
+                policy = resources.policy_of(_project_metadata(self.pipeline.repo_path))
+                if policy.learn_memory:
+                    request = resources.learned_request(
+                        _recent_memory_peaks(self.pipeline.uuid, block_run.block_uuid),
+                    )
         except resources.ResourceError as error:
             self.__fail_admission(block_run, metrics, str(error))
             return False
@@ -1514,6 +1522,48 @@ def _project_metadata(repo_path: str) -> Dict:
         return {}
 
 
+# Peaks of recent block runs by (pipeline, block): read once a minute per scheduler, not at
+# every admission.
+_PEAKS_SECONDS = 60
+_peaks: Dict[tuple, tuple] = {}
+
+
+def _recent_memory_peaks(pipeline_uuid: str, block_uuid: str) -> List[int]:
+    """The memory peaks of the block's last completed runs, newest first."""
+    from mage_ai.orchestration.resources import LEARNED_RUNS
+
+    key = (pipeline_uuid, block_uuid)
+    cached = _peaks.get(key)
+    if cached and time.monotonic() - cached[0] < _PEAKS_SECONDS:
+        return cached[1]
+    rows = (
+        BlockRun.query.join(PipelineRun, BlockRun.pipeline_run_id == PipelineRun.id)
+        .filter(
+            PipelineRun.pipeline_uuid == pipeline_uuid,
+            BlockRun.block_uuid == block_uuid,
+            BlockRun.status == BlockRun.BlockRunStatus.COMPLETED,
+        )
+        .order_by(BlockRun.id.desc())
+        .limit(LEARNED_RUNS * 2)
+        .all()
+    )
+    peaks = [int((b.metrics or {}).get('memory_peak') or 0) for b in rows]
+    peaks = [p for p in peaks if p][:LEARNED_RUNS]
+    _peaks[key] = (time.monotonic(), peaks)
+    return peaks
+
+
+def _record_memory_peak(block_run: BlockRun, peak: int) -> None:
+    """Keeps the block run's memory peak with its metrics, for learned reservations."""
+    if not peak:
+        return
+    try:
+        block_run.refresh()
+        block_run.update(metrics=dict(block_run.metrics or {}, memory_peak=int(peak)))
+    except Exception as error:
+        logger.warning(f'The memory peak of block run {block_run.id} was not recorded: {error}')
+
+
 def _launcher(job_manager) -> Optional[str]:
     """The scheduler process the job manager's queue belongs to, as HOST_<host>_PID_<pid>."""
     client_id = getattr(getattr(job_manager, 'queue', None), 'client_id', None)
@@ -1637,26 +1687,32 @@ def run_block(
             block.retry_config,
         )
 
-    with attempt_fence.holding(block_run.id, attempt):
-        return ExecutorFactory.get_block_executor(
-            pipeline,
-            block_uuid,
-            block_run_id=block_run.id,
-            execution_partition=execution_partition,
-        ).execute(
-            block_run_id=block_run.id,
-            global_vars=variables,
-            input_from_output=input_from_output,
-            on_complete=on_complete,
-            on_failure=pipeline_scheduler.on_block_failure,
-            pipeline_run_id=pipeline_run_id,
-            retry_config=retry_config,
-            runtime_arguments=runtime_arguments,
-            tags=tags,
-            template_runtime_configuration=template_runtime_configuration,
-            verify_output=verify_output,
-            block_run_dicts=block_run_dicts,
-        )
+    from mage_ai.orchestration.resources import track_memory_peak
+
+    peak = track_memory_peak()
+    try:
+        with peak, attempt_fence.holding(block_run.id, attempt):
+            return ExecutorFactory.get_block_executor(
+                pipeline,
+                block_uuid,
+                block_run_id=block_run.id,
+                execution_partition=execution_partition,
+            ).execute(
+                block_run_id=block_run.id,
+                global_vars=variables,
+                input_from_output=input_from_output,
+                on_complete=on_complete,
+                on_failure=pipeline_scheduler.on_block_failure,
+                pipeline_run_id=pipeline_run_id,
+                retry_config=retry_config,
+                runtime_arguments=runtime_arguments,
+                tags=tags,
+                template_runtime_configuration=template_runtime_configuration,
+                verify_output=verify_output,
+                block_run_dicts=block_run_dicts,
+            )
+    finally:
+        _record_memory_peak(block_run, peak.bytes)
 
 
 def run_stage(

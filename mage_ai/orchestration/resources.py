@@ -25,9 +25,15 @@ run that ends, fails, is cancelled or reset by crash detection stops holding wit
 release, and a scheduler restart loses nothing. Memory and GPUs are per scheduler process
 (they are the host's); shared limits count every scheduler of the project. A block run
 that waits records why (block_run.metrics['waiting']).
+
+A block that declares no memory but used much in its last runs (block_run.metrics
+['memory_peak'], measured by track_memory_peak) is reserved its recent peak with a margin
+(learned_request), so heavy blocks that declare nothing do not start together and run the
+host out of memory. `learn_memory: false` in the project's resources turns it off.
 """
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,7 +50,13 @@ _UNITS = {
 }
 _KEY = re.compile(r'^[A-Za-z0-9][\w.\-]{0,99}$')
 _REQUEST_KEYS = {'memory', 'cpu', 'gpu', 'uses'}
-_POLICY_KEYS = {'limits', 'memory', 'gpus'}
+_POLICY_KEYS = {'learn_memory', 'limits', 'memory', 'gpus'}
+# A learned reservation: the largest peak of the block's last runs, with a margin, for
+# blocks that used at least LEARNED_MIN_BYTES (lighter ones start as before).
+LEARNED_RUNS = 3
+LEARNED_MARGIN = 1.25
+LEARNED_MIN_BYTES = 512 * 1024**2
+PEAK_INTERVAL_SECONDS = 0.25
 
 
 class ResourceError(Exception):
@@ -81,6 +93,8 @@ class Request:
     cpu: Optional[int] = None
     gpu: int = 0
     uses: Tuple[str, ...] = ()
+    # The peak the memory was learned from (learned_request): the block declared none.
+    learned_peak: int = 0
 
     @property
     def empty(self) -> bool:
@@ -92,6 +106,7 @@ class Policy:
     limits: Dict[str, int] = field(default_factory=dict)
     memory: int = 0
     gpus: List[str] = field(default_factory=list)
+    learn_memory: bool = True
 
 
 def request_of(block) -> Request:
@@ -160,7 +175,10 @@ def policy_of(repo_config) -> Policy:
         gpus = list(range(gpus))
     if not isinstance(gpus, list):
         raise ResourceError('The gpus of the project must be a list of devices or a count.')
-    return Policy(limits=limits, memory=memory, gpus=[str(g) for g in gpus])
+    learn = config.get('learn_memory', True)
+    if not isinstance(learn, bool):
+        raise ResourceError('learn_memory in the resources of the project must be true or false.')
+    return Policy(limits=limits, memory=memory, gpus=[str(g) for g in gpus], learn_memory=learn)
 
 
 @dataclass
@@ -197,6 +215,10 @@ def decide(
         if in_use >= policy.limits[key]:
             return Decision(False, f'waiting for {key}: {in_use} of {policy.limits[key]} in use')
     local = [h for h in mine if h.get('launched_by') == launcher]
+    if request.learned_peak and policy.memory:
+        # More than the scheduler has runs alone rather than never.
+        request = Request(memory=min(request.memory, policy.memory),
+                          learned_peak=request.learned_peak)
     if request.memory:
         if policy.memory and request.memory > policy.memory:
             return Decision(False, (
@@ -205,9 +227,12 @@ def decide(
             ), impossible=True)
         used = sum(int(h.get('memory') or 0) for h in local)
         if policy.memory and used + request.memory > policy.memory:
+            needs = (f'this block used {format_bytes(request.learned_peak)} in its last runs'
+                     if request.learned_peak else f'needs {format_bytes(request.memory)}')
             return Decision(False, (
-                f'waiting for memory: needs {format_bytes(request.memory)}, '
-                f'{format_bytes(policy.memory - used)} of {format_bytes(policy.memory)} free'
+                f'waiting for memory: {needs}, '
+                f'{format_bytes(max(policy.memory - used, 0))} of '
+                f'{format_bytes(policy.memory)} free'
             ))
     gpus: List[str] = []
     if request.gpu:
@@ -222,14 +247,85 @@ def decide(
                 f'waiting for GPUs: needs {request.gpu}, {len(free)} of {len(policy.gpus)} free'
             ))
         gpus = free[:request.gpu]
-    return Decision(True, held=dict(
+    held = dict(
         project=project,
         launched_by=launcher,
         memory=request.memory,
         cpu=request.cpu,
         gpus=gpus,
         uses=list(request.uses),
-    ))
+    )
+    if request.learned_peak:
+        held['learned'] = True
+    return Decision(True, held=held)
+
+
+def learned_request(peaks: List[int]) -> Request:
+    """
+    The memory to reserve for a block that declares none, from the peaks of its last runs
+    (newest first): the largest, with a margin; nothing when it stays light.
+    """
+    recent = [int(p) for p in peaks[:LEARNED_RUNS] if p]
+    peak = max(recent, default=0)
+    if peak < LEARNED_MIN_BYTES:
+        return Request()
+    return Request(memory=int(peak * LEARNED_MARGIN), learned_peak=peak)
+
+
+def _tree_rss(process) -> int:
+    import psutil
+
+    total = 0
+    try:
+        processes = [process, *process.children(recursive=True)]
+    except psutil.Error:
+        return 0
+    for each in processes:
+        try:
+            total += each.memory_info().rss
+        except psutil.Error:
+            continue
+    return total
+
+
+class track_memory_peak:
+    """
+    The largest resident memory of this process and the processes it starts (a Python
+    worker, an R session) while the block runs, sampled every PEAK_INTERVAL_SECONDS:
+    `with track_memory_peak() as peak: ...; peak.bytes`.
+    """
+
+    def __init__(self, interval: float = PEAK_INTERVAL_SECONDS):
+        self.bytes = 0
+        self._interval = interval
+        self._stop = threading.Event()
+        self._thread = None
+        self._process = None
+
+    def _sample(self) -> None:
+        self.bytes = max(self.bytes, _tree_rss(self._process))
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            self._sample()
+
+    def __enter__(self) -> 'track_memory_peak':
+        try:
+            import psutil
+
+            self._process = psutil.Process()
+        except Exception:
+            return self
+        self._sample()
+        self._thread = threading.Thread(target=self._run, daemon=True, name='memory-peak')
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_) -> None:
+        if self._thread is not None:
+            self._stop.set()
+            self._thread.join(timeout=5)
+            self._sample()
 
 
 def environment_for(held: Optional[Dict[str, Any]]) -> Dict[str, str]:

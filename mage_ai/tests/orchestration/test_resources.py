@@ -75,6 +75,49 @@ class DecisionTest(TestCase):
             self.assertNotIn('OMP_NUM_THREADS', resources.environment_for(dict(cpu=2)))
 
 
+class LearnedMemoryTest(TestCase):
+    def test_a_heavy_block_is_reserved_its_recent_peak_with_a_margin(self):
+        self.assertTrue(resources.learned_request([]).empty)
+        self.assertTrue(resources.learned_request([300 * 1024**2]).empty)
+        # The largest of the last three runs; older ones are not read.
+        request = resources.learned_request([2 * GiB, 4 * GiB, 1 * GiB, 9 * GiB])
+        self.assertEqual((request.memory, request.learned_peak), (5 * GiB, 4 * GiB))
+
+    def test_a_learned_request_waits_with_its_peak_and_never_fails(self):
+        policy = resources.Policy(memory=8 * GiB)
+        held = [dict(project='p', launched_by='me', memory=5 * GiB)]
+        waits = resources.decide(resources.learned_request([4 * GiB]), policy, held, 'p', 'me')
+        self.assertFalse(waits.admitted)
+        self.assertEqual(waits.reason, 'waiting for memory: this block used 4.0 GiB in its '
+                                       'last runs, 3.0 GiB of 8.0 GiB free')
+        # Above what the scheduler has: it runs alone, where a declared request fails.
+        alone = resources.decide(resources.learned_request([20 * GiB]), policy, [], 'p', 'me')
+        self.assertTrue(alone.admitted)
+        self.assertEqual((alone.held['memory'], alone.held['learned']), (8 * GiB, True))
+
+    def test_the_project_turns_learning_off(self):
+        self.assertTrue(resources.policy_of({}).learn_memory)
+        self.assertFalse(resources.policy_of(dict(resources=dict(learn_memory=False))).learn_memory)
+        with self.assertRaisesRegex(resources.ResourceError, 'true or false'):
+            resources.policy_of(dict(resources=dict(learn_memory='no')))
+
+    def test_the_peak_includes_what_the_block_allocates_and_its_processes(self):
+        import subprocess
+        import sys
+        import time
+
+        with resources.track_memory_peak(interval=0.02) as idle:
+            time.sleep(0.1)
+        with resources.track_memory_peak(interval=0.02) as peak:
+            held = bytearray(300 * 1024**2)
+            child = subprocess.Popen([sys.executable, '-c', (
+                'import time; b = bytearray(200 * 1024**2); time.sleep(1)')])
+            time.sleep(0.8)
+            child.wait()
+            del held
+        self.assertGreater(peak.bytes - idle.bytes, 450 * 1024**2)
+
+
 class AdmissionTest(DBTestCase):
     def setUp(self):
         super().setUp()
@@ -151,3 +194,50 @@ class AdmissionTest(DBTestCase):
         block = list(pipeline.blocks_by_uuid.values())[0]
         self.assertFalse(fusion.block_can_fuse(pipeline, block))
         self.assertEqual(PipelineRun.PipelineRunStatus.RUNNING.value, 'running')
+
+    def test_heavy_blocks_that_declare_nothing_do_not_start_together(self):
+        first_pipeline, second_pipeline = self.pipeline(None), self.pipeline(None)
+        for pipeline in (first_pipeline, second_pipeline):
+            past = self.schedule(pipeline)
+            past.update(status=BlockRun.BlockRunStatus.COMPLETED,
+                        metrics=dict(memory_peak=3 * GiB))
+        pipeline_scheduler_original._peaks.clear()
+
+        first = self.schedule(first_pipeline)
+        self.assertEqual(first.status, BlockRun.BlockRunStatus.QUEUED)
+        self.assertEqual(first.metrics['resources']['memory'], int(3.75 * GiB))
+        second = self.schedule(second_pipeline)
+        self.assertEqual(second.status, BlockRun.BlockRunStatus.INITIAL)
+        self.assertIn('this block used 3.0 GiB in its last runs', second.metrics['waiting'])
+
+        first.update(status=BlockRun.BlockRunStatus.COMPLETED)
+        self.assertEqual(self.reschedule(second).status, BlockRun.BlockRunStatus.QUEUED)
+
+    def test_a_light_block_or_a_project_that_turns_it_off_reserves_nothing(self):
+        pipeline = self.pipeline(None)
+        past = self.schedule(pipeline)
+        past.update(status=BlockRun.BlockRunStatus.COMPLETED, metrics=dict(memory_peak=GiB // 4))
+        pipeline_scheduler_original._peaks.clear()
+        self.assertNotIn('resources', self.schedule(pipeline).metrics or {})
+
+        heavy = self.pipeline(None)
+        past = self.schedule(heavy)
+        past.update(status=BlockRun.BlockRunStatus.COMPLETED, metrics=dict(memory_peak=3 * GiB))
+        config = yaml.safe_load(self.metadata.read_text())
+        config['resources']['learn_memory'] = False
+        self.metadata.write_text(yaml.safe_dump(config))
+        pipeline_scheduler_original._peaks.clear()
+        run = self.schedule(heavy)
+        self.assertEqual(run.status, BlockRun.BlockRunStatus.QUEUED)
+        self.assertNotIn('resources', run.metrics or {})
+
+    def test_a_block_run_records_its_memory_peak(self):
+        pipeline = self.pipeline(None)
+        block_run = self.schedule(pipeline)
+        with patch.object(pipeline_scheduler_original.ExecutorFactory, 'get_block_executor') as get:
+            get.return_value.execute.side_effect = lambda **_: bytearray(64 * 1024**2) and None
+            pipeline_scheduler_original.run_block(
+                block_run.pipeline_run_id, block_run.id, {}, {},
+            )
+        block_run.refresh()
+        self.assertGreater(block_run.metrics['memory_peak'], 64 * 1024**2)

@@ -48,6 +48,17 @@ state. A Rust kernel would only replace a few comparisons.
 - **Fusion.** Blocks with resources don't fuse: a stage claims later blocks without
   passing through admission.
 
+## Learned memory
+
+A block that declares nothing gets a reservation from what it used. `run_block` samples the
+resident memory of its job process and the processes under it every 250 ms
+(`track_memory_peak`) and records the largest as `metrics.memory_peak`. At admission,
+`learned_request` takes the largest peak of the block's last three completed runs: under
+512 MB it reserves nothing, so light blocks stay off the admission lock; above it, the peak
+plus 25%, capped at the scheduler's budget so a learned request never fails. Peaks are read
+once a minute per scheduler and block. `learn_memory: false` in the project's resources
+turns it off. Stages are not measured: their blocks share a process.
+
 ## Remaining gaps
 
 1. **No enforcement.** Declared memory is accounting, not a cgroup limit. Containers and

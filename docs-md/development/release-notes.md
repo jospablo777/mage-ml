@@ -12,6 +12,13 @@
 - An R library out of sync names eight packages and counts the rest, instead of every
   package of a new environment.
 
+### Scheduling
+
+- Heavy blocks that declare no memory no longer start together and run the host out of
+  memory: a block that used 512 MB or more in its last runs is reserved its peak plus
+  25%, and waits with `waiting for memory: this block used 5.2 GiB in its last runs`.
+  `learn_memory: false` in the project's resources turns it off.
+
 ### Python workers
 
 - A block that closes `sys.stdout` or `sys.stderr` no longer fails after it returned: the

@@ -48,6 +48,23 @@ configuration:
 | `gpu` | The block run gets that many of the project's GPU devices for itself, through `CUDA_VISIBLE_DEVICES`. |
 | `uses` | The block run starts when each named shared limit has room. |
 
+## Blocks that declare nothing
+
+Each block run records the most memory its process and the processes it started (a
+Python worker, an R session) used while the block ran. A block that declares no memory
+but used 512 MB or more in one of its last three runs is reserved that peak, plus 25%,
+like a declared `memory`: two such blocks don't start together when the scheduler's
+budget can't hold both. It waits with `waiting for memory: this block used 5.2 GiB in its
+last runs, 3.1 GiB of 48.0 GiB free`. A peak above the whole budget runs the block alone
+instead of failing it. Lighter blocks start as before.
+
+To turn it off for the project:
+
+```yaml
+resources:
+  learn_memory: false
+```
+
 ## Waiting and failing
 
 A block run that waits stays **initial**. The pipeline run's page lists it under
@@ -76,3 +93,5 @@ A request that can never fit fails the block run at once, with the reason:
 - Thread settings apply to libraries that start their thread pools after the block run
   starts. A library the worker process loaded and used before keeps its pool.
 - Notebook runs don't wait for resources.
+- A learned peak is measured for block runs that run on their own. Blocks in a block
+  fusion stage run in the stage's process, so they record no peak and reserve nothing.
