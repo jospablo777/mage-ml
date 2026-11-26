@@ -238,7 +238,12 @@ processes of their own; at most four stay idle per worker
 
 Each block in a warm process starts as it would in a new one: when a file of the project
 changed (a helper in `utils/`), the project's modules are imported again, and what a block
-did to `os.environ` or `sys.path` is undone. What a library keeps inside its own module
+did to `os.environ`, `sys.path`, `sys.stdout`, `sys.stderr` or its directory is undone. A
+block that closes `sys.stdout` only flushes it, and a log handler added again to the same
+stream or file is not added twice, so a block that adds one each time it runs logs each
+line once. A process killed while idle is replaced for the next block, and a run that is
+killed (a block timeout, a scheduler that crashed) stops its worker processes within a
+second or two. What a library keeps inside its own module
 (`mlflow.set_tracking_uri`) stays for the next block of that worker, as in any Python
 process: set it in each block that relies on it. Measured on an M-series Mac:
 

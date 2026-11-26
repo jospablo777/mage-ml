@@ -20,7 +20,9 @@ triggers, waits for every run to finish, and checks that:
 
 `make -C integration_tests test-soak` runs it for 150 seconds with 12 chain pipelines;
 `MAGE_TEST_SOAK_SECONDS` and `MAGE_TEST_SOAK_PIPELINES` change both. It also passed for
-600 seconds with 20 chain pipelines.
+600 seconds with 20 chain pipelines. Each push runs it for 150 seconds in Python, with
+block fusion and on the run engine; the Fault soak workflow (`fault_soak.yml`) runs the
+three for 30 minutes each night, with a Kafka broker down for 330 s under a stream.
 
 ## What it found
 

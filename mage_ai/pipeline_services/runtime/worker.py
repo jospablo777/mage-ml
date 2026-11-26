@@ -1455,6 +1455,9 @@ def serve(requests=None, channel=None) -> None:
             return
         # A block that changes directory does not move the next request's.
         directory = os.getcwd()
+        # Nor one that replaces sys.stdout or sys.stderr: the end markers and the next
+        # block's lines go to the process's own.
+        streams = sys.stdout, sys.stderr
         warm = bool(request.get('end_marker'))
         if warm:
             # In MageML's warm processes each block starts as in a fresh one: the project's
@@ -1496,6 +1499,7 @@ def serve(requests=None, channel=None) -> None:
                 os.chdir(directory)
             except OSError:
                 pass
+            sys.stdout, sys.stderr = streams
             if warm:
                 _remember_project_modules()
                 if dict(os.environ) != environ:
@@ -1511,7 +1515,50 @@ def serve(requests=None, channel=None) -> None:
         _reply(channel, message)
 
 
+class _KeptOpen(io.TextIOWrapper):
+    """
+    The worker's stdout and stderr. A block that closes sys.stdout (as code written for a
+    script does) only flushes it: closed, the worker failed writing its end marker after
+    the block had returned, and the block's run failed with it.
+    """
+
+    def close(self) -> None:
+        self.flush()
+
+
+def _kept_open(fd: int) -> _KeptOpen:
+    return _KeptOpen(io.FileIO(fd, 'w', closefd=False), encoding='utf-8',
+                     errors='backslashreplace', line_buffering=True, write_through=True)
+
+
+def _handler_target(handler: logging.Handler):
+    # Where a handler writes: its file, or its stream; any other handler is only itself.
+    return getattr(handler, 'baseFilename', None) or id(getattr(handler, 'stream', handler))
+
+
+_add_handler = logging.Logger.addHandler
+
+
+def _add_handler_once(logger: logging.Logger, handler: logging.Handler) -> None:
+    """
+    Logger.addHandler in a worker: a handler of the same class to the same stream or file
+    as one the logger has is not added again. A block that adds a handler each time it runs
+    (as code from a script does) printed each line once more per block in a warm process,
+    which keeps its loggers; a fresh process printed it once.
+    """
+    for existing in logger.handlers:
+        if type(existing) is type(handler) and (
+                _handler_target(existing) == _handler_target(handler)):
+            if existing is not handler:
+                # A FileHandler opened its file; the block cannot have meant two.
+                handler.close()
+            return
+    _add_handler(logger, handler)
+
+
 def main() -> None:
+    sys.stdout, sys.stderr = _kept_open(1), _kept_open(2)
+    logging.Logger.addHandler = _add_handler_once
     project = os.environ.get('MAGE_REPO_PATH')
     if project:
         # Blocks import shared code as `<project>.utils...` and as `utils...`.

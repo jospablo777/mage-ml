@@ -1,0 +1,105 @@
+name: Fault soak
+
+# The fault tests too long for every push: a Kafka broker down past librdkafka's message
+# timeout under a running stream, and the scheduler for 30 minutes (each push runs it for
+# 150 s) with its jobs in Python and on the run engine, through worker crashes and restarts.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      soak_seconds:
+        description: Seconds the scheduler soak runs
+        default: "1800"
+
+concurrency:
+  group: fault-soak
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  ENV: test_mage
+  # Match build_and_test.yml (test_deployment_contracts checks both).
+  UV_VERSION: "0.11.29"
+  RUST_VERSION: "1.98.0"
+
+jobs:
+  faults:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: kafka
+            name: Kafka broker down for 330 s
+            target: test-kafka-outage
+            services: kafka
+          - id: scheduler
+            name: Scheduler soak
+            target: test-soak
+            services: postgres redis
+          - id: fusion
+            name: Scheduler soak with block fusion
+            target: test-soak-fusion
+            services: postgres redis
+          - id: engine
+            name: Scheduler soak on the run engine
+            target: test-soak-engine
+            services: postgres redis
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: integration
+          save-if: false
+          workspaces: |
+            rust/column_atlas -> target
+            mage_ai/pipeline_services/service -> target
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install "uv==${{ env.UV_VERSION }}"
+      - name: Install dependencies
+        run: uv sync --locked --group dev --extra postgres --extra streaming
+      # librdkafka (the kafka feature) builds with cmake and includes curl's header.
+      - name: Build the engine with its stream connectors
+        if: matrix.id == 'kafka'
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q cmake libcurl4-openssl-dev
+          cd mage_ai/pipeline_services/service
+          CARGO_TARGET_DIR=target/streams cargo build -q --release -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats,mongodb,sqs,pubsub,activemq,search,influxdb
+          echo "MAGE_TEST_STREAM_RELEASE=1" >> "$GITHUB_ENV"
+      - name: Build the run engine
+        if: matrix.id == 'engine'
+        working-directory: mage_ai/pipeline_services/service
+        run: cargo build -q --release -p mage-service
+      - name: Start the services
+        run: make -C integration_tests up SERVICES="${{ matrix.services }}"
+      - name: Run the test
+        env:
+          MAGE_TEST_SOAK_SECONDS: ${{ inputs.soak_seconds || '1800' }}
+        run: make -C integration_tests ${{ matrix.target }} SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-${{ matrix.id }}-results.xml'
+      - name: Failed tests
+        if: failure()
+        run: python3 scripts/junit_annotations.py integration_tests/soak*-results.xml
+      - name: Service logs
+        if: failure()
+        run: docker compose -f integration_tests/compose.yaml logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fault-soak-${{ matrix.id }}
+          path: integration_tests/soak*-results.xml
+          if-no-files-found: ignore

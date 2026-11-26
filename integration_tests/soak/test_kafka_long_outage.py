@@ -15,8 +15,8 @@ from integration_tests.kafka.test_broker_restart import (  # noqa: F401 (fixture
     restart_under_stream,
 )
 
-# Six minutes with the broker down and the stream engine built: it runs when asked, not with
-# the scheduler soak (make test-kafka-outage).
+# Six minutes with the broker down and the stream engine built: it runs each night
+# (fault_soak.yml) and when asked (make test-kafka-outage), not on each push.
 pytestmark = pytest.mark.skipif(
     os.getenv('MAGE_TEST_KAFKA_OUTAGE') != '1',
     reason='set MAGE_TEST_KAFKA_OUTAGE=1 (make test-kafka-outage)',

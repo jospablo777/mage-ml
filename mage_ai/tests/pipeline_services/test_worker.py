@@ -1,6 +1,8 @@
 import io
 import json
+import logging
 import os
+import sys
 import tempfile
 import textwrap
 from datetime import datetime
@@ -326,6 +328,68 @@ class ProtocolTest(WorkerTestCase):
         )
         self.assertEqual([r.get('ok') for r in replies[1:4]], [True, False, True])
         self.assertEqual(replies[2]['error']['phase'], 'run')
+
+
+class LeftoversTest(WorkerTestCase):
+    """What a block leaves in its process does not reach the next request."""
+
+    def test_a_block_that_replaces_sys_stdout_leaves_the_next_request_the_streams(self):
+        replaces = self.block('''
+            import io
+            import sys
+
+            @transformer
+            def f():
+                sys.stdout = io.StringIO()
+                sys.stderr = io.StringIO()
+                return 1
+        ''', name='replaces')
+        requests = io.StringIO(json.dumps(dict(
+            op='run', id='1', block=replaces, inputs=[],
+            output_dir=os.path.join(self.directory, 'out'),
+        )) + '\n')
+        streams = sys.stdout, sys.stderr
+        try:
+            worker.serve(requests, io.StringIO())
+            self.assertIs(sys.stdout, streams[0])
+            self.assertIs(sys.stderr, streams[1])
+        finally:
+            sys.stdout, sys.stderr = streams
+
+    def test_a_closed_stream_only_flushes(self):
+        read_fd, write_fd = os.pipe()
+        stream = worker._kept_open(write_fd)
+        stream.write('before\n')
+        stream.close()
+        self.assertFalse(stream.closed)
+        stream.write('after\n')
+        stream.flush()
+        os.close(write_fd)
+        with os.fdopen(read_fd) as reader:
+            self.assertEqual(reader.read(), 'before\nafter\n')
+
+    def test_a_handler_to_the_same_stream_or_file_is_added_once(self):
+        logger = logging.getLogger(f'leftovers.{self.id()}')
+        self.addCleanup(logger.handlers.clear)
+        stream = io.StringIO()
+        path = os.path.join(self.directory, 'block.log')
+        for _ in range(3):
+            worker._add_handler_once(logger, logging.StreamHandler(stream))
+            worker._add_handler_once(logger, logging.FileHandler(path))
+        # Another stream, or the same handler again, as the logging module allows.
+        other = logging.StreamHandler(io.StringIO())
+        worker._add_handler_once(logger, other)
+        worker._add_handler_once(logger, other)
+        self.assertEqual(
+            [type(h).__name__ for h in logger.handlers],
+            ['StreamHandler', 'FileHandler', 'StreamHandler'],
+        )
+        logger.warning('once')
+        self.assertEqual(stream.getvalue(), 'once\n')
+        for handler in logger.handlers:
+            handler.close()
+        with open(path) as file:
+            self.assertEqual(file.read(), 'once\n')
 
 
 class ChainTest(WorkerTestCase):
