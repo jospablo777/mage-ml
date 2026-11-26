@@ -312,6 +312,17 @@ class StatusTest(RuntimeTestCase):
         self.assertIn('`rv add bit64`', report['problems'][1])
         self.assertIn('bit64 would change', report['problems'][2])
 
+    def test_a_sync_of_every_package_names_a_few_and_counts_the_rest(self):
+        # A new or emptied library: all of them would change.
+        self.pending = {'installed': [{'name': f'pkg{i:03}'} for i in range(196)], 'removed': []}
+
+        with patch.object(runtime, '_run', side_effect=self.fake_run):
+            report = runtime.status(runtime.r_config(str(self.repo)))
+
+        [problem] = [p for p in report['problems'] if 'not synced' in p]
+        self.assertEqual(problem, 'The library is not synced: pkg000, pkg001, pkg002, pkg003, '
+                                  'pkg004, pkg005, pkg006, pkg007 and 188 more would change.')
+
 
 class MagemlHashTest(TestCase):
     def test_changes_with_the_source_but_not_the_tests(self):

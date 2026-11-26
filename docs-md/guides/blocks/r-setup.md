@@ -129,8 +129,9 @@ Then check that R blocks can run:
 mage r status path/to/project
 ```
 
-The last line says `R blocks can run.` To add packages later, see
-[R packages with rv](r-packages.md).
+The last line says `R blocks can run.` The app shows the same under **Workers**, then
+**R**, with the packages and their locked versions, and edits `rproject.toml`. To add
+packages later, see [R packages with rv](r-packages.md).
 
 ## 6. Run your first R block
 

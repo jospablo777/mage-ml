@@ -64,6 +64,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `interactions` | Viewer | Viewer | Editor | Editor | Editor |
 | `kernel_processes` | Viewer | Viewer | No one | No one | Editor * |
 | `kernels` | Viewer | No one | No one | Editor * | No one |
+| `language_environments` | Viewer | Viewer | No one | Editor | No one |
 | `language_setups` | No one | Editor | No one | No one | No one |
 | `logs` | Viewer | No one | No one | No one | No one |
 | `model_releases` | No one | Viewer | Editor | No one | No one |

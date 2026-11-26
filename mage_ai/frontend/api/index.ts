@@ -70,6 +70,7 @@ export const LANGUAGE_SETUPS: 'language_setups' = 'language_setups';
 export const PIPELINE_SERVICES: 'pipeline_services' = 'pipeline_services';
 export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_service_builds';
 export const PIPELINE_SERVICE_MODELS: 'pipeline_service_models' = 'pipeline_service_models';
+export const LANGUAGE_ENVIRONMENTS: 'language_environments' = 'language_environments';
 export const PYTHON_WORKERS: 'python_workers' = 'python_workers';
 export const PYTHON_WORKER_COMBINATIONS: 'python_worker_combinations' = 'python_worker_combinations';
 export const PYTHON_WORKER_AUDITS: 'python_worker_audits' = 'python_worker_audits';
@@ -196,6 +197,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PIPELINE_SERVICES],
   [PIPELINE_SERVICE_BUILDS],
   [PIPELINE_SERVICE_MODELS],
+  [LANGUAGE_ENVIRONMENTS],
   [PYTHON_WORKERS],
   [PYTHON_WORKER_COMBINATIONS],
   [PYTHON_WORKER_AUDITS],

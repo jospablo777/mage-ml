@@ -187,6 +187,25 @@ Its page in the app shows the command for the way this server's MageML is instal
 packages only some blocks need, or versions that clash with MageML's (Feast with pandas 2,
 an older MLflow), add a worker instead: MageML's own packages then never change.
 
+## R and Rust on the Workers page
+
+R and Rust blocks have one environment per language, which every block of that language
+runs with: the rv project in `r/` and the Cargo workspace in `rust/`. The Workers page
+lists both under **R and Rust**, and each page shows:
+
+- the tools and their versions (Rscript, rv and rig; cargo and rustc);
+- what stops the language's blocks and how to fix it, such as an R library that is not
+  synced with `rv.lock`, with a **Sync the packages** button;
+- the packages or crates, each with its locked version, and the blocks that use them;
+- `rproject.toml` or `Cargo.toml` to edit. **Check and save** resolves it with rv or
+  cargo in a copy first: a package or crate that does not exist, or a version that cannot
+  fit, is refused with the tool's reason and the file stays as it was. `rv.lock` follows
+  at the next sync, `Cargo.lock` at the next build.
+
+A project without a Rust environment gets one from **Set up the Rust environment**. The R
+environment is created with `mage r init` in a terminal, since it installs the tidyverse
+and takes minutes.
+
 ## How it works
 
 <picture>

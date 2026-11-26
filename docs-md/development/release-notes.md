@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Workers page: R and Rust
+
+- R and Rust environments are on the Workers page: tools and versions, what stops the
+  language's blocks, packages or crates with their locked versions, and the blocks that
+  use them. `rproject.toml` and `Cargo.toml` are edited there and saved once rv or cargo
+  resolves them in a copy; the R library syncs from the page, and a Rust environment is
+  set up from it.
+- An R library out of sync names eight packages and counts the rest, instead of every
+  package of a new environment.
+
 ### Python workers
 
 - A block that closes `sys.stdout` or `sys.stderr` no longer fails after it returned: the

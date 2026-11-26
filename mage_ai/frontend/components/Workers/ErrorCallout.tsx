@@ -31,9 +31,13 @@ const OutputStyle = styled.pre`
   ${props => `color: ${(props.theme.content || dark.content).default};`}
 `;
 
-// What went wrong, said first; the tool's own output (uv's, after a blank line in the
-// message) one click away.
-function ErrorCallout({ message, title }: { message: string; title: string }) {
+// What went wrong, said first; the tool's own output (uv's unless named, after a blank line
+// in the message) one click away.
+function ErrorCallout({ message, title, tool = 'uv' }: {
+  message: string;
+  title: string;
+  tool?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [summary, ...rest] = (message || '').split('\n\n');
   const output = rest.join('\n\n').trim();
@@ -46,7 +50,7 @@ function ErrorCallout({ message, title }: { message: string; title: string }) {
       {output && (
         <Spacing mt={1}>
           <Link onClick={() => setOpen(!open)} small>
-            {open ? 'Hide uv\'s output' : 'Show uv\'s output'}
+            {open ? `Hide ${tool}'s output` : `Show ${tool}'s output`}
           </Link>
           {open && <OutputStyle>{output}</OutputStyle>}
         </Spacing>

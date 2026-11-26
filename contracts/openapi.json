@@ -3925,6 +3925,88 @@
     },
     "type": "object"
    },
+   "LanguageEnvironment": {
+    "properties": {
+     "block_count": {
+      "type": "integer"
+     },
+     "blocks": {
+      "items": {},
+      "type": "array"
+     },
+     "commands": {
+      "items": {
+       "type": "string"
+      },
+      "type": [
+       "array",
+       "null"
+      ]
+     },
+     "definition": {
+      "type": "null"
+     },
+     "exists": {
+      "type": "boolean"
+     },
+     "id": {
+      "type": "string"
+     },
+     "label": {
+      "type": "string"
+     },
+     "language": {
+      "type": "string"
+     },
+     "locked_count": {
+      "type": "integer"
+     },
+     "manifest": {
+      "type": "string"
+     },
+     "manifest_text": {
+      "type": "null"
+     },
+     "package_count": {
+      "type": "integer"
+     },
+     "packages": {
+      "items": {},
+      "type": "array"
+     },
+     "problems": {
+      "items": {},
+      "type": [
+       "array",
+       "null"
+      ]
+     },
+     "state": {
+      "type": "string"
+     },
+     "tools": {
+      "properties": {
+       "rig": {
+        "type": "string"
+       },
+       "rscript": {
+        "type": "string"
+       },
+       "rv": {
+        "type": "string"
+       }
+      },
+      "type": [
+       "null",
+       "object"
+      ]
+     },
+     "version": {
+      "type": "null"
+     }
+    },
+    "type": "object"
+   },
    "LanguageSetup": {
     "properties": {
      "commands": {},
@@ -10697,6 +10779,112 @@
     "summary": "update kernels",
     "tags": [
      "kernels"
+    ]
+   }
+  },
+  "/api/language_environments": {
+   "get": {
+    "operationId": "list_language_environments",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "language_environments": {
+           "items": {
+            "$ref": "#/components/schemas/LanguageEnvironment"
+           },
+           "type": "array"
+          },
+          "metadata": {
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "list language_environments",
+    "tags": [
+     "language_environments"
+    ]
+   }
+  },
+  "/api/language_environments/{id}": {
+   "get": {
+    "operationId": "detail_language_environments",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "language_environment": {
+           "$ref": "#/components/schemas/LanguageEnvironment"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail language_environments",
+    "tags": [
+     "language_environments"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ],
+   "put": {
+    "operationId": "update_language_environments",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "language_environment": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "language_environment": {
+           "$ref": "#/components/schemas/LanguageEnvironment"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "update language_environments",
+    "tags": [
+     "language_environments"
     ]
    }
   },
@@ -21483,6 +21671,14 @@
     "update"
    ],
    "schema": "Kernel"
+  },
+  "language_environments": {
+   "operations": [
+    "list",
+    "detail",
+    "update"
+   ],
+   "schema": "LanguageEnvironment"
   },
   "language_setups": {
    "operations": [

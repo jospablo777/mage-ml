@@ -575,7 +575,7 @@ def _prepare(config: RConfig) -> RLibraries:
                     names = sorted({change.get('name', '?') for change in changes})
                     raise REnvironmentError(
                         f'The R library in {config.project_dir} is not synced with '
-                        f'rv.lock: {", ".join(names)} would change. Run `mage r sync` or '
+                        f'rv.lock: {_some(names)} would change. Run `mage r sync` or '
                         '`rv sync` there, or set MAGE_R_SYNC=auto.',
                     )
 
@@ -688,6 +688,13 @@ def install_mageml(config: RConfig, r_version: str, rv_library: Optional[Path]) 
     return target
 
 
+def _some(names: List[str], shown: int = 8) -> str:
+    # A sync of a new environment changes every package: name a few and count the rest.
+    if len(names) <= shown:
+        return ', '.join(names)
+    return f'{", ".join(names[:shown])} and {len(names) - shown} more'
+
+
 def project_dependencies(project_dir: Path) -> List[str]:
     with open(project_dir / 'rproject.toml', 'rb') as file:
         dependencies = tomllib.load(file).get('project', {}).get('dependencies') or []
@@ -723,7 +730,7 @@ def status(config: RConfig) -> Dict:
         changes = (pending.get('installed') or []) + (pending.get('removed') or [])
         if changes:
             names = sorted({change.get('name', '?') for change in changes})
-            problems.append(f'The library is not synced: {", ".join(names)} would change.')
+            problems.append(f'The library is not synced: {_some(names)} would change.')
 
         library = library_path(config)
         details['library'] = str(library)

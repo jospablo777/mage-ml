@@ -140,3 +140,31 @@ export type WorkerHeldPackagesType = {
   reason?: string;
   state: 'held' | 'current' | 'unchecked';
 };
+
+// language_environments.py: the R or Rust environment every block of that language runs with.
+export type LanguagePackageType = {
+  locked?: string;
+  name: string;
+  requirement?: string;
+  source?: string;
+};
+
+export type LanguageEnvironmentType = {
+  block_count: number;
+  blocks: string[];
+  commands?: string[];
+  definition?: string;
+  exists: boolean;
+  id: 'r' | 'rust';
+  label: string;
+  language: 'r' | 'rust';
+  locked_count?: number;
+  manifest: string;
+  manifest_text?: string;
+  package_count: number;
+  packages: LanguagePackageType[];
+  problems?: string[];
+  state: 'ready' | 'problems' | 'none';
+  tools?: { [tool: string]: string | null };
+  version?: string;
+};

@@ -7,6 +7,7 @@ import Button from '@oracle/elements/Button';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
 import NewWorker from './NewWorker';
+import { languageState } from './LanguageEnvironment';
 import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
 import Text from '@oracle/elements/Text';
@@ -26,7 +27,7 @@ import {
 } from './shared';
 import { NumberStyle, TileStyle } from '@components/PipelineServiceExport';
 import { UNIT } from '@oracle/styles/units/spacing';
-import { WorkerType } from './types';
+import { LanguageEnvironmentType, WorkerType } from './types';
 
 const TilesStyle = styled.div`
   display: grid;
@@ -60,6 +61,85 @@ const HELD_BACK_HINT = 'Locked below their newest release, which does not fit th
 
 // The Workers page: every Python worker of the project, whether it can run blocks, how much
 // it installs, where it is used and whether it has known vulnerabilities; New worker.
+// R and Rust: one environment each, which every block of that language runs with.
+function LanguageRows() {
+  const router = useRouter();
+  const { data } = api.language_environments.list({}, { revalidateOnFocus: false });
+  const environments: LanguageEnvironmentType[] = data?.language_environments || [];
+  if (!environments.length) {
+    return null;
+  }
+  const open = (language: string) => router.push(
+    '/workers/languages/[language]', `/workers/languages/${language}`,
+  );
+
+  return (
+    <Spacing mt={3}>
+      <Text bold large>R and Rust</Text>
+      <Text muted small>
+        One environment per language, which every block of that language runs with.
+      </Text>
+      <Spacing mt={1.5} />
+      <CardStyle>
+        <TableStyle aria-label="R and Rust">
+          <thead>
+            <tr>
+              <th>Language</th>
+              <th>Version</th>
+              <th>Packages</th>
+              <th>Blocks</th>
+              <th>State</th>
+            </tr>
+          </thead>
+          <tbody>
+            {environments.map((environment) => {
+              const state = languageState(environment);
+              return (
+                <RowLinkStyle
+                  aria-label={`Open ${environment.label}`}
+                  key={environment.language}
+                  onClick={() => open(environment.language)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      open(environment.language);
+                    }
+                  }}
+                  role="link"
+                  tabIndex={0}
+                >
+                  <td>
+                    <Text bold>{environment.label}</Text>
+                    {environment.definition && (
+                      <MonoStyle>
+                        <Text inline muted small>{environment.definition}/</Text>
+                      </MonoStyle>
+                    )}
+                  </td>
+                  <td><Text small>{environment.version || '-'}</Text></td>
+                  <td>
+                    <Text muted={!environment.exists} small>
+                      {environment.exists
+                        ? `${environment.package_count} listed, ${environment.locked_count} locked`
+                        : (environment.language === 'r' ? 'mage r init' : 'mage rust init')}
+                    </Text>
+                  </td>
+                  <td>
+                    <Text muted={!environment.block_count} small>
+                      {environment.block_count || 'None yet'}
+                    </Text>
+                  </td>
+                  <td><PillStyle tone={state.tone}>{state.label}</PillStyle></td>
+                </RowLinkStyle>
+              );
+            })}
+          </tbody>
+        </TableStyle>
+      </CardStyle>
+    </Spacing>
+  );
+}
+
 function Workers() {
   const router = useRouter();
   // /workers?new=1, from "Add a worker" in a block's Runs in menu, opens the form.
@@ -272,6 +352,8 @@ function Workers() {
           </Spacing>
         </>
       )}
+
+      {data && <LanguageRows />}
     </>
   );
 }

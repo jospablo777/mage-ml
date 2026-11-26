@@ -151,8 +151,9 @@ Add a crate under `[workspace.dependencies]` in `rust/Cargo.toml`, then use it i
 regex = "1"
 ```
 
-New projects come with `anyhow`, `serde`, `serde_json`, `rayon` and `ureq` (HTTP with
-rustls). Polars comes with the `mage` crate; to enable more Polars features, add `polars`
+Or open **Workers**, then **Rust**: the page lists the crates with their locked versions and
+edits `rust/Cargo.toml`, saving a change only once cargo resolves it. New projects come
+with `anyhow`, `serde`, `serde_json`, `rayon` and `ureq` (HTTP with rustls). Polars comes with the `mage` crate; to enable more Polars features, add `polars`
 with the same version and the features you need. See [Rust blocks](rust-blocks.md#crates).
 
 ## The build cache
