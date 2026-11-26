@@ -335,6 +335,12 @@ jobs:
             tests: ""
             r: false
             warm: ""
+    env:
+      # Every Rust block builds with the same features of MageML's crate (all but onnx), so
+      # Polars and the crate's dependencies build once with one feature set, and the one
+      # cached build directory serves every group: with each group's own features, the
+      # groups that did not save the cache rebuilt Polars for 9 to 18 minutes.
+      MAGE_RUST_FEATURES: clickhouse,duckdb,feast,models,mongodb,mysql,postgres,redis,storage
     steps:
       - uses: actions/checkout@v5
       # uv sync compiles the ColumnAtlas extension in rust/column_atlas; exported-service

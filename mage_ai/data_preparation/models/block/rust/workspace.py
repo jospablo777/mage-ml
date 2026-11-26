@@ -256,7 +256,18 @@ def sdk_features(texts) -> List[str]:
             found.add(match.group(1))
         for match in re.finditer(r'\bmage::\{([^}]*)\}', text):
             found.update(part.strip().split('::')[0] for part in match.group(1).split(','))
-    return sorted(found & set(SDK_FEATURE_MODULES))
+    return sorted((found | features_for_every_block()) & set(SDK_FEATURE_MODULES))
+
+
+def features_for_every_block() -> set:
+    """
+    MAGE_RUST_FEATURES (comma-separated): features of MageML's crate on for every block, as
+    listing them in the project's Cargo.toml does. CI sets the same list in every job, so
+    every project builds Polars and the crate's dependencies with one set of features, and
+    one cached build serves them all.
+    """
+    listed = os.getenv('MAGE_RUST_FEATURES') or ''
+    return {f.strip() for f in listed.split(',') if f.strip()}
 
 
 def block_manifest(crate: str, crates: List[str], features: Optional[List[str]] = None) -> str:

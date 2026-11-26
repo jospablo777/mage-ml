@@ -3,6 +3,7 @@ import os
 import tempfile
 import textwrap
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import polars as pl
@@ -162,6 +163,7 @@ class WorkspaceTest(TestCase):
         self.assertIn('regex = { workspace = true }', manifest)
         self.assertIn('dead_code = "allow"', manifest)
 
+    @patch.dict(os.environ, {'MAGE_RUST_FEATURES': ''})
     def test_a_block_crate_turns_on_the_sdk_features_its_code_uses(self):
         code = (
             'use mage::prelude::*;\nuse mage::storage::Storage;\n'
@@ -180,6 +182,13 @@ class WorkspaceTest(TestCase):
             'mage-block = { workspace = true, features = ["duckdb", "feast", "storage"] }',
             manifest,
         )
+
+    @patch.dict(os.environ, {'MAGE_RUST_FEATURES': 'mysql, storage,not_a_feature'})
+    def test_features_listed_for_every_block_join_the_ones_its_code_uses(self):
+        self.assertEqual(
+            ws.sdk_features(['use mage::duckdb::DuckDb;']), ['duckdb', 'mysql', 'storage'],
+        )
+        self.assertEqual(ws.sdk_features(['use mage::prelude::*;']), ['mysql', 'storage'])
 
     def test_files_are_rewritten_only_when_they_change(self):
         workspace = ws.init(tempfile.mkdtemp())
