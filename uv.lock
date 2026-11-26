@@ -4023,7 +4023,7 @@ dev = [
 
 [[package]]
 name = "mageml-engine"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "packages/mageml-engine" }
 
 [[package]]

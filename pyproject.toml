@@ -257,7 +257,7 @@ integrations = ["mage-integrations==0.2.0"]
 # Dependency profile used by the container image.
 # The Rust engine, mage-service: stream and pipeline services, and the scheduler's jobs in
 # warm workers (on by default when it is installed; MAGE_JOB_ENGINE=off turns it off).
-services = ["mageml-engine>=0.2.1"]
+services = ["mageml-engine>=0.2.2"]
 all = [
   "mage-ml[airtable]",
   "mage-ml[azure]",
