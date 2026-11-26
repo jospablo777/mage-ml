@@ -260,7 +260,11 @@ names the range), **no fix** or **accepted**. It exits 1 when one is held. A hel
 needs a person: raise the range that holds it, or replace the dependency, or accept the
 advisory in `audit_dependencies.sh` with the reason.
 
-`dependency_fixes.yml` runs it every day. When a lock changes, it pushes the
+`dependency_fixes.yml` runs it every day. A lock it changes is part of a published
+package's source (the engine's and ColumnAtlas's Cargo.lock), so it then raises that
+package's patch version and mage-ml's exact pin on it
+(`scripts/release/unchanged_sources.py --bump`, then `uv lock`); without it the Packaging
+job refuses the branch. When a lock changes, it pushes the
 `security/dependency-fixes` branch, opens or updates its pull request with the summary,
 and starts `build_and_test.yml` and `dependency_audit.yml` on it (a push with the
 workflow's token starts no workflow by itself). Merge the pull request when they pass. The

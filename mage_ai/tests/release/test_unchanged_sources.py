@@ -73,6 +73,44 @@ class UnchangedSourcesTest(unittest.TestCase):
         self.assertEqual(unchanged.check(self.root, self.manifest), [])
         self.assertEqual(unchanged.check(self.root, {'artifacts': []}), [])
 
+    def test_a_change_not_committed_yet_counts(self) -> None:
+        # The Dependency fixes workflow checks its lock updates before it commits them.
+        (self.root / 'mage_ai/pipeline_services/service/code.txt').write_text('v2\n')
+
+        [problem] = unchanged.check(self.root, self.manifest)
+
+        self.assertIn('mageml-engine 1.0.0', problem)
+
+    def test_bump_raises_the_changed_packages_and_their_exact_pins(self) -> None:
+        (self.root / 'pyproject.toml').write_text(
+            '[project]\nname = "mage-ml"\nversion = "9.0.0"\n'
+            'dependencies = [\n  "column-atlas-native==1.0.0",\n]\n'
+            '[project.optional-dependencies]\nintegrations = ["mage-integrations==1.0.0"]\n'
+        )
+        git(self.root, 'add', '-A')
+        git(self.root, 'commit', '-q', '-m', 'pins')
+        (self.root / 'rust/column_atlas/code.txt').write_text('v2\n')
+
+        self.assertEqual(unchanged.bump(self.root, self.manifest),
+                         ['column-atlas-native 1.0.0 -> 1.0.1'])
+
+        self.assertIn('version = "1.0.1"',
+                      (self.root / 'rust/column_atlas/pyproject.toml').read_text())
+        root = (self.root / 'pyproject.toml').read_text()
+        self.assertIn('"column-atlas-native==1.0.1"', root)
+        self.assertIn('"mage-integrations==1.0.0"', root)
+        self.assertIn('version = "9.0.0"', root)
+        # The new version is not published: nothing more to raise, and the check passes.
+        self.assertEqual(unchanged.check(self.root, self.manifest), [])
+        self.assertEqual(unchanged.bump(self.root, self.manifest), [])
+
+    def test_the_next_patch_of_a_version(self) -> None:
+        self.assertEqual(unchanged.next_patch('0.2.1'), '0.2.2')
+        self.assertEqual(unchanged.next_patch('0.2.9'), '0.2.10')
+        self.assertEqual(unchanged.next_patch('5.13.0+mage.2'), '5.13.0+mage.3')
+        with self.assertRaises(ValueError):
+            unchanged.next_patch('1.0.0rc')
+
 
 def path_dependencies(crate: Path) -> set[Path]:
     """The crates a crate compiles in by path, recursively, resolved."""

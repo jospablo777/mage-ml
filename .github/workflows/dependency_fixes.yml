@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The release tags: which published packages' sources the fixes change.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -47,6 +50,20 @@ jobs:
           echo "code=$?" >> "$GITHUB_OUTPUT"
           [ -f "$RUNNER_TEMP/fixes.md" ] && cat "$RUNNER_TEMP/fixes.md" >> "$GITHUB_STEP_SUMMARY"
           exit 0
+
+      # A lock the fixer updated is part of a published package's source, so that package
+      # gets a new patch version, as a release requires (Packaging refused it otherwise).
+      - name: Raise the versions of the published packages whose locks changed
+        if: steps.fix.outputs.code != '2'
+        run: |
+          manifest="$RUNNER_TEMP/release-manifest.json"
+          if curl -fsSL "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/release-manifest.json" -o "$manifest"; then
+            python3 scripts/release/unchanged_sources.py "$manifest" --bump | tee "$RUNNER_TEMP/bumped.txt"
+            uv lock
+            if ! grep -q '^No published package changed' "$RUNNER_TEMP/bumped.txt"; then
+              { echo; echo 'Versions raised:'; sed 's/^/- /' "$RUNNER_TEMP/bumped.txt"; } >> "$RUNNER_TEMP/fixes.md"
+            fi
+          fi
 
       - name: Open or update the pull request
         if: steps.fix.outputs.code != '2'
