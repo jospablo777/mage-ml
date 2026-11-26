@@ -133,6 +133,14 @@ A new test folder goes into one group in `.github/workflows/build_and_test.yml`,
 services it needs. The Rust groups share one build cache (the repository's caches are
 limited to 10 GB), saved by the pipelines group.
 
+### Keeping CI fast
+
+| What | Why |
+| --- | --- |
+| Caches are saved from master only; branches restore master's | The repository has 10 GB of caches. Branch copies (the daily dependency fixes saved 1.5 GB of Rust blocks and the R library) pushed master's out, and the next master run built them again: ColumnAtlas from source in every job (11 minutes), the R library (47 minutes) |
+| The R environment reads Posit's snapshot of the day `rv.lock` was written (`rproject.toml`) | `cran/latest` has binaries of each package's newest version only, so the locked duckdb 1.5.6 built from source for 47 minutes whenever its cache was gone. Move the date when the lock changes; a package still built from source builds on every CPU (`MAKEFLAGS=-j4`) |
+| Unit tests run on four workers, a file's tests on one (`-n 4 --dist loadfile`) | 42 minutes in one process. Each worker has its own test database (`test<worker>.db`) and each test class its own project folder |
+
 ## Failures and their causes
 
 Each row is a failure CI has had, what it looked like, and the rule that prevents it.
