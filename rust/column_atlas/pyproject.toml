@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "column-atlas-native"
-version = "0.2.1"
+version = "0.2.2"
 description = "Native code of MageML: ColumnAtlas Parquet queries and profiles, PostgreSQL binary COPY, log windows"
 requires-python = ">=3.12"
 license = "Apache-2.0"

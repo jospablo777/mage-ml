@@ -11,6 +11,16 @@
 //!   never goes to dead letters because a sink is down. A sink that rejects a batch as invalid
 //!   (not retryable) stops the stream with that sink's error.
 //! - A retry goes only to the sinks that have not confirmed the batch.
+//!
+//! With `exactly_once` (Kafka to Kafka, `EXACTLY_ONCE_KAFKA.md`), every write goes into one
+//! open transaction, and a commit is that transaction's: it must hold exactly the writes of
+//! the batches whose positions it commits. So positions are committed only at a barrier
+//! (each tick with writes, a revoke, a full partition, shutdown): new batches' writes are
+//! held, the batches written in the transaction finish, then [`Effect::Commit`] carries
+//! their positions and the held writes go into the next transaction. Within a partition a
+//! batch earlier than one already written still writes, or the barrier would wait on it.
+//! A failed write cannot be retried inside a transaction: the stream stops, the driver
+//! aborts the transaction, and a restart reads from the committed positions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -55,6 +65,8 @@ pub struct RunnerConfig {
     pub has_dead_letter: bool,
     /// Consecutive failures of one write before an alert.
     pub alert_after: u32,
+    /// Commits are transactions over every write since the last one (module docs).
+    pub exactly_once: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +154,10 @@ pub enum StopReason {
         sink: SinkId,
         error: String,
     },
+    /// Exactly-once: a write failed, or a revoke dropped a written batch, so the open
+    /// transaction cannot commit; the driver aborts it and a restart reads from the last
+    /// committed positions.
+    TransactionAborted { error: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,6 +220,14 @@ pub struct RunnerMachine {
     stopping: bool,
     finished: bool,
     stopped: bool,
+    /// Exactly-once: batches with a write in the open transaction.
+    transaction: BTreeSet<BatchId>,
+    /// Exactly-once: writes held until the barrier's commit, in order.
+    held: Vec<(BatchId, Effect)>,
+    /// Exactly-once: the open transaction is to be committed as soon as its batches finish.
+    barrier: bool,
+    /// Exactly-once: the commit sent and not yet confirmed.
+    committing: Vec<Commit>,
 }
 
 impl RunnerMachine {
@@ -220,6 +244,10 @@ impl RunnerMachine {
             stopping: false,
             finished: false,
             stopped: false,
+            transaction: BTreeSet::new(),
+            held: Vec::new(),
+            barrier: false,
+            committing: Vec::new(),
         }
     }
 
@@ -267,6 +295,7 @@ impl RunnerMachine {
                 if self.tracker.epoch(partition) == Some(epoch) {
                     // Finished below once nothing of the partition is in flight.
                     self.draining.insert(partition, epoch);
+                    self.barrier |= self.config.exactly_once;
                 } else {
                     effects.push(Effect::Revoked { partition, epoch });
                 }
@@ -308,7 +337,7 @@ impl RunnerMachine {
                     if self.config.poison == PoisonPolicy::DeadLetter && self.config.has_dead_letter
                     {
                         if self.tracker.require(id, SinkId::REJECTED_ROWS) {
-                            effects.push(Effect::DeadLetterRows(id));
+                            self.write(id, Effect::DeadLetterRows(id), &mut effects);
                         }
                     } else {
                         self.stopped = true;
@@ -323,11 +352,12 @@ impl RunnerMachine {
             Event::TransformDone(id) => {
                 if self.tracker.epoch(id.partition) == Some(id.epoch) {
                     self.transform_attempts.remove(&id);
-                    for sink in &self.config.sinks {
+                    for sink in &self.config.sinks.clone() {
                         if !self.config.tracker.required_sinks.contains(sink) {
                             self.best_effort_pending.insert((id, *sink));
                         }
-                        effects.push(Effect::Write { id, sink: *sink });
+                        let sink = *sink;
+                        self.write(id, Effect::Write { id, sink }, &mut effects);
                     }
                 }
             }
@@ -346,7 +376,7 @@ impl RunnerMachine {
                         if self.config.poison == PoisonPolicy::DeadLetter
                             && self.config.has_dead_letter
                         {
-                            effects.push(Effect::DeadLetter { id, error });
+                            self.write(id, Effect::DeadLetter { id, error }, &mut effects);
                         } else {
                             self.stopped = true;
                             effects.push(Effect::StopReading);
@@ -360,6 +390,19 @@ impl RunnerMachine {
                 self.best_effort_pending.remove(&(id, sink));
                 if self.tracker.on_receipt(id, sink) == ReceiptOutcome::Recorded {
                     self.commits(&mut effects);
+                }
+            }
+            Event::SinkFailed {
+                id,
+                sink,
+                retryable: _,
+                error,
+            } if self.config.exactly_once => {
+                if self.tracker.epoch(id.partition) == Some(id.epoch) {
+                    self.abort(
+                        format!("sink {} failed on {id}: {error}", sink.0),
+                        &mut effects,
+                    );
                 }
             }
             Event::SinkFailed {
@@ -421,6 +464,14 @@ impl RunnerMachine {
                     self.commits(&mut effects);
                 }
             }
+            Event::DeadLetterFailed { id, error } if self.config.exactly_once => {
+                if self.tracker.epoch(id.partition) == Some(id.epoch) {
+                    self.abort(
+                        format!("the dead-letter sink failed on {id}: {error}"),
+                        &mut effects,
+                    );
+                }
+            }
             Event::DeadLetterFailed { id, error } => {
                 if self.tracker.epoch(id.partition) == Some(id.epoch) {
                     let attempts = self.dead_letter_attempts.entry(id).or_insert(0);
@@ -439,13 +490,26 @@ impl RunnerMachine {
             }
             Event::Committed(commit) => {
                 self.tracker.confirm(&commit);
+                if self.config.exactly_once && !self.committing.is_empty() {
+                    self.committing.retain(|c| *c != commit);
+                    if self.committing.is_empty() {
+                        // The transaction is committed: the held writes open the next one.
+                        self.transaction.clear();
+                        self.barrier = false;
+                        self.release_held(&mut effects);
+                    }
+                }
                 // Unconfirmed batches hold partitions paused; confirmed, they can read on.
                 self.resumes(&mut effects);
             }
-            Event::Tick => self.commits(&mut effects),
+            Event::Tick => {
+                self.barrier |= self.config.exactly_once && !self.transaction.is_empty();
+                self.commits(&mut effects);
+            }
             Event::Shutdown => {
                 if !self.stopping {
                     self.stopping = true;
+                    self.barrier |= self.config.exactly_once;
                     effects.push(Effect::StopReading);
                 }
             }
@@ -457,10 +521,23 @@ impl RunnerMachine {
                 return effects;
             }
         }
+        if self.config.exactly_once && !self.stopped {
+            // A full partition waits for a commit, and a stopping stream commits what it
+            // wrote: commit now, not at the next tick.
+            self.barrier |=
+                (!self.paused.is_empty() || self.stopping) && !self.transaction.is_empty();
+            self.commit_transaction(&mut effects);
+        }
         let drained: Vec<(PartitionId, AssignmentEpoch)> = self
             .draining
             .iter()
-            .filter(|(p, _)| !self.tracker.has_unfinished(**p))
+            .filter(|(p, _)| {
+                !self.tracker.has_unfinished(**p)
+                    // Exactly-once: its writes are committed with their positions first.
+                    && (!self.config.exactly_once
+                        || (self.committing.is_empty()
+                            && !self.transaction.iter().any(|b| b.partition == **p)))
+            })
             .map(|(p, e)| (*p, *e))
             .collect();
         for (partition, epoch) in drained {
@@ -476,9 +553,12 @@ impl RunnerMachine {
     }
 
     fn commits(&mut self, effects: &mut Vec<Effect>) {
-        let commits = self.tracker.committable();
-        if !commits.is_empty() {
-            effects.push(Effect::Commit(commits));
+        // Exactly-once commits only at a barrier (commit_transaction).
+        if !self.config.exactly_once {
+            let commits = self.tracker.committable();
+            if !commits.is_empty() {
+                effects.push(Effect::Commit(commits));
+            }
         }
         self.timers_done(effects);
         self.resumes(effects);
@@ -526,14 +606,30 @@ impl RunnerMachine {
         effects: &mut Vec<Effect>,
     ) {
         self.draining.remove(&partition);
-        let commits: Vec<Commit> = self
-            .tracker
-            .committable()
-            .into_iter()
-            .filter(|c| c.partition == partition && c.epoch == epoch)
-            .collect();
-        if !commits.is_empty() {
-            effects.push(Effect::Commit(commits));
+        if self.config.exactly_once {
+            // A batch of the partition written in the open transaction (a revoke past its
+            // deadline) would be committed without its position.
+            if self.transaction.iter().any(|b| b.partition == partition) {
+                self.abort(
+                    format!(
+                        "partition {} was revoked before the batches written for it were \
+                         committed",
+                        partition.0
+                    ),
+                    effects,
+                );
+            }
+            self.held.retain(|(b, _)| b.partition != partition);
+        } else {
+            let commits: Vec<Commit> = self
+                .tracker
+                .committable()
+                .into_iter()
+                .filter(|c| c.partition == partition && c.epoch == epoch)
+                .collect();
+            if !commits.is_empty() {
+                effects.push(Effect::Commit(commits));
+            }
         }
         self.timers_done(effects);
         let dropped = self.tracker.revoke(partition, epoch);
@@ -543,6 +639,76 @@ impl RunnerMachine {
             effects.push(Effect::Cancel(dropped));
         }
         effects.push(Effect::Revoked { partition, epoch });
+    }
+
+    /// A write: straight out, or into the open transaction, or held for the next one while
+    /// a barrier waits (exactly-once).
+    fn write(&mut self, id: BatchId, effect: Effect, effects: &mut Vec<Effect>) {
+        if self.config.exactly_once {
+            // A later batch of the partition is in the transaction: this one must be too.
+            let fills_gap = self
+                .transaction
+                .range(id..)
+                .any(|b| b.partition == id.partition && *b > id);
+            if (self.barrier || !self.committing.is_empty()) && !fills_gap {
+                self.held.push((id, effect));
+                return;
+            }
+            self.transaction.insert(id);
+        }
+        effects.push(effect);
+    }
+
+    fn release_held(&mut self, effects: &mut Vec<Effect>) {
+        for (id, effect) in std::mem::take(&mut self.held) {
+            if self.tracker.epoch(id.partition) == Some(id.epoch) {
+                self.write(id, effect, effects);
+            }
+        }
+    }
+
+    /// Exactly-once: commits the open transaction once every batch written in it is done,
+    /// and no earlier batch of their partitions is not.
+    fn commit_transaction(&mut self, effects: &mut Vec<Effect>) {
+        if !self.barrier || !self.committing.is_empty() {
+            return;
+        }
+        if self.transaction.is_empty() {
+            self.barrier = false;
+            self.release_held(effects);
+            return;
+        }
+        let mut last: BTreeMap<PartitionId, BatchId> = BTreeMap::new();
+        for id in &self.transaction {
+            last.insert(id.partition, *id);
+        }
+        for (partition, written) in &last {
+            if self
+                .tracker
+                .first_unfinished(*partition)
+                .is_some_and(|first| first <= *written)
+            {
+                return;
+            }
+        }
+        let commits = self.tracker.committable();
+        if commits.is_empty() {
+            // Its batches left with their partitions; nothing of them is visible.
+            self.transaction.clear();
+            self.barrier = false;
+            self.release_held(effects);
+            return;
+        }
+        self.committing = commits.clone();
+        effects.push(Effect::Commit(commits));
+    }
+
+    fn abort(&mut self, error: String, effects: &mut Vec<Effect>) {
+        if !self.stopped {
+            self.stopped = true;
+            effects.push(Effect::StopReading);
+            effects.push(Effect::Stop(StopReason::TransactionAborted { error }));
+        }
     }
 
     fn forget(&mut self, ids: &[BatchId]) {
@@ -587,6 +753,7 @@ mod tests {
             poison,
             has_dead_letter,
             alert_after: 3,
+            exactly_once: false,
         }
     }
 
@@ -1202,6 +1369,305 @@ mod tests {
                             revoked.insert(e.0);
                         }
                         queue.push(effect);
+                    }
+                }
+            }
+        }
+    }
+
+    // Exactly-once (EXACTLY_ONCE_KAFKA.md): a commit carries exactly the positions of the
+    // batches written in its transaction.
+    mod exactly_once {
+        use super::*;
+
+        const Q: PartitionId = PartitionId(1);
+
+        fn eos() -> RunnerMachine {
+            let mut config = config(PoisonPolicy::DeadLetter, true);
+            config.exactly_once = true;
+            config.sinks = vec![REQUIRED];
+            let mut m = RunnerMachine::new(config);
+            for partition in [P, Q] {
+                m.step(Event::Assigned {
+                    partition,
+                    epoch: E,
+                });
+            }
+            m
+        }
+
+        fn on(partition: PartitionId, seq: u64) -> BatchMeta {
+            let mut meta = meta(seq);
+            meta.id.partition = partition;
+            meta
+        }
+
+        fn writes(effects: &[Effect]) -> Vec<BatchId> {
+            effects
+                .iter()
+                .filter_map(|e| match e {
+                    Effect::Write { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn commits(effects: &[Effect]) -> Vec<Commit> {
+            effects
+                .iter()
+                .filter_map(|e| match e {
+                    Effect::Commit(c) => Some(c.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        }
+
+        fn done(m: &mut RunnerMachine, id: BatchId) -> Vec<Effect> {
+            let mut effects = m.step(Event::TransformDone(id));
+            effects.extend(m.step(Event::SinkReceipt { id, sink: REQUIRED }));
+            effects
+        }
+
+        #[test]
+        fn positions_commit_at_a_barrier_and_writes_wait_for_the_next_transaction() {
+            let mut m = eos();
+            let first = on(P, 0);
+            m.step(Event::BatchRead(first.clone()));
+            let effects = done(&mut m, first.id);
+            assert_eq!(writes(&effects), vec![first.id]);
+            // Confirmed, but committed only with the transaction.
+            assert!(commits(&effects).is_empty());
+
+            let effects = m.step(Event::Tick);
+            let committed = commits(&effects);
+            assert_eq!(committed.len(), 1);
+            assert_eq!(committed[0].position, Position::Offset(9));
+
+            // While the commit is out, a new batch's writes wait.
+            let second = on(Q, 0);
+            m.step(Event::BatchRead(second.clone()));
+            assert!(writes(&m.step(Event::TransformDone(second.id))).is_empty());
+            let effects = m.step(Event::Committed(committed[0].clone()));
+            assert_eq!(writes(&effects), vec![second.id]);
+        }
+
+        #[test]
+        fn an_earlier_batch_writes_into_the_transaction_of_a_later_one() {
+            let mut m = eos();
+            let (zero, one) = (on(P, 0), on(P, 1));
+            m.step(Event::BatchRead(zero.clone()));
+            m.step(Event::BatchRead(one.clone()));
+            // Batch 1 finishes its transform first (batch 0 retries).
+            m.step(Event::TransformDone(one.id));
+            m.step(Event::SinkReceipt {
+                id: one.id,
+                sink: REQUIRED,
+            });
+            m.step(Event::Tick);
+            // The barrier waits for batch 0, which writes now rather than wait for it.
+            let effects = m.step(Event::TransformDone(zero.id));
+            assert_eq!(writes(&effects), vec![zero.id]);
+            let effects = m.step(Event::SinkReceipt {
+                id: zero.id,
+                sink: REQUIRED,
+            });
+            let committed = commits(&effects);
+            assert_eq!(committed.len(), 1);
+            assert_eq!(committed[0].position, Position::Offset(19));
+        }
+
+        #[test]
+        fn a_failed_write_aborts_the_transaction() {
+            let mut m = eos();
+            let first = on(P, 0);
+            m.step(Event::BatchRead(first.clone()));
+            m.step(Event::TransformDone(first.id));
+            let effects = m.step(Event::SinkFailed {
+                id: first.id,
+                sink: REQUIRED,
+                retryable: true,
+                error: "broker down".into(),
+            });
+            assert!(effects.iter().any(|e| matches!(
+                e,
+                Effect::Stop(StopReason::TransactionAborted { error }) if error.contains("broker down")
+            )));
+            assert!(commits(&effects).is_empty());
+        }
+
+        #[test]
+        fn a_revoke_commits_its_partition_first_or_aborts_past_the_deadline() {
+            let mut m = eos();
+            let first = on(P, 0);
+            m.step(Event::BatchRead(first.clone()));
+            done(&mut m, first.id);
+            let effects = m.step(Event::Revoking {
+                partition: P,
+                epoch: E,
+            });
+            let committed = commits(&effects);
+            assert_eq!(committed.len(), 1);
+            assert!(!effects.iter().any(|e| matches!(e, Effect::Revoked { .. })));
+            let effects = m.step(Event::Committed(committed[0].clone()));
+            assert!(effects.contains(&Effect::Revoked {
+                partition: P,
+                epoch: E
+            }));
+
+            // Written but unfinished when the deadline passes: the transaction cannot commit.
+            let mut m = eos();
+            let late = on(Q, 0);
+            m.step(Event::BatchRead(late.clone()));
+            m.step(Event::TransformDone(late.id));
+            m.step(Event::Revoking {
+                partition: Q,
+                epoch: E,
+            });
+            let effects = m.step(Event::RevokeDeadline {
+                partition: Q,
+                epoch: E,
+            });
+            assert!(
+                effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::Stop(StopReason::TransactionAborted { .. })))
+            );
+        }
+
+        #[test]
+        fn a_full_partition_commits_and_reads_on() {
+            let mut m = eos();
+            let mut all = Vec::new();
+            for seq in 0..8 {
+                let meta = on(P, seq);
+                all.extend(m.step(Event::BatchRead(meta.clone())));
+                all.extend(done(&mut m, meta.id));
+            }
+            // The ninth fills the partition: it pauses, and the barrier commits the eight.
+            let ninth = on(P, 8);
+            all.extend(m.step(Event::BatchRead(ninth.clone())));
+            assert!(all.contains(&Effect::Pause(P)), "{all:?}");
+            let committed = commits(&all);
+            assert_eq!(committed.len(), 1, "{all:?}");
+            assert!(writes(&m.step(Event::TransformDone(ninth.id))).is_empty());
+            let effects = m.step(Event::Committed(committed[0].clone()));
+            assert!(effects.contains(&Effect::Resume(P)), "{effects:?}");
+            assert_eq!(writes(&effects), vec![ninth.id]);
+            // The next transaction commits at a tick.
+            m.step(Event::SinkReceipt {
+                id: ninth.id,
+                sink: REQUIRED,
+            });
+            let effects = m.step(Event::Tick);
+            assert_eq!(commits(&effects).len(), 1, "{effects:?}");
+        }
+
+        #[test]
+        fn a_shutdown_commits_what_was_written() {
+            let mut m = eos();
+            let first = on(P, 0);
+            m.step(Event::BatchRead(first.clone()));
+            done(&mut m, first.id);
+            let effects = m.step(Event::Shutdown);
+            let committed = commits(&effects);
+            assert_eq!(committed.len(), 1);
+            let effects = m.step(Event::Committed(committed[0].clone()));
+            assert!(effects.contains(&Effect::Finished {
+                unfinished: Vec::new()
+            }));
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(400))]
+
+            /// Two partitions, transforms finishing in any order: every commit holds every
+            /// batch written since the last one, and no batch it does not commit.
+            #[test]
+            fn a_transaction_commits_exactly_the_batches_written_in_it(
+                choices in proptest::collection::vec((0u8..6, 0usize..64), 50..300),
+            ) {
+                let mut m = eos();
+                let mut next = [0u64, 0u64];
+                let mut transforming: Vec<BatchId> = Vec::new();
+                let mut written: Vec<BatchId> = Vec::new();
+                let mut unconfirmed: Vec<BatchId> = Vec::new();
+                let mut pending_commit: Vec<Commit> = Vec::new();
+                let mut committed: BTreeMap<PartitionId, i64> = BTreeMap::new();
+                for (action, pick) in choices {
+                    let mut events = Vec::new();
+                    match action {
+                        0 | 1 => {
+                            let partition = if action == 0 { P } else { Q };
+                            let index = partition.0 as usize;
+                            let meta = on(partition, next[index]);
+                            next[index] += 1;
+                            transforming.push(meta.id);
+                            events.push(Event::BatchRead(meta));
+                        }
+                        2 if !transforming.is_empty() => {
+                            let id = transforming.remove(pick % transforming.len());
+                            events.push(Event::TransformDone(id));
+                        }
+                        3 if !unconfirmed.is_empty() => {
+                            let id = unconfirmed.remove(pick % unconfirmed.len());
+                            events.push(Event::SinkReceipt { id, sink: REQUIRED });
+                        }
+                        4 => events.push(Event::Tick),
+                        5 if !pending_commit.is_empty() => {
+                            for commit in std::mem::take(&mut pending_commit) {
+                                events.push(Event::Committed(commit));
+                            }
+                        }
+                        _ => {}
+                    }
+                    for event in events {
+                        for effect in m.step(event) {
+                            match effect {
+                                Effect::Write { id, .. } => {
+                                    written.push(id);
+                                    unconfirmed.push(id);
+                                }
+                                Effect::Commit(commits) => {
+                                    prop_assert!(pending_commit.is_empty());
+                                    // Every batch written since the last commit is in it.
+                                    for id in &written {
+                                        let last = id.seq as i64 * 10 + 9;
+                                        let to = commits
+                                            .iter()
+                                            .find(|c| c.partition == id.partition)
+                                            .map(|c| match c.position {
+                                                Position::Offset(o) => o,
+                                                _ => -1,
+                                            });
+                                        prop_assert!(
+                                            to.is_some_and(|to| to >= last),
+                                            "{id} written but not committed"
+                                        );
+                                    }
+                                    // Nothing committed that was not written.
+                                    for commit in &commits {
+                                        let Position::Offset(to) = commit.position else {
+                                            unreachable!()
+                                        };
+                                        let from = committed.get(&commit.partition).copied();
+                                        let mut covered: Vec<i64> = written
+                                            .iter()
+                                            .filter(|b| b.partition == commit.partition)
+                                            .map(|b| b.seq as i64 * 10 + 9)
+                                            .collect();
+                                        covered.sort();
+                                        prop_assert_eq!(covered.last().copied(), Some(to));
+                                        prop_assert!(from.is_none_or(|f| f < to));
+                                        committed.insert(commit.partition, to);
+                                    }
+                                    written.clear();
+                                    pending_commit = commits;
+                                }
+                                Effect::Stop(reason) => prop_assert!(false, "stopped: {reason:?}"),
+                                _ => {}
+                            }
+                        }
                     }
                 }
             }

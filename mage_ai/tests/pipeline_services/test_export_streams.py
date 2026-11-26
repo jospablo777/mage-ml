@@ -224,6 +224,35 @@ class StreamManifestTest(StreamExportTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class ExactlyOnceExportTest(StreamExportTestCase):
+    """delivery: exactly_once on a Kafka source (I-36)."""
+
+    def test_kafka_to_kafka_exports_exactly_once(self):
+        self.stream(source=SOURCE + '    delivery: exactly_once\n')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        [pipeline] = captured.manifest['pipelines']
+        self.assertEqual(pipeline['stream']['delivery'], 'exactly_once')
+        self.assertNotIn('delivery', pipeline['stream']['source']['config'])
+        self.assertTrue(any('writes exactly once' in note for note in captured.notes))
+
+    def test_at_least_once_leaves_the_manifest_as_it_was(self):
+        self.stream(source=SOURCE + '    delivery: at_least_once\n')
+
+        [pipeline] = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines']
+
+        self.assertNotIn('delivery', pipeline['stream'])
+
+    def test_a_sink_that_is_not_kafka_or_an_unknown_delivery_is_refused(self):
+        self.stream(source=SOURCE + '    delivery: exactly_once\n', sink=PRINT)
+        self.assertIn('is not Kafka', self.problems())
+
+    def test_an_unknown_delivery_is_refused(self):
+        self.stream(source=SOURCE + '    delivery: once\n')
+        self.assertIn("delivery is at_least_once or exactly_once, not 'once'", self.problems())
+
+
 class WebhookExportTest(StreamExportTestCase):
     def test_a_webhook_source_becomes_the_engines_http_source(self):
         self.stream(source='''

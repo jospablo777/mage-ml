@@ -68,20 +68,7 @@ fn source(
     let _config = settings(service, connector);
     match connector.kind {
         #[cfg(feature = "kafka")]
-        ConnectorKind::Kafka => {
-            let stream = pipeline.stream.as_ref().expect("a stream");
-            let batch = &stream.batch;
-            let limits = mage_connector_kafka::BatchLimits {
-                max_records: batch.max_records,
-                max_bytes: batch.max_bytes,
-                max_wait: Duration::from_millis(batch.max_wait_ms),
-            };
-            Ok(Box::new(mage_connector_kafka::KafkaSource::new(
-                &static_membership(_config, &pipeline.uuid),
-                limits,
-                in_flight_bytes(stream),
-            )?))
-        }
+        ConnectorKind::Kafka => Ok(Box::new(kafka_source(pipeline, _config)?)),
         #[cfg(feature = "rabbitmq")]
         ConnectorKind::Rabbitmq => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -259,6 +246,26 @@ pub struct HttpIngest {
 /// With `MAGE_SERVICE_INSTANCE_ID` (a stable name per replica, such as a StatefulSet pod's),
 /// the consumer is a static group member (I-39): a restart within the session timeout keeps
 /// its partitions instead of moving every partition of the group twice.
+#[cfg(feature = "kafka")]
+#[cfg(feature = "kafka")]
+fn kafka_source(
+    pipeline: &Pipeline,
+    config: Value,
+) -> Result<mage_connector_kafka::KafkaSource, ConnectorError> {
+    let stream = pipeline.stream.as_ref().expect("a stream");
+    let batch = &stream.batch;
+    let limits = mage_connector_kafka::BatchLimits {
+        max_records: batch.max_records,
+        max_bytes: batch.max_bytes,
+        max_wait: Duration::from_millis(batch.max_wait_ms),
+    };
+    mage_connector_kafka::KafkaSource::new(
+        &static_membership(config, &pipeline.uuid),
+        limits,
+        in_flight_bytes(stream),
+    )
+}
+
 #[cfg(feature = "kafka")]
 fn static_membership(mut config: Value, pipeline: &str) -> Value {
     let Ok(instance) = std::env::var("MAGE_SERVICE_INSTANCE_ID") else {
@@ -498,6 +505,7 @@ fn runner_config(stream: &mage_service_core::manifest::Stream) -> RunnerConfig {
         },
         has_dead_letter: errors.dead_letter.is_some(),
         alert_after: 5,
+        exactly_once: stream.delivery == mage_service_core::manifest::Delivery::ExactlyOnce,
     }
 }
 
@@ -525,6 +533,9 @@ fn own_scope(scope: &str, connector: &Connector) -> String {
 
 fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<StreamParts, String> {
     let stream = pipeline.stream.as_ref().expect("a stream");
+    if stream.delivery == mage_service_core::manifest::Delivery::ExactlyOnce {
+        return exactly_once_parts(service, pipeline, log);
+    }
     let source = source(service, pipeline, &stream.source).map_err(|e| e.message)?;
     let scope = sink_scope(&pipeline.uuid, source.capabilities().durable_positions);
     let mut sinks = Vec::new();
@@ -554,7 +565,109 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         pause: None,
         tap,
         time: stream.time.clone().map(crate::stream_time::Lateness::new),
+        transaction: None,
     })
+}
+
+/// Exactly-once delivery (I-36): the source and every sink, dead letters included, are Kafka
+/// on one cluster, and the sinks write through one transaction that commits the source's
+/// offsets. Keyed state is refused: it is saved apart from the transaction, so a crash
+/// between the two would apply replayed messages to it twice.
+#[cfg(feature = "kafka")]
+fn exactly_once_parts(
+    service: &Arc<Service>,
+    pipeline: &Pipeline,
+    log: RunLog,
+) -> Result<StreamParts, String> {
+    let stream = pipeline.stream.as_ref().expect("a stream");
+    let connectors: Vec<&Connector> = std::iter::once(&stream.source)
+        .chain(&stream.sinks)
+        .chain(stream.errors.dead_letter.as_ref())
+        .collect();
+    let others: Vec<&str> = connectors
+        .iter()
+        .filter(|c| c.kind != ConnectorKind::Kafka)
+        .map(|c| c.name.as_str())
+        .collect();
+    if !others.is_empty() {
+        return Err(format!(
+            "delivery: exactly_once needs Kafka for the source and every sink, dead letters \
+             included; {} {} not Kafka.",
+            others.join(", "),
+            if others.len() == 1 { "is" } else { "are" },
+        ));
+    }
+    let cluster =
+        mage_connector_kafka::cluster(&settings(service, &stream.source)).map_err(|e| e.message)?;
+    for connector in &connectors[1..] {
+        let other =
+            mage_connector_kafka::cluster(&settings(service, connector)).map_err(|e| e.message)?;
+        if other != cluster {
+            return Err(format!(
+                "delivery: exactly_once commits the source's offsets with the sinks' writes, \
+                 so they must be on the source's cluster ({cluster}); {} writes to {other}.",
+                connector.name
+            ));
+        }
+    }
+    let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
+    let transform = transform_session(service, pipeline, log, tap)?;
+    if transform.as_ref().is_some_and(|t| t.keeps_state()) {
+        return Err(
+            "delivery: exactly_once does not keep block state yet: state is saved apart from \
+             the transaction, so a crash between the two would count replayed messages twice."
+                .to_string(),
+        );
+    }
+    let source =
+        kafka_source(pipeline, settings(service, &stream.source)).map_err(|e| e.message)?;
+    // Stable per instance: a restart fences the producer it replaces.
+    let instance = std::env::var("MAGE_SERVICE_INSTANCE_ID")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "single".to_string());
+    let transaction = source
+        .transaction(
+            &settings(service, connectors[1]),
+            &format!("mageml-{}-{}", pipeline.uuid, instance.trim()),
+        )
+        .map_err(|e| e.message)?;
+    let mut sinks = Vec::new();
+    for connector in &stream.sinks {
+        let sink = transaction
+            .sink(&settings(service, connector))
+            .map_err(|e| e.message)?;
+        sinks.push((Arc::new(sink) as Arc<dyn Sink>, connector.after.clone()));
+    }
+    let dead_letter = match &stream.errors.dead_letter {
+        Some(connector) => Some(Arc::new(
+            transaction
+                .sink(&settings(service, connector))
+                .map_err(|e| e.message)?,
+        ) as Arc<dyn Sink>),
+        None => None,
+    };
+    Ok(StreamParts {
+        name: pipeline.uuid.clone(),
+        source: Box::new(source),
+        sinks,
+        dead_letter,
+        transform,
+        config: runner_config(stream),
+        shutdown_deadline: Duration::from_secs(20),
+        pause: None,
+        tap,
+        time: stream.time.clone().map(crate::stream_time::Lateness::new),
+        transaction: Some(Arc::new(transaction)),
+    })
+}
+
+#[cfg(not(feature = "kafka"))]
+fn exactly_once_parts(
+    _service: &Arc<Service>,
+    _pipeline: &Pipeline,
+    _log: RunLog,
+) -> Result<StreamParts, String> {
+    Err("delivery: exactly_once needs the engine built with Kafka (the kafka feature).".into())
 }
 
 /// The session that runs a stream's blocks: one Python or Rust session when they are all in

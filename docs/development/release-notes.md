@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Stream services
+
+- Kafka to Kafka streams can be exactly once: `delivery: exactly_once` on the source commits
+  the sinks' messages and the source's offsets in one Kafka transaction, so
+  `read_committed` consumers see each output once through crashes, restarts and
+  rebalances. With the engine killed three times mid-stream, 20,000 messages came out once
+  each, where at least once wrote 2,520 twice. The source and every sink must be Kafka on
+  one cluster; blocks that keep state are refused for now.
+
 ### Workers page: R and Rust
 
 - R and Rust environments are on the Workers page: tools and versions, what stops the

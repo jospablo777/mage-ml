@@ -225,6 +225,26 @@ pub struct Stream {
     /// Event time and late messages; without it, messages are taken as they come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time: Option<EventTime>,
+    #[serde(default, skip_serializing_if = "Delivery::is_at_least_once")]
+    pub delivery: Delivery,
+}
+
+/// What a crash can do to the outputs of a stream.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Delivery {
+    /// A restart writes again what was written after the last acknowledged position.
+    #[default]
+    AtLeastOnce,
+    /// Kafka to Kafka: outputs and positions commit in one transaction, so
+    /// `read_committed` consumers see each message's outputs once.
+    ExactlyOnce,
+}
+
+impl Delivery {
+    pub fn is_at_least_once(&self) -> bool {
+        *self == Delivery::AtLeastOnce
+    }
 }
 
 /// Where a message's event time is, how late it may arrive, and what happens to it after.
@@ -1005,6 +1025,22 @@ impl Pipeline {
                  dead_letter), and the stream has none: add one, or set on_late: pass."
             ));
         }
+        if stream.delivery == Delivery::ExactlyOnce {
+            let others: Vec<&str> = std::iter::once(&stream.source)
+                .chain(&stream.sinks)
+                .chain(stream.errors.dead_letter.iter())
+                .filter(|c| c.kind != ConnectorKind::Kafka)
+                .map(|c| c.name.as_str())
+                .collect();
+            if !others.is_empty() {
+                problems.push(format!(
+                    "Pipeline {name}: delivery: exactly_once needs Kafka for the source and \
+                     every sink, dead letters included; {} {} not Kafka.",
+                    others.join(", "),
+                    if others.len() == 1 { "is" } else { "are" }
+                ));
+            }
+        }
         let batch = &stream.batch;
         if batch.max_records == 0 || batch.max_bytes < 1024 {
             problems.push(format!(
@@ -1459,6 +1495,31 @@ mod tests {
             crate::io_config::variables(password),
             vec!["KAFKA_PASSWORD"]
         );
+    }
+
+    #[test]
+    fn exactly_once_needs_kafka_everywhere_and_is_left_out_when_at_least_once() {
+        let mut stream = kafka_to_http();
+        stream["delivery"] = json!("exactly_once");
+        let problems = stream_manifest(json!([block("score", &[])]), stream.clone())
+            .validate(None)
+            .join("\n");
+        assert!(problems.contains("scores is not Kafka"), "{problems}");
+
+        stream["sinks"][0]["kind"] = json!("kafka");
+        stream["sinks"][0]["config"] = json!({"bootstrap_server": "kafka:9092", "topic": "s"});
+        let manifest = stream_manifest(json!([block("score", &[])]), stream);
+        assert!(
+            manifest.validate(None).is_empty(),
+            "{:?}",
+            manifest.validate(None)
+        );
+        let written = serde_json::to_value(manifest.pipelines[0].stream.as_ref().unwrap()).unwrap();
+        assert_eq!(written["delivery"], "exactly_once");
+
+        let default = stream_manifest(json!([block("score", &[])]), kafka_to_http());
+        let written = serde_json::to_value(default.pipelines[0].stream.as_ref().unwrap()).unwrap();
+        assert!(written.get("delivery").is_none());
     }
 
     #[test]

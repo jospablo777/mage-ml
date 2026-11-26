@@ -926,6 +926,8 @@ KAFKA_SETTINGS = {
 KAFKA_SOURCE_SETTINGS = KAFKA_SETTINGS | {
     'topic', 'topics', 'consumer_group', 'auto_offset_reset', 'batch_size', 'timeout_ms',
     'include_metadata', 'serde_config', 'offset', 'max_partition_fetch_bytes',
+    # at_least_once (the default) or exactly_once: Kafka to Kafka in transactions.
+    'delivery',
 }
 KAFKA_SINK_SETTINGS = KAFKA_SETTINGS | {'topic', 'batch_size', 'timeout_ms'}
 SASL_SETTINGS = {'mechanism', 'username', 'password'}
@@ -1608,6 +1610,46 @@ def _event_hubs_connector(block, config: Dict, where: str, problems: List[str]) 
                 timeout_ms=config.get('timeout_ms'))
 
 
+def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optional[Dict],
+              blocks: List[Dict], capture_: Capture, problems: List[str]) -> Optional[str]:
+    """
+    The stream's delivery from its Kafka source's `delivery` setting: exactly_once commits
+    the source's offsets with the sinks' writes in one Kafka transaction (I-36), so the
+    source and every sink, dead letters included, must be Kafka.
+    """
+    delivery = (source.get('config') or {}).pop('delivery', None)
+    if delivery in (None, '', 'at_least_once'):
+        return None
+    if delivery != 'exactly_once':
+        problems.append(
+            f'{prefix}: delivery is at_least_once or exactly_once, not {delivery!r}.'
+        )
+        return None
+    others = [c['name'] for c in [source, *sinks, *([dead_letter] if dead_letter else [])]
+              if c.get('kind') != 'kafka']
+    if others:
+        problems.append(
+            f'{prefix}: delivery: exactly_once needs Kafka for the source and every sink, '
+            f'dead letters included; {", ".join(others)} '
+            f'{"is" if len(others) == 1 else "are"} not Kafka.'
+        )
+        return None
+    windows = [b.get('uuid') for b in blocks if b.get('window')]
+    if windows:
+        problems.append(
+            f'{prefix}: delivery: exactly_once does not keep block state yet, and '
+            f'{", ".join(windows)} keep{"s" if len(windows) == 1 else ""} windows.'
+        )
+        return None
+    capture_.notes.append(
+        f'{prefix} writes exactly once: the sinks\' messages and the source\'s offsets commit '
+        'in one Kafka transaction, about once a second, so consumers that read with '
+        'isolation.level=read_committed see each output once, through crashes and '
+        'rebalances. The sinks must be on the source\'s cluster.'
+    )
+    return 'exactly_once'
+
+
 def _marked_dead_letter(block, pipeline) -> bool:
     """Whether a YAML sink sets `dead_letter: true`."""
     try:
@@ -1878,6 +1920,10 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     if not sink_entries and not problems:
         problems.append(f'{prefix} has only a dead-letter sink; it needs a sink for its messages.')
     stream = dict(source=source, sinks=sink_entries, batch=batch, errors=errors)
+    delivery = _delivery(prefix, source, sink_entries, errors.get('dead_letter'), blocks,
+                         capture_, problems)
+    if delivery:
+        stream['delivery'] = delivery
     time = _event_time(source_block, pipeline, prefix, bool(dead_letters), problems)
     if time is not None:
         stream['time'] = time

@@ -23,7 +23,8 @@ OpenSearch), Protobuf messages, and passwords written in the file.
 
 Every stream is at least once: a batch is acknowledged only after its sinks wrote it, so a
 crash or restart can repeat the batches that were in flight, and never loses one. "Repeats
-absorbed" names how a sink writes a repeated batch only once, where it can.
+absorbed" names how a sink writes a repeated batch only once, where it can. A Kafka to
+Kafka stream can be [exactly once](#exactly-once-kafka-to-kafka) instead.
 
 | `connector_type` | Source: acknowledged | Source: instances | Sink: confirmed | Repeats absorbed | Unlike MageML |
 | --- | --- | --- | --- | --- | --- |
@@ -219,6 +220,38 @@ sasl_config:
     schema_registry_password: "{{ env_var('REGISTRY_PASSWORD') }}"
   ```
 - IBM Event Streams credentials: see [IBM Cloud](../integrations/ibm-cloud.md).
+
+#### Exactly once, Kafka to Kafka
+
+```yaml
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: orders
+consumer_group: orders-clean
+delivery: exactly_once
+```
+
+With `delivery: exactly_once` on the source, the sinks' messages and the source's offsets
+commit in one Kafka transaction, about once a second (sooner when a partition holds as many
+batches as it may), so a consumer that reads with `isolation.level=read_committed` sees each
+output once, through crashes, restarts and rebalances. The default, `at_least_once`, can
+write again the batches in flight at a crash. Tested with 20,000 messages and the engine
+killed (SIGKILL) three times mid-stream: each output once with `exactly_once`, 2,520
+written twice with `at_least_once`
+(`integration_tests/kafka/test_exactly_once.py`).
+
+- The source and every sink, the dead-letter sink included, must be Kafka on the source's
+  cluster: the export and the service refuse anything else, saying which connector is not.
+- A sink write that fails aborts the transaction and stops the stream; at its restart it
+  reads from the last committed offsets, and what the aborted transaction wrote stays
+  invisible to `read_committed` consumers.
+- Each instance writes with its own `transactional.id`, `mageml-<pipeline>-<instance>`
+  (`MAGE_SERVICE_INSTANCE_ID`, else the host name), so a restarted instance fences the one
+  it replaces. Kafka's group generation fences an instance that lost its partitions.
+- Blocks that keep state (windows) are refused for now: their state is saved apart from the
+  transaction.
+- Consumers that read with `read_uncommitted` (kafka-python's default, not librdkafka's)
+  also see the messages of aborted transactions.
 
 ### Webhooks
 

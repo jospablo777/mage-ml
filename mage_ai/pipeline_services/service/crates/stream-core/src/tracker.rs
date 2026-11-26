@@ -364,6 +364,13 @@ impl AckTracker {
             .collect()
     }
 
+    /// The partition's first batch that is not done yet.
+    pub fn first_unfinished(&self, partition: PartitionId) -> Option<BatchId> {
+        self.partitions
+            .get(&partition)
+            .and_then(|s| s.in_flight.iter().find(|b| !b.done()).map(|b| b.meta.id))
+    }
+
     /// Whether the partition has batches that are not done yet.
     pub fn has_unfinished(&self, partition: PartitionId) -> bool {
         self.partitions

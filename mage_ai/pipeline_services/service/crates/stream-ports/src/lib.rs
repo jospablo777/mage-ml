@@ -172,6 +172,18 @@ pub trait Sink: Send + Sync {
     }
 }
 
+/// Exactly-once delivery: the stream's writes go into one open transaction, and a commit
+/// is that transaction's, with the source's positions in it (Kafka to Kafka: a
+/// transactional producer and `send_offsets_to_transaction`). The sinks of such a stream
+/// write through it.
+pub trait Transaction: Send + Sync {
+    /// Commits every write since the last commit together with these positions, then opens
+    /// the next transaction. An error means nothing of it is visible.
+    fn commit<'a>(&'a self, commits: &'a [Commit]) -> BoxFuture<'a, Result<(), ConnectorError>>;
+    /// Discards every write since the last commit.
+    fn abort(&self) -> BoxFuture<'_, ()>;
+}
+
 /// A row user code rejected, by its index in the input batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowError {

@@ -200,6 +200,8 @@ pub struct StreamParts {
     pub tap: bool,
     /// Event time and late messages (manifest `time`).
     pub time: Option<crate::stream_time::Lateness>,
+    /// Exactly-once delivery (manifest `delivery`): commits go through it, not the source.
+    pub transaction: Option<Arc<dyn mage_stream_ports::Transaction>>,
 }
 
 /// Work for the transform lane, in order.
@@ -928,7 +930,29 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             );
                             continue;
                         }
-                        match parts.source.commit(&commits).await {
+                        // Exactly-once: the positions commit with the open transaction.
+                        let outcome = match &parts.transaction {
+                            Some(transaction) => match transaction.commit(&commits).await {
+                                Ok(()) => CommitOutcome::Committed,
+                                Err(error) => {
+                                    // Nothing of it is visible: stop, and a restart reads
+                                    // from the last committed positions.
+                                    effects.extend(machine.step(Event::SinkFailed {
+                                        id: mage_stream_core::BatchId {
+                                            partition: commits[0].partition,
+                                            epoch: commits[0].epoch,
+                                            seq: 0,
+                                        },
+                                        sink: mage_stream_core::SinkId(0),
+                                        retryable: false,
+                                        error: format!("the commit failed: {error}"),
+                                    }));
+                                    continue;
+                                }
+                            },
+                            None => parts.source.commit(&commits).await,
+                        };
+                        match outcome {
                             CommitOutcome::Committed => {
                                 for commit in commits {
                                     let id_partition = commit.partition.0;
@@ -1016,7 +1040,14 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             StopReason::SinkRejected { id, sink, error } => {
                                 format!("stopped: sink {} rejected {id}: {error}", sink.0)
                             }
+                            StopReason::TransactionAborted { error } => format!(
+                                "stopped: the transaction was aborted, so nothing since the \
+                                 last commit is visible; a restart reads it again: {error}"
+                            ),
                         };
+                        if let Some(transaction) = &parts.transaction {
+                            transaction.abort().await;
+                        }
                         crate::log::error(&format!("Stream {}: {message}", parts.name));
                         keep_error(&status, &message);
                         set_state(&status, StreamState::Failed);
@@ -1024,6 +1055,10 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     }
                     Effect::Finished { unfinished } => {
                         reading = false;
+                        // Exactly-once: what is not committed stays invisible.
+                        if let Some(transaction) = &parts.transaction {
+                            transaction.abort().await;
+                        }
                         if !unfinished.is_empty() {
                             crate::log::warn(&format!(
                                 "Stream {}: {} batch(es) were in flight at the shutdown \
@@ -1170,6 +1205,7 @@ mod tests {
             poison,
             has_dead_letter,
             alert_after: 3,
+            exactly_once: false,
         }
     }
 
@@ -1209,6 +1245,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1268,6 +1305,7 @@ mod tests {
                     on_late: mage_service_core::manifest::LatePolicy::DeadLetter,
                 },
             )),
+            transaction: None,
         })
         .await;
 
@@ -1319,6 +1357,7 @@ mod tests {
                 pause: Some(receiver),
                 tap: false,
                 time: None,
+                transaction: None,
             },
             status.clone(),
             CancellationToken::new(),
@@ -1470,6 +1509,7 @@ mod tests {
                 pause: None,
                 tap: false,
                 time: None,
+                transaction: None,
             },
             status.clone(),
             CancellationToken::new(),
@@ -1504,6 +1544,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1534,6 +1575,7 @@ mod tests {
             pause: None,
             tap: true,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1559,6 +1601,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1623,6 +1666,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1802,6 +1846,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1839,6 +1884,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1874,6 +1920,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1899,6 +1946,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1924,6 +1972,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1956,6 +2005,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -1982,6 +2032,7 @@ mod tests {
             pause: None,
             tap: false,
             time: None,
+            transaction: None,
         })
         .await;
 
@@ -2015,6 +2066,7 @@ mod tests {
                 pause: None,
                 tap: false,
                 time: None,
+                transaction: None,
             },
             status.clone(),
             shutdown.clone(),
@@ -2045,6 +2097,7 @@ mod tests {
                 pause: None,
                 tap: false,
                 time: None,
+                transaction: None,
             },
             SharedStatus::default(),
             shutdown,

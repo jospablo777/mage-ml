@@ -26,7 +26,7 @@ use mage_stream_core::BatchId;
 use mage_stream_ports::{
     AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, Confirmation,
     ConnectorError, Envelope, EnvelopeBuilder, Header, PartitionId, Position, RecordBatch, Sink,
-    SinkCapabilities, Source, SourceCapabilities, SourceEvent, read_envelope,
+    SinkCapabilities, Source, SourceCapabilities, SourceEvent, Transaction, read_envelope,
 };
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
@@ -1700,6 +1700,156 @@ impl Source for KafkaSource {
                     let _ = commit_within(&consumer, &list, COMMIT_WITHIN);
                 }
                 consumer.unsubscribe()
+            })
+            .await;
+        })
+    }
+}
+
+impl KafkaSource {
+    /// Exactly-once delivery (I-36): a transactional producer for the stream's Kafka sinks
+    /// (built with [`KafkaTransaction::sink`]) that commits this source's offsets in each
+    /// transaction, so a `read_committed` consumer sees each message's outputs once. Its
+    /// settings (`config`, a sink's: brokers and credentials) must reach the source's
+    /// cluster: the offsets are committed there.
+    pub fn transaction(
+        &self,
+        config: &Value,
+        transactional_id: &str,
+    ) -> Result<KafkaTransaction, ConnectorError> {
+        let mut client = client_config(config)?;
+        client
+            .set("enable.idempotence", "true")
+            .set("acks", "all")
+            .set("transactional.id", transactional_id)
+            .set_log_level(rdkafka::config::RDKafkaLogLevel::Debug);
+        for (key, value) in SINK_DEFAULTS {
+            if client.get(key).is_none() {
+                client.set(*key, *value);
+            }
+        }
+        let producer: Arc<FutureProducer<SinkContext>> = Arc::new(
+            client
+                .create_with_context(SinkContext)
+                .map_err(connector_error)?,
+        );
+        // Fences an earlier producer with this id and aborts its open transaction.
+        producer
+            .init_transactions(TRANSACTION_TIMEOUT)
+            .map_err(connector_error)?;
+        producer.begin_transaction().map_err(connector_error)?;
+        Ok(KafkaTransaction {
+            producer,
+            consumer: self.consumer.clone(),
+            table: self.table.clone(),
+        })
+    }
+}
+
+const TRANSACTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The brokers settings reach, sorted: two connectors on one cluster have the same.
+pub fn cluster(config: &Value) -> Result<String, ConnectorError> {
+    let client = client_config(config)?;
+    let mut servers: Vec<String> = client
+        .get("bootstrap.servers")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    servers.sort();
+    Ok(servers.join(","))
+}
+
+/// One stream's open Kafka transaction ([`KafkaSource::transaction`]).
+pub struct KafkaTransaction {
+    producer: Arc<FutureProducer<SinkContext>>,
+    consumer: Arc<KafkaConsumer>,
+    table: Arc<Mutex<Table>>,
+}
+
+impl KafkaTransaction {
+    /// A sink that writes to `config`'s topic inside the transaction.
+    pub fn sink(&self, config: &Value) -> Result<KafkaSink, ConnectorError> {
+        let topic = text(config, "topic")
+            .ok_or_else(|| ConnectorError::fatal("Kafka sink settings need topic."))?;
+        Ok(KafkaSink {
+            producer: self.producer.clone(),
+            topic,
+            timeout: Duration::from_secs(30),
+            stop: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// The offsets to commit: the next offset to read after each position.
+    fn offsets(&self, commits: &[Commit]) -> Result<TopicPartitionList, ConnectorError> {
+        let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+        let mut list = TopicPartitionList::new();
+        for commit in commits {
+            let Position::Offset(last) = commit.position else {
+                return Err(ConnectorError::fatal("Kafka commits offsets"));
+            };
+            if table.epochs.get(&commit.partition.0) != Some(&commit.epoch) {
+                return Err(ConnectorError::fatal(format!(
+                    "partition {} was reassigned before its transaction committed",
+                    commit.partition.0
+                )));
+            }
+            let (topic, partition) = table
+                .names
+                .get(commit.partition.0 as usize)
+                .ok_or_else(|| ConnectorError::fatal("Kafka: a partition without a name"))?;
+            list.add_partition_offset(topic, *partition, Offset::Offset(last + 1))
+                .map_err(connector_error)?;
+        }
+        Ok(list)
+    }
+}
+
+impl Transaction for KafkaTransaction {
+    fn commit<'a>(&'a self, commits: &'a [Commit]) -> BoxFuture<'a, Result<(), ConnectorError>> {
+        Box::pin(async move {
+            let list = self.offsets(commits)?;
+            let committed = list.clone();
+            let (producer, consumer) = (self.producer.clone(), self.consumer.clone());
+            let result = tokio::task::spawn_blocking(move || {
+                // The group's generation fences an instance that lost these partitions.
+                let group = consumer.group_metadata().ok_or_else(|| {
+                    ConnectorError::fatal("Kafka: the source's consumer has no group metadata")
+                })?;
+                producer
+                    .send_offsets_to_transaction(&list, &group, TRANSACTION_TIMEOUT)
+                    .map_err(connector_error)?;
+                producer
+                    .commit_transaction(TRANSACTION_TIMEOUT)
+                    .map_err(connector_error)?;
+                producer.begin_transaction().map_err(connector_error)
+            })
+            .await
+            .map_err(|e| ConnectorError::fatal(format!("Kafka: {e}")))?;
+            if result.is_ok() {
+                // The broker has the offsets: the source reads on past them, as after its
+                // own confirmed commits. Not `committed`, which the source would commit
+                // again outside the transaction.
+                let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+                for entry in committed.elements() {
+                    if let Offset::Offset(next) = entry.offset() {
+                        table.confirm(entry.topic(), entry.partition(), next);
+                    }
+                }
+            }
+            result
+        })
+    }
+
+    fn abort(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            let producer = self.producer.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                if producer.abort_transaction(TRANSACTION_TIMEOUT).is_ok() {
+                    let _ = producer.begin_transaction();
+                }
             })
             .await;
         })
