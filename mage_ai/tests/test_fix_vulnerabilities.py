@@ -158,3 +158,41 @@ class YarnLockTest(unittest.TestCase):
             self.assertTrue(fv.is_direct('axios'))
         self.assertEqual(package['resolutions'], {'**/follow-redirects': '^1.15.6'})
         self.assertEqual(package['dependencies'], {'axios': '^0.21.4'})
+
+
+class GeneratedMembersTest(unittest.TestCase):
+    """A MageML project's Rust workspace has generated members git ignores (I-523)."""
+
+    def workspace(self, members: str, lock: str) -> Path:
+        root = Path(tempfile.mkdtemp())
+        (root / 'Cargo.toml').write_text(
+            f'[workspace]\nresolver = "3"\nmembers = [{members}]\n\n'
+            '[workspace.dependencies]\nmage-block = { path = ".mage/sdk" }\nanyhow = "1"\n'
+        )
+        (root / 'Cargo.lock').write_text(lock)
+        return root
+
+    def test_the_sdk_and_each_locked_block_exist_for_cargo_and_go_after(self):
+        root = self.workspace('".mage/blocks/*"', (
+            'version = 4\n\n[[package]]\nname = "block_load_ab12"\nversion = "0.0.0"\n\n'
+            '[[package]]\nname = "mage-block"\nversion = "0.1.0"\n\n'
+            '[[package]]\nname = "anyhow"\nversion = "1.0.0"\n'
+            'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+        ))
+        with fv.generated_members(root):
+            self.assertTrue((root / '.mage/sdk/Cargo.toml').exists())
+            manifest = (root / '.mage/blocks/block_load_ab12/Cargo.toml').read_text()
+            self.assertIn('anyhow = { workspace = true }', manifest)
+            self.assertEqual(sorted(p.name for p in (root / '.mage/blocks').iterdir()),
+                             ['block_load_ab12'])
+        self.assertFalse((root / '.mage').exists())
+
+    def test_other_workspaces_and_existing_crates_are_left_alone(self):
+        plain = self.workspace('"crates/*"', 'version = 4\n')
+        with fv.generated_members(plain):
+            self.assertFalse((plain / '.mage').exists())
+        built = self.workspace('".mage/blocks/*"', 'version = 4\n')
+        (built / '.mage/blocks/mine').mkdir(parents=True)
+        with fv.generated_members(built):
+            pass
+        self.assertTrue((built / '.mage/blocks/mine').exists())

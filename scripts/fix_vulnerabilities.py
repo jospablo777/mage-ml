@@ -28,6 +28,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -255,38 +257,75 @@ def cargo_locked_version(lock: Path, name: str, old: str) -> str:
     return ', '.join(sorted(newer, key=version_key)) or 'removed'
 
 
+@contextmanager
+def generated_members(root: Path):
+    """
+    A MageML project's Rust workspace (<project>/rust) lists generated crates as members:
+    MageML's SDK in .mage/sdk and one crate per block in .mage/blocks, which git ignores, so
+    cargo cannot load the workspace of a fresh checkout. They are written for cargo here, as
+    MageML writes them (each block depends on every workspace crate), and removed after.
+    """
+    try:
+        members = tomllib.loads((root / 'Cargo.toml').read_text()).get(
+            'workspace', {}).get('members') or []
+    except (OSError, tomllib.TOMLDecodeError):
+        members = []
+    generated = root / '.mage'
+    if '.mage/blocks/*' not in members or generated.exists():
+        yield
+        return
+    from mage_ai.data_preparation.models.block.rust import workspace as ws
+
+    try:
+        workspace = ws.Workspace(root)
+        ws.sync_sdk(workspace)
+        lock = tomllib.loads((root / 'Cargo.lock').read_text())
+        for package in lock.get('package') or []:
+            # The workspace's own crates have no source; mage-block is the SDK.
+            if 'source' not in package and package['name'] != 'mage-block':
+                ws.write_block_crate(workspace, package['name'], {'main.rs': 'fn main() {}\n'})
+        yield
+    finally:
+        shutil.rmtree(generated, ignore_errors=True)
+
+
 def fix_rust(dry_run: bool, accepted: Set[str]) -> List[Finding]:
     results = []
     for lock in cargo_locks():
-        manifest = lock.parent / 'Cargo.toml'
         findings = rust_findings(lock, accepted)
         todo = classify(findings.values(), dry_run)
         if todo and not dry_run:
-            for finding in todo:
-                spec = f'{finding.package}@{finding.version}'
-                update = ['cargo', 'update', '--manifest-path', str(manifest), '-p', spec]
-                updated = run(update)
-                still = rust_findings(lock, accepted).get((finding.package, finding.version))
-                if updated.returncode == 0 and still is not None and still.advisories:
-                    # The newest compatible release was not enough: ask for the fixed one.
-                    updated = run(update + ['--precise', finding.to])
-                if updated.returncode != 0:
-                    finding.note = short(updated.stderr)
-            after = rust_findings(lock, accepted)
-            for finding in todo:
-                remaining = set()
-                for (name, _), found in after.items():
-                    if name == finding.package:
-                        remaining |= found.advisories & finding.advisories
-                settle(finding, remaining,
-                       cargo_locked_version(lock, finding.package, finding.version))
-                if finding.status == 'held' and not finding.note:
-                    finding.note = (
-                        f'A version range excludes the fixed release (cargo tree -i '
-                        f'{finding.package}@{finding.version}).'
-                    )
+            with generated_members(lock.parent):
+                update_rust(lock, todo, accepted)
         results += findings.values()
     return results
+
+
+def update_rust(lock: Path, todo: List[Finding], accepted: Set[str]) -> None:
+    manifest = lock.parent / 'Cargo.toml'
+    for finding in todo:
+        spec = f'{finding.package}@{finding.version}'
+        update = ['cargo', 'update', '--manifest-path', str(manifest), '-p', spec]
+        updated = run(update)
+        still = rust_findings(lock, accepted).get((finding.package, finding.version))
+        if updated.returncode == 0 and still is not None and still.advisories:
+            # The newest compatible release was not enough: ask for the fixed one.
+            updated = run(update + ['--precise', finding.to])
+        if updated.returncode != 0:
+            finding.note = short(updated.stderr)
+    after = rust_findings(lock, accepted)
+    for finding in todo:
+        remaining = set()
+        for (name, _), found in after.items():
+            if name == finding.package:
+                remaining |= found.advisories & finding.advisories
+        settle(finding, remaining,
+               cargo_locked_version(lock, finding.package, finding.version))
+        if finding.status == 'held' and not finding.note:
+            finding.note = (
+                f'A version range excludes the fixed release (cargo tree -i '
+                f'{finding.package}@{finding.version}).'
+            )
 
 
 # Frontend: yarn audit; a transitive package is resolved again from its ranges, then
