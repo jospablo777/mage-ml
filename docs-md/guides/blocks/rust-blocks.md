@@ -211,6 +211,12 @@ A block that uses a module of the `mage` crate that needs a feature (`mage::mysq
 block made from a template builds as it is. The first build of a block with a new
 feature compiles its client, which takes a few minutes for DuckDB.
 
+Blocks with different features build Polars and the clients again for each set. To build
+them once for every block, list the features in `MAGE_RUST_FEATURES`, such as
+`MAGE_RUST_FEATURES=postgres,storage,duckdb`: they are on for every block, as if listed in
+the project's `Cargo.toml`. A CI job that caches the build directory gets one build that
+serves every project.
+
 ## PostgreSQL
 
 The `mage::postgres` module reads and writes PostgreSQL with binary `COPY`, so a pipeline
