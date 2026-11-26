@@ -3,6 +3,10 @@
 use mage_ledger as ledger;
 use mage_log as log;
 
+#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+#[global_allocator]
+static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 mod alerts;
 mod api;
 mod audit;

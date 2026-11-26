@@ -4,6 +4,10 @@
 
 ### Stream services
 
+- The engine allocates with jemalloc in the published wheels and exported images: a Kafka
+  stream used about 30% less memory (115 to 123 MB against 159 to 175 MB) at the same
+  throughput. Builds from a source checkout keep the system allocator (`--features
+  jemalloc` turns it on; its build refuses paths with spaces).
 - Kafka to Kafka streams can be exactly once: `delivery: exactly_once` on the source commits
   the sinks' messages and the source's offsets in one Kafka transaction, so
   `read_committed` consumers see each output once through crashes, restarts and

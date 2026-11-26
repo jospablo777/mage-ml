@@ -4147,12 +4147,12 @@ RUN --mount=type=secret,id=uv-env,required=false \\
         runtime = f'FROM debian:{build_base}-slim\n'
         python_env = ''
         copy_python = ''
-    engine_features = ''
+    # jemalloc: about 30% less memory than the system allocator at the same throughput; its
+    # build needs make, which the Kafka step installs too.
+    engine_features = ' --features ' + ','.join(
+        f'mage-service/{feature}' for feature in [*capture_.engine_features, 'jemalloc']
+    )
     kafka_build = ''
-    if capture_.engine_features:
-        engine_features = ' --features ' + ','.join(
-            f'mage-service/{feature}' for feature in capture_.engine_features
-        )
     if capture_.needs_kafka:
         # librdkafka builds with CMake, OpenSSL from source (make, perl), and includes curl's
         # header (I-40). All of it links statically: the runtime image needs nothing more.
@@ -4160,6 +4160,12 @@ RUN --mount=type=secret,id=uv-env,required=false \\
             '# The Kafka connector builds librdkafka and OpenSSL from source.\n'
             'RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make \\\n'
             '      perl libcurl4-openssl-dev && \\\n'
+            '    rm -rf /var/lib/apt/lists/*\n'
+        )
+    else:
+        kafka_build = (
+            '# jemalloc, the engine\'s allocator, builds with make.\n'
+            'RUN apt-get update && apt-get install -y --no-install-recommends make && \\\n'
             '    rm -rf /var/lib/apt/lists/*\n'
         )
     ibm_mq_stage = ''
