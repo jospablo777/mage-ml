@@ -251,13 +251,18 @@ jobs:
             -o "sbom/mage-ml-$VERSION-all-extras.cdx.json"
           engine=$(python3 -c "import tomllib; print(tomllib.load(open('packages/mageml-engine/pyproject.toml','rb'))['project']['version'])")
           native=$(python3 -c "import tomllib; print(tomllib.load(open('rust/column_atlas/pyproject.toml','rb'))['project']['version'])")
-          # The features each wheel builds with (their pyproject.toml's [tool.maturin]).
-          cargo cyclonedx -q --manifest-path mage_ai/pipeline_services/service/crates/service/Cargo.toml \
-            -F full -f json --spec-version 1.5 --override-filename sbom
-          mv mage_ai/pipeline_services/service/crates/service/sbom.json "sbom/mageml-engine-$engine.cdx.json"
-          cargo cyclonedx -q --manifest-path rust/column_atlas/Cargo.toml \
-            -F extension-module,postgres -f json --spec-version 1.5 --override-filename sbom
-          mv rust/column_atlas/sbom.json "sbom/column-atlas-native-$native.cdx.json"
+          # The features each wheel builds with (their pyproject.toml's [tool.maturin]), one
+          # SBOM per platform a wheel is built for: the crates differ by target.
+          for platform in linux-x86_64:x86_64-unknown-linux-gnu linux-aarch64:aarch64-unknown-linux-gnu macos-arm64:aarch64-apple-darwin; do
+            name=${platform%%:*}
+            target=${platform#*:}
+            cargo cyclonedx -q --manifest-path mage_ai/pipeline_services/service/crates/service/Cargo.toml \
+              -F full -f json --spec-version 1.5 --target "$target" --override-filename sbom
+            mv mage_ai/pipeline_services/service/crates/service/sbom.json "sbom/mageml-engine-$engine-$name.cdx.json"
+            cargo cyclonedx -q --manifest-path rust/column_atlas/Cargo.toml \
+              -F extension-module,postgres -f json --spec-version 1.5 --target "$target" --override-filename sbom
+            mv rust/column_atlas/sbom.json "sbom/column-atlas-native-$native-$name.cdx.json"
+          done
           for file in sbom/*.json; do
             python3 -c "import json, sys; d = json.load(open(sys.argv[1])); assert d['components'], sys.argv[1]; print(sys.argv[1], len(d['components']), 'components')" "$file"
           done
@@ -385,16 +390,23 @@ jobs:
           echo "path=site" >> "$GITHUB_OUTPUT"
       # A wheel of an unchanged package keeps the published one (and its attestations), so
       # only the wheels built and published now are attested.
+      # A wheel of an unchanged package keeps the published one (and its attestations), so
+      # only the wheels built and published now are attested.
       - name: Name the attestation subjects
         id: subjects
         run: |
-          for name in mageml_engine column_atlas_native; do
-            if compgen -G "release-assets/$name-*.whl" > /dev/null; then
-              echo "$name=true" >> "$GITHUB_OUTPUT"
-            fi
+          for wheel in release-assets/mageml_engine-*.whl release-assets/column_atlas_native-*.whl; do
+            [ -e "$wheel" ] || continue
+            package=$(basename "$wheel" | cut -d- -f1)
+            platform=$(basename "$wheel" .whl | rev | cut -d- -f1 | rev)
+            echo "${package}_${platform}=$wheel" >> "$GITHUB_OUTPUT"
           done
-          echo "engine_sbom=$(ls release-sbom/mageml-engine-*.cdx.json)" >> "$GITHUB_OUTPUT"
-          echo "native_sbom=$(ls release-sbom/column-atlas-native-*.cdx.json)" >> "$GITHUB_OUTPUT"
+          for name in mageml-engine column-atlas-native; do
+            for platform in linux-x86_64 linux-aarch64 macos-arm64; do
+              key=$(echo "${name}_sbom_$platform" | tr '-' '_')
+              echo "$key=$(ls release-sbom/$name-*-$platform.cdx.json)" >> "$GITHUB_OUTPUT"
+            done
+          done
       # Checked with: gh attestation verify <file> --repo jospablo777/mage-ml
       - name: Attest the build provenance of the assets
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -408,18 +420,42 @@ jobs:
         with:
           subject-path: release-assets/mage_ml-*.whl
           sbom-path: release-sbom/mage-ml-${{ needs.contract.outputs.version }}-all-extras.cdx.json
-      - name: Attest the SBOM of mageml-engine
-        if: steps.subjects.outputs.mageml_engine
+      - name: Attest the SBOM of mageml-engine (linux-x86_64)
+        if: steps.subjects.outputs.mageml_engine_manylinux_2_28_x86_64
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: release-assets/mageml_engine-*.whl
-          sbom-path: ${{ steps.subjects.outputs.engine_sbom }}
-      - name: Attest the SBOM of column-atlas-native
-        if: steps.subjects.outputs.column_atlas_native
+          subject-path: ${{ steps.subjects.outputs.mageml_engine_manylinux_2_28_x86_64 }}
+          sbom-path: ${{ steps.subjects.outputs.mageml_engine_sbom_linux_x86_64 }}
+      - name: Attest the SBOM of mageml-engine (linux-aarch64)
+        if: steps.subjects.outputs.mageml_engine_manylinux_2_28_aarch64
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: release-assets/column_atlas_native-*.whl
-          sbom-path: ${{ steps.subjects.outputs.native_sbom }}
+          subject-path: ${{ steps.subjects.outputs.mageml_engine_manylinux_2_28_aarch64 }}
+          sbom-path: ${{ steps.subjects.outputs.mageml_engine_sbom_linux_aarch64 }}
+      - name: Attest the SBOM of mageml-engine (macos-arm64)
+        if: steps.subjects.outputs.mageml_engine_macosx_12_0_arm64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subjects.outputs.mageml_engine_macosx_12_0_arm64 }}
+          sbom-path: ${{ steps.subjects.outputs.mageml_engine_sbom_macos_arm64 }}
+      - name: Attest the SBOM of column-atlas-native (linux-x86_64)
+        if: steps.subjects.outputs.column_atlas_native_manylinux_2_28_x86_64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subjects.outputs.column_atlas_native_manylinux_2_28_x86_64 }}
+          sbom-path: ${{ steps.subjects.outputs.column_atlas_native_sbom_linux_x86_64 }}
+      - name: Attest the SBOM of column-atlas-native (linux-aarch64)
+        if: steps.subjects.outputs.column_atlas_native_manylinux_2_28_aarch64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subjects.outputs.column_atlas_native_manylinux_2_28_aarch64 }}
+          sbom-path: ${{ steps.subjects.outputs.column_atlas_native_sbom_linux_aarch64 }}
+      - name: Attest the SBOM of column-atlas-native (macos-arm64)
+        if: steps.subjects.outputs.column_atlas_native_macosx_12_0_arm64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subjects.outputs.column_atlas_native_macosx_12_0_arm64 }}
+          sbom-path: ${{ steps.subjects.outputs.column_atlas_native_sbom_macos_arm64 }}
       - name: Draft the release, upload and verify the assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -257,8 +257,9 @@ upstream Mage, not MageML.
 
 In releases after 0.4.0, each wheel a release builds carries a signed attestation of the
 workflow run and commit that built it, and the release lists the packages each wheel ships
-as CycloneDX SBOMs (`mage-ml-X.Y.Z.cdx.json`, `mage-ml-X.Y.Z-all-extras.cdx.json`,
-`mageml-engine-X.Y.Z.cdx.json`, `column-atlas-native-X.Y.Z.cdx.json`). With the GitHub CLI:
+as CycloneDX SBOMs: `mage-ml-X.Y.Z.cdx.json` and `mage-ml-X.Y.Z-all-extras.cdx.json`,
+and one per platform for the engine and ColumnAtlas
+(`mageml-engine-X.Y.Z-linux-x86_64.cdx.json`). With the GitHub CLI:
 
 ```bash
 gh release download vX.Y.Z --repo jospablo777/mage-ml --pattern 'mage_ml-*.whl'

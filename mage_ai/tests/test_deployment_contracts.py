@@ -184,12 +184,17 @@ class PublishWorkflowTest(unittest.TestCase):
         subjects = [step['with']['subject-path'] for step in attests]
         self.assertIn('release-assets/*.whl', subjects[0])
         self.assertNotIn('sbom-path', attests[0]['with'])
-        self.assertEqual(
-            sorted(s for s in subjects[1:]),
-            ['release-assets/column_atlas_native-*.whl', 'release-assets/mage_ml-*.whl',
-             'release-assets/mageml_engine-*.whl'],
-        )
+        self.assertEqual(subjects[1], 'release-assets/mage_ml-*.whl')
+        # Each native wheel with the SBOM of its own platform's crates.
+        native = [step['name'] for step in attests[2:]]
+        self.assertEqual(sorted(native), sorted(
+            f'Attest the SBOM of {package} ({platform})'
+            for package in ('mageml-engine', 'column-atlas-native')
+            for platform in ('linux-x86_64', 'linux-aarch64', 'macos-arm64')
+        ))
         self.assertTrue(all('sbom-path' in step['with'] for step in attests[1:]))
+        self.assertTrue(all(step['if'].startswith('steps.subjects.outputs.')
+                            for step in attests[2:]))
         # Attested before the draft: a failed attestation publishes nothing.
         names = [step.get('name', step.get('uses')) for step in publish['steps']]
         self.assertLess(names.index('Attest the build provenance of the assets'),

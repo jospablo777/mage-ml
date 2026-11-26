@@ -58,7 +58,7 @@ how to reproduce each check locally.
    attestation stops it before the draft. The SBOMs come from the Software bill of
    materials job: `uv export --format cyclonedx1.5` of `uv.lock` for mage-ml, base and with
    every extra, and `cargo cyclonedx` for the engine and ColumnAtlas with the features
-   their wheels build with.
+   their wheels build with, one per platform target, since the crates differ by target.
 7. Install from the public index in a fresh environment to confirm, then mark the release
    as latest.
 
