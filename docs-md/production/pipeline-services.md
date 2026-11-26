@@ -727,6 +727,52 @@ mage-service ledger import /var/lib/mage-service/runs.db
 An engine refuses a run history newer than it knows, file or schema, instead of writing
 to it.
 
+## Traces
+
+With a collector's OTLP/HTTP endpoint set, the service sends OpenTelemetry traces:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+```
+
+| Span | Parent | Attributes |
+| --- | --- | --- |
+| `POST /v1/pipelines/{pipeline}/runs` and the other API requests | the caller's `traceparent` header, if sent | `http.route`, `http.response.status_code` |
+| `run <pipeline>` | the request that submitted it | `mage.pipeline`, `mage.run_id`, `mage.run.source`, `mage.run.status` |
+| `block <uuid>`, `chain <first block>` | the run; one span per attempt | `mage.block`, `mage.attempt`, `mage.outputs`; the error when it fails |
+
+`/healthz` and `/metrics` are not traced. Block code gets its block's span as `TRACEPARENT`
+(Python, R and SQL blocks, Rust programs), and Rust blocks also as `BlockContext::traceparent`,
+so spans made in the block join the run's trace:
+
+```python
+import os
+
+from opentelemetry import trace
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+parent = TraceContextTextMapPropagator().extract({'traceparent': os.environ['TRACEPARENT']})
+with trace.get_tracer(__name__).start_as_current_span('score', context=parent):
+    ...
+```
+
+| Variable | |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | The collector; `/v1/traces` is added |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | The full URL instead |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `key=value,...`, such as `authorization=Bearer%20abc` |
+| `OTEL_SERVICE_NAME` | Default: the service's name |
+| `OTEL_RESOURCE_ATTRIBUTES` | `key=value,...` on every span |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Default `parentbased_always_on`; `traceidratio` with a ratio keeps that share of traces |
+| `OTEL_SDK_DISABLED` | `true` turns tracing off |
+
+The service sends OTLP over HTTP as JSON, which collectors take on port 4318; with
+`OTEL_EXPORTER_OTLP_PROTOCOL=grpc` it says so and stays off. A span costs about 2 µs; spans
+wait in a queue of 8,192 that a thread sends in batches every second, and when the collector
+is slow or down, spans are dropped, never runs delayed. `/metrics` counts them in
+`mage_service_trace_spans_total{outcome="sent|failed|dropped"}`. Without an endpoint nothing
+starts. Stream batches are not traced; their [metrics](stream-services.md) cover them.
+
 ## Settings
 
 | Variable | Default | |

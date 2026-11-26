@@ -49,4 +49,7 @@ pub struct BlockContext {
     pub scratch_dir: PathBuf,
     /// The digest of the block's code, in a pipeline service; audit records name it.
     pub block_sha256: Option<String>,
+    /// The W3C `traceparent` of the block's span when the service traces runs
+    /// (OpenTelemetry): spans the block makes with it as their parent join the run's trace.
+    pub traceparent: Option<String>,
 }

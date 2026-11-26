@@ -1464,6 +1464,12 @@ def serve(requests=None, channel=None) -> None:
             # files as they are now, the environment and import path as the process began.
             _forget_changed_project_modules()
             environ, path = dict(os.environ), list(sys.path)
+        # The engine's span for this block: OpenTelemetry in the block's code continues it
+        # (the TRACEPARENT environment variable), and so do the processes it starts.
+        traced = request.get('traceparent')
+        if traced:
+            parent_trace = os.environ.get('TRACEPARENT')
+            os.environ['TRACEPARENT'] = traced
         try:
             if request.get('op') == 'stream':
                 # The reply holds the outputs' JSON: a Polars output is not made a list.
@@ -1500,6 +1506,11 @@ def serve(requests=None, channel=None) -> None:
             except OSError:
                 pass
             sys.stdout, sys.stderr = streams
+            if traced:
+                if parent_trace is None:
+                    os.environ.pop('TRACEPARENT', None)
+                else:
+                    os.environ['TRACEPARENT'] = parent_trace
             if warm:
                 _remember_project_modules()
                 if dict(os.environ) != environ:

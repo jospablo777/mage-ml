@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use crate::log::RunLog;
 use crate::python::{PythonPool, WorkerError};
 use crate::service::Service;
+use crate::traces::{Kind, Span, SpanContext};
 
 /// One block's outcome after all its attempts.
 struct BlockOutcome {
@@ -82,9 +83,24 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
         ),
     );
     let kwargs = Arc::new(service.block_kwargs(&pipeline, &detail.run, &detail.variables));
+    let mut span = Span::start(
+        format!("run {}", pipeline.uuid),
+        Kind::Internal,
+        service.take_trace_parent(&run_id),
+    );
+    span.set("mage.pipeline", pipeline.uuid.clone());
+    span.set("mage.run_id", run_id.clone());
+    span.set("mage.run.source", detail.run.source.clone());
 
     let run_future = run_blocks(
-        &service, &pipeline, &run_id, &run_dir, &log, kwargs, &cancel,
+        &service,
+        &pipeline,
+        &run_id,
+        &run_dir,
+        &log,
+        kwargs,
+        &cancel,
+        span.context(),
     );
     let outcome = match pipeline.run_timeout_seconds {
         Some(seconds) => {
@@ -107,6 +123,11 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
         Ok(()) => (RunStatus::Completed, None),
         Err((status, message)) => (status, Some(message)),
     };
+    span.set("mage.run.status", status.as_str());
+    if let Some(message) = &error {
+        span.fail(message);
+    }
+    span.end();
     // Blocks left pending when the run stopped did not run.
     if let Ok(Some(current)) = service.ledger.run(&run_id) {
         for block in current
@@ -171,6 +192,7 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
     service.run_finished(&pipeline.uuid, &run_id, status);
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_blocks(
     service: &Arc<Service>,
     pipeline: &Pipeline,
@@ -179,6 +201,7 @@ async fn run_blocks(
     log: &RunLog,
     kwargs: Arc<Map<String, Value>>,
     cancel: &CancellationToken,
+    trace: Option<SpanContext>,
 ) -> Result<(), (RunStatus, String)> {
     let order: Vec<Block> = pipeline
         .topological_order()
@@ -258,6 +281,7 @@ async fn run_blocks(
                         kwargs: kwargs.clone(),
                         inputs,
                         cancel: cancel.clone(),
+                        trace,
                     };
                     tasks.spawn(task.run());
                     continue;
@@ -272,6 +296,7 @@ async fn run_blocks(
                     kwargs: kwargs.clone(),
                     inputs,
                     cancel: cancel.clone(),
+                    trace,
                 };
                 tasks.spawn(task.run());
             }
@@ -438,6 +463,25 @@ struct BlockTask {
     kwargs: Arc<Map<String, Value>>,
     inputs: Vec<Vec<Value>>,
     cancel: CancellationToken,
+    /// The run's span: each attempt is a span under it.
+    trace: Option<SpanContext>,
+}
+
+/// An attempt's span, with the attributes every block attempt has.
+fn attempt_span(trace: Option<SpanContext>, name: String, blocks: &[&Block], attempt: u32) -> Span {
+    if trace.is_none() {
+        return Span::default();
+    }
+    let mut span = Span::start(name, Kind::Internal, trace);
+    span.set("mage.attempt", attempt);
+    if let [block] = blocks {
+        span.set("mage.block", block.uuid.clone());
+        span.set("mage.block.language", block.language.as_str());
+    } else {
+        let uuids: Vec<&str> = blocks.iter().map(|b| b.uuid.as_str()).collect();
+        span.set("mage.blocks", uuids.join(","));
+    }
+    span
 }
 
 impl BlockTask {
@@ -464,7 +508,20 @@ impl BlockTask {
                 break;
             }
             let started = std::time::Instant::now();
-            match self.run_once().await {
+            let mut span = attempt_span(
+                self.trace,
+                format!("block {}", self.block.uuid),
+                &[&self.block],
+                attempt,
+            );
+            let ran = self.run_once(span.traceparent()).await;
+            match &ran {
+                Ok(Ran::Skipped(reason)) => span.set("mage.block.skipped", reason.clone()),
+                Ok(Ran::Outputs(records)) => span.set("mage.outputs", records.len() as i64),
+                Err(failure) => span.fail(&failure.message),
+            }
+            span.end();
+            match ran {
                 Ok(Ran::Skipped(reason)) => {
                     let _ = self.service.ledger.finish_block(
                         &self.run_id,
@@ -602,7 +659,7 @@ impl BlockTask {
         }
     }
 
-    async fn run_once(&self) -> Result<Ran, BlockFailure> {
+    async fn run_once(&self, traceparent: Option<String>) -> Result<Ran, BlockFailure> {
         let timeout = self.block.timeout_seconds.map(Duration::from_secs);
         let pool = || {
             self.service.python_for(&self.block).ok_or_else(|| {
@@ -618,18 +675,23 @@ impl BlockTask {
             // The Python worker runs R and SQL blocks too, and checks their conditions in
             // the same request.
             Language::Python | Language::R | Language::Sql => {
-                self.run_python(pool()?, timeout, false).await
+                self.run_python(pool()?, timeout, false, traceparent.as_deref())
+                    .await
             }
             Language::Window => Err(BlockFailure::fatal(
                 "a window block runs in a stream, not in a pipeline run",
             )),
             Language::Rust => {
                 if !self.block.conditions.is_empty()
-                    && let Ran::Skipped(reason) = self.run_python(pool()?, timeout, true).await?
+                    && let Ran::Skipped(reason) = self
+                        .run_python(pool()?, timeout, true, traceparent.as_deref())
+                        .await?
                 {
                     return Ok(Ran::Skipped(reason));
                 }
-                self.run_rust(timeout).await.map(Ran::Outputs)
+                self.run_rust(timeout, traceparent.as_deref())
+                    .await
+                    .map(Ran::Outputs)
             }
         }
     }
@@ -641,13 +703,14 @@ impl BlockTask {
         pool: &Arc<PythonPool>,
         timeout: Option<Duration>,
         conditions_only: bool,
+        traceparent: Option<&str>,
     ) -> Result<Ran, BlockFailure> {
         let inputs: Vec<Value> = self
             .inputs
             .iter()
             .map(|records| python_input(records))
             .collect();
-        let request = json!({
+        let mut request = json!({
             "block": worker_block(&self.service, &self.block, &self.pipeline_uuid),
             "inputs": inputs,
             "kwargs": *self.kwargs,
@@ -655,6 +718,9 @@ impl BlockTask {
             "run_tests": true,
             "conditions_only": conditions_only,
         });
+        if let Some(traceparent) = traceparent {
+            request["traceparent"] = json!(traceparent);
+        }
         let reply = pool
             .run(
                 request,
@@ -700,7 +766,11 @@ impl BlockTask {
         })
     }
 
-    async fn run_rust(&self, timeout: Option<Duration>) -> Result<Vec<Value>, BlockFailure> {
+    async fn run_rust(
+        &self,
+        timeout: Option<Duration>,
+        traceparent: Option<&str>,
+    ) -> Result<Vec<Value>, BlockFailure> {
         let binary = self
             .block
             .binary
@@ -718,15 +788,20 @@ impl BlockTask {
             "output_dir": ".",
             // Audit records of the block's scores name its code (mage::models::audit).
             "block_sha256": self.block.sha256,
+            // A resident program started before this attempt: the job says it.
+            "traceparent": traceparent,
         });
         std::fs::write(self.output_dir.join("job.json"), job.to_string())
             .map_err(|e| BlockFailure::retryable(format!("could not write the job: {e}")))?;
-        let env: Vec<(String, String)> = self
+        let mut env: Vec<(String, String)> = self
             .block
             .entry
             .iter()
             .map(|entry| ("MAGE_BLOCK".to_string(), entry.clone()))
             .collect();
+        if let Some(traceparent) = traceparent {
+            env.push(("TRACEPARENT".to_string(), traceparent.to_string()));
+        }
         let status = match (&self.service.residents, &self.block.entry) {
             (Some(residents), Some(entry)) => {
                 residents
@@ -1063,6 +1138,7 @@ struct ChainTask {
     kwargs: Arc<Map<String, Value>>,
     inputs: Vec<Vec<Value>>,
     cancel: CancellationToken,
+    trace: Option<SpanContext>,
 }
 
 impl ChainTask {
@@ -1121,7 +1197,25 @@ impl ChainTask {
                 break;
             }
             let chain_started = crate::ledger::now();
-            match self.run_once(timeout).await {
+            let members: Vec<&Block> = self.blocks.iter().collect();
+            let mut span = attempt_span(
+                self.trace,
+                format!("chain {}", head.uuid),
+                &members,
+                attempt,
+            );
+            let ran = self.run_once(timeout, span.traceparent()).await;
+            match &ran {
+                Ok((records, _)) => span.set("mage.outputs", records.len() as i64),
+                Err((failure, block)) => {
+                    if let Some(block) = block {
+                        span.set("mage.block", block.clone());
+                    }
+                    span.fail(&failure.message);
+                }
+            }
+            span.end();
+            match ran {
                 Ok((records, seconds)) => {
                     let chain_finished = crate::ledger::now();
                     // The spans follow one another with the times the chain measured,
@@ -1287,16 +1381,18 @@ impl ChainTask {
     async fn run_once(
         &self,
         timeout: Option<Duration>,
+        traceparent: Option<String>,
     ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
         match self.kind {
-            ChainKind::Rust => self.run_rust_chain(timeout).await,
-            ChainKind::Worker => self.run_worker_chain(timeout).await,
+            ChainKind::Rust => self.run_rust_chain(timeout, traceparent).await,
+            ChainKind::Worker => self.run_worker_chain(timeout, traceparent).await,
         }
     }
 
     async fn run_worker_chain(
         &self,
         timeout: Option<Duration>,
+        traceparent: Option<String>,
     ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
         let head = &self.blocks[0];
         // A chain's blocks share their worker: chains split where it changes.
@@ -1321,6 +1417,7 @@ impl ChainTask {
             "kwargs": *self.kwargs,
             "output_dir": self.output_dir,
             "run_tests": true,
+            "traceparent": traceparent,
         });
         let reply = pool
             .run(request, self.log.clone(), &head.uuid, timeout, &self.cancel)
@@ -1382,6 +1479,7 @@ impl ChainTask {
     async fn run_rust_chain(
         &self,
         timeout: Option<Duration>,
+        traceparent: Option<String>,
     ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
         let head = &self.blocks[0];
         let binary = head
@@ -1413,6 +1511,7 @@ impl ChainTask {
             "output_dir": ".",
             "chain": steps,
             "block_sha256": head.sha256,
+            "traceparent": traceparent,
         });
         std::fs::write(self.output_dir.join("job.json"), job.to_string()).map_err(|e| {
             (
@@ -1442,7 +1541,10 @@ impl ChainTask {
                     &self.service,
                     &binary,
                     &self.output_dir,
-                    vec![("MAGE_CHAIN".to_string(), "1".to_string())],
+                    [("MAGE_CHAIN".to_string(), "1".to_string())]
+                        .into_iter()
+                        .chain(traceparent.map(|t| ("TRACEPARENT".to_string(), t)))
+                        .collect(),
                     profile,
                     &self.log,
                     &head.uuid,

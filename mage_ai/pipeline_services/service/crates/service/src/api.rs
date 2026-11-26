@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Extension, MatchedPath, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -30,6 +30,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::service::{AdmissionError, BUCKETS, Service};
+use crate::traces::{Kind, Span, SpanContext};
 
 #[derive(Clone)]
 pub struct Auth {
@@ -77,8 +78,46 @@ pub fn router(state: AppState) -> Router {
             post(ingest).layer(DefaultBodyLimit::max(MAX_INGEST_BODY)),
         )
         .route("/v1/control", post(control))
+        .route_layer(axum::middleware::from_fn(trace_request))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(state)
+}
+
+/// The span of the API request in progress: a run it submits continues its trace.
+#[derive(Clone, Copy)]
+struct RequestTrace(Option<SpanContext>);
+
+/// A server span per API request, continuing the caller's `traceparent`; health checks and
+/// metrics scrapes are left out.
+async fn trace_request(
+    route: MatchedPath,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let route = route.as_str().to_string();
+    if crate::traces::tracer().is_none() || route == "/healthz" || route == "/metrics" {
+        return next.run(request).await;
+    }
+    let parent = request
+        .headers()
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .and_then(SpanContext::parse);
+    let method = request.method().as_str().to_string();
+    let mut span = Span::start(format!("{method} {route}"), Kind::Server, parent);
+    span.set("http.request.method", method);
+    span.set("http.route", route);
+    span.set("url.path", request.uri().path().to_string());
+    request
+        .extensions_mut()
+        .insert(RequestTrace(span.context()));
+    let response = next.run(request).await;
+    let status = response.status();
+    span.set("http.response.status_code", i64::from(status.as_u16()));
+    if status.is_server_error() {
+        span.fail(status.canonical_reason().unwrap_or("server error"));
+    }
+    response
 }
 
 pub struct ApiError(StatusCode, String);
@@ -256,6 +295,7 @@ async fn create_run(
     State(state): State<AppState>,
     Path(pipeline): Path<String>,
     Query(query): Query<WaitQuery>,
+    trace: Option<Extension<RequestTrace>>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> ApiResult<Response> {
@@ -271,11 +311,12 @@ async fn create_run(
     }
     let (id, created) = state
         .service
-        .submit(
+        .submit_traced(
             &pipeline,
             "api",
             &request.variables,
             request.idempotency_key.as_deref(),
+            trace.and_then(|Extension(RequestTrace(context))| context),
         )
         .map_err(|error| match error {
             AdmissionError::UnknownPipeline(_) => {
@@ -1483,6 +1524,26 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
                     escape(segment)
                 );
             }
+        }
+    }
+    if let Some(tracer) = crate::traces::tracer() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _ = writeln!(
+            out,
+            "# HELP mage_service_trace_spans_total Spans by outcome: sent to the collector, \
+             failed (the collector did not take them) or dropped (the queue was full)."
+        );
+        let _ = writeln!(out, "# TYPE mage_service_trace_spans_total counter");
+        for (outcome, count) in [
+            ("sent", &tracer.counts.sent),
+            ("failed", &tracer.counts.failed),
+            ("dropped", &tracer.counts.dropped),
+        ] {
+            let _ = writeln!(
+                out,
+                "mage_service_trace_spans_total{{outcome=\"{outcome}\"}} {}",
+                count.load(Relaxed)
+            );
         }
     }
     let _ = writeln!(out, "# TYPE mage_service_up gauge");

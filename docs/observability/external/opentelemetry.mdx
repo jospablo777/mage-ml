@@ -36,6 +36,20 @@ MageML uses the SQLAlchemyInstrumentor from OpenTelemetry to instrument operatio
 2. **Tornado Instrumentation**:
 To monitor HTTP server operations, MageML uses OpenTelemetry's Tornado instrumentation. This collects data related to HTTP requests and server performance.
 
+### The gateway
+
+When the MageML server runs behind the Rust gateway (`mage-service gateway`), each `/api/`
+request (not `/api/statuses`, which the editor polls) is a span named by its resource, such as
+`GET /api/pipelines`, and the server's Tornado span continues it, so a trace shows the time in
+the gateway and in the server. The gateway sends OTLP over HTTP: since the server's exporter
+takes `OTEL_EXPORTER_OTLP_ENDPOINT` as its gRPC endpoint, the gateway sends its spans only to
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (the collector's HTTP endpoint, such as
+`http://collector:4318/v1/traces`), or to `OTEL_EXPORTER_OTLP_ENDPOINT` when
+`OTEL_EXPORTER_OTLP_PROTOCOL` is `http/protobuf` or `http/json`.
+
+Exported pipeline services trace their API requests, runs and block attempts the same way;
+see [Traces](/production/pipeline-services#traces).
+
 ## Telemetry data collection and analysis
 
 With the environment variable set, restart the server. OpenTelemetry starts collecting traces based on the instrumentation above.

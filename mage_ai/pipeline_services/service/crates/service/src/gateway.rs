@@ -21,6 +21,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpListener;
 
 use crate::gateway_shadow::Shadow;
+use crate::traces::{Kind, Span, SpanContext, Tracer};
 
 type Body = BoxBody<Bytes, hyper::Error>;
 
@@ -44,6 +45,8 @@ struct Upstream {
     /// Reads a shadowed route's answer again (gateway_shadow.rs).
     rereads: Client<HttpConnector, Empty<Bytes>>,
     shadow: Option<Arc<Shadow>>,
+    /// Where API requests' spans go; None when tracing is off.
+    tracer: Option<&'static Tracer>,
 }
 
 const SCHEDULER_SHADOW_EVERY: Duration = Duration::from_secs(15);
@@ -106,6 +109,23 @@ pub async fn serve(
     shadow: Option<Shadow>,
     header_timeout: Duration,
 ) -> Result<(), String> {
+    serve_traced(
+        listener,
+        upstream,
+        shadow,
+        header_timeout,
+        crate::traces::tracer(),
+    )
+    .await
+}
+
+async fn serve_traced(
+    listener: TcpListener,
+    upstream: String,
+    shadow: Option<Shadow>,
+    header_timeout: Duration,
+    tracer: Option<&'static Tracer>,
+) -> Result<(), String> {
     let mut connector = HttpConnector::new();
     connector.set_nodelay(true);
     connector.set_keepalive(Some(Duration::from_secs(60)));
@@ -117,6 +137,7 @@ pub async fn serve(
             .build(connector.clone()),
         rereads: Client::builder(TokioExecutor::new()).build(connector),
         shadow: shadow.map(Arc::new),
+        tracer,
     };
     if let Some(shadow) = upstream.shadow.clone().filter(|s| s.shadows_scheduler()) {
         tokio::spawn(async move {
@@ -146,7 +167,7 @@ pub async fn serve(
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |request| {
                 let upstream = upstream.clone();
-                async move { Ok::<_, Infallible>(forward(&upstream, peer, request).await) }
+                async move { Ok::<_, Infallible>(traced_forward(&upstream, peer, request).await) }
             });
             // Errors here are clients that went away; nothing to answer.
             let _ = hyper::server::conn::http1::Builder::new()
@@ -157,6 +178,53 @@ pub async fn serve(
                 .await;
         });
     }
+}
+
+/// API requests are traced, except the status polling; pages, assets and WebSockets are not.
+fn traced(path: &str) -> bool {
+    path.starts_with("/api/") && path != "/api/statuses"
+}
+
+/// `forward` in a server span, whose `traceparent` the server's own instrumentation
+/// continues. The span ends when the server's response starts.
+async fn traced_forward(
+    upstream: &Upstream,
+    peer: SocketAddr,
+    mut request: Request<Incoming>,
+) -> Response<Body> {
+    let path = request.uri().path().to_string();
+    if upstream.tracer.is_none() || !traced(&path) || wants_upgrade(request.headers()) {
+        return forward(upstream, peer, request).await;
+    }
+    let parent = request
+        .headers()
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .and_then(SpanContext::parse);
+    // Named by the resource, without the ids after it: few names, as a route template.
+    let resource = path["/api/".len()..].split('/').next().unwrap_or("");
+    let method = request.method().as_str().to_string();
+    let mut span = Span::start_in(
+        upstream.tracer,
+        format!("{method} /api/{resource}"),
+        Kind::Server,
+        parent,
+    );
+    span.set("http.request.method", method);
+    span.set("url.path", path);
+    if let Some(value) = span
+        .traceparent()
+        .and_then(|t| HeaderValue::from_str(&t).ok())
+    {
+        request.headers_mut().insert("traceparent", value);
+    }
+    let response = forward(upstream, peer, request).await;
+    let status = response.status();
+    span.set("http.response.status_code", i64::from(status.as_u16()));
+    if status.is_server_error() {
+        span.fail(status.canonical_reason().unwrap_or("server error"));
+    }
+    response
 }
 
 async fn forward(
@@ -688,8 +756,13 @@ mod tests {
                                 let body = ChannelBody(receiver);
                                 return Ok(Response::new(body.boxed()));
                             }
+                            let traceparent = request
+                                .headers()
+                                .get("traceparent")
+                                .map(|v| format!(" traceparent={}", v.to_str().unwrap()))
+                                .unwrap_or_default();
                             let head = format!(
-                                "{} {} host={} real={} forwarded={} body=",
+                                "{} {} host={} real={} forwarded={}{traceparent} body=",
                                 request.method(),
                                 request.uri(),
                                 request.headers()[header::HOST].to_str().unwrap(),
@@ -733,15 +806,66 @@ mod tests {
     }
 
     async fn gateway(upstream: SocketAddr) -> SocketAddr {
+        traced_gateway(upstream, None).await
+    }
+
+    async fn traced_gateway(upstream: SocketAddr, tracer: Option<&'static Tracer>) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        tokio::spawn(serve(
+        tokio::spawn(serve_traced(
             listener,
             upstream.to_string(),
             None,
             Duration::from_millis(300),
+            tracer,
         ));
         address
+    }
+
+    #[tokio::test]
+    async fn an_api_request_is_a_span_the_server_continues() {
+        let (url, received) = crate::traces::testing::collector();
+        let tracer = crate::traces::testing::tracer(&url);
+        let through = traced_gateway(upstream().await, Some(tracer)).await;
+        let caller = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let text = exchange(
+            through,
+            &format!(
+                "GET /api/pipelines/p1/blocks HTTP/1.1\r\nHost: h\r\ntraceparent: {caller}\r\n\
+                 Connection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        // Not traced: status polling and pages.
+        exchange(
+            through,
+            "GET /api/statuses HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        let page = exchange(
+            through,
+            "GET /pipelines HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        assert!(!page.contains("traceparent="), "{page}");
+        tracer.flush(Duration::from_secs(5));
+
+        let body = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        let spans = body["resourceSpans"][0]["scopeSpans"][0]["spans"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(spans.len(), 1, "{spans:?}");
+        let span = &spans[0];
+        assert_eq!(span["name"], "GET /api/pipelines");
+        assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert_eq!(span["parentSpanId"], "00f067aa0ba902b7");
+        // The server gets the gateway's span as its parent.
+        let forwarded = format!(
+            "traceparent=00-4bf92f3577b34da6a3ce929d0e0e4736-{}-01",
+            span["spanId"].as_str().unwrap()
+        );
+        assert!(text.contains(&forwarded), "{text}");
     }
 
     async fn exchange(address: SocketAddr, request: &str) -> String {

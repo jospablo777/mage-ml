@@ -86,6 +86,8 @@ pub struct Service {
     wake: Notify,
     shutting_down: AtomicBool,
     running: Mutex<HashMap<String, (String, CancellationToken)>>,
+    /// The trace each run submitted with one continues (an API request's), until it starts.
+    trace_parents: Mutex<HashMap<String, crate::traces::SpanContext>>,
     metrics: Mutex<Metrics>,
     idle: Notify,
 }
@@ -230,6 +232,7 @@ impl Service {
             wake: Notify::new(),
             shutting_down: AtomicBool::new(false),
             running: Mutex::new(HashMap::new()),
+            trace_parents: Mutex::new(HashMap::new()),
             metrics: Mutex::new(Metrics::default()),
             idle: Notify::new(),
         })
@@ -319,6 +322,18 @@ impl Service {
         variables: &Map<String, Value>,
         idempotency_key: Option<&str>,
     ) -> Result<(String, bool), AdmissionError> {
+        self.submit_traced(pipeline_uuid, source, variables, idempotency_key, None)
+    }
+
+    /// `submit`, with the trace the run's spans continue.
+    pub fn submit_traced(
+        &self,
+        pipeline_uuid: &str,
+        source: &str,
+        variables: &Map<String, Value>,
+        idempotency_key: Option<&str>,
+        trace: Option<crate::traces::SpanContext>,
+    ) -> Result<(String, bool), AdmissionError> {
         if self.shutting_down() {
             return Err(AdmissionError::ShuttingDown);
         }
@@ -334,8 +349,24 @@ impl Service {
             idempotency_key,
             blocks: &blocks,
         })?;
+        if let (Some(trace), (id, true)) = (trace, &result) {
+            let mut parents = self.trace_parents.lock().unwrap_or_else(|p| p.into_inner());
+            // Runs cancelled while queued leave theirs: a bound, not a leak.
+            if parents.len() >= 10_000 {
+                parents.clear();
+            }
+            parents.insert(id.clone(), trace);
+        }
         self.wake();
         Ok(result)
+    }
+
+    /// The trace a run continues, taken when it starts.
+    pub fn take_trace_parent(&self, run_id: &str) -> Option<crate::traces::SpanContext> {
+        self.trace_parents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(run_id)
     }
 
     /// Cancels a queued or running run; false when it already finished or does not exist.

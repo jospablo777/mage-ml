@@ -233,6 +233,7 @@ pub fn run_job<Args, F: BlockFn<Args>>(
         variables: Vars(job.variables.clone()),
         scratch_dir,
         block_sha256: job.block_sha256.clone(),
+        traceparent: job.traceparent.clone(),
     };
     let upstream = job.inputs.len();
     let mut inputs = Inputs {
@@ -577,6 +578,7 @@ fn run_chain_job(entries: &ChainEntries, job_dir: &Path) -> anyhow::Result<()> {
             variables: Vars(job.variables.clone()),
             scratch_dir: scratch_dir.clone(),
             block_sha256: step.block_sha256.clone(),
+            traceparent: job.traceparent.clone(),
         };
         let mut inputs = Inputs {
             context: &context,

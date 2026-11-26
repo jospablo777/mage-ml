@@ -525,6 +525,7 @@ mod tests {
             ),
             scratch_dir: root.path().into(),
             block_sha256: Some("def".into()),
+            traceparent: None,
         };
         let data = df!(
             "id" => [1i64, 2],

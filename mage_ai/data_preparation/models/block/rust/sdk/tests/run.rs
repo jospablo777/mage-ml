@@ -235,3 +235,24 @@ fn an_error_reports_each_cause_once() {
         "{text}"
     );
 }
+
+#[test]
+fn the_block_gets_its_span_from_the_job() {
+    let dir = tempfile::tempdir().unwrap();
+    let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let mut value: serde_json::Value = json!({
+        "api_version": 1, "block_uuid": "block", "block_type": "data_loader", "inputs": [],
+        "variables": {}, "output_dir": "out", "traceparent": traceparent,
+    });
+    std::fs::write(dir.path().join("job.json"), value.to_string()).unwrap();
+    run_job(
+        |context: BlockContext| json!({"traceparent": context.traceparent}),
+        vec![],
+        dir.path(),
+    )
+    .unwrap();
+    let written = result(dir.path());
+    let path = written["outputs"][0]["path"].as_str().unwrap();
+    value = serde_json::from_slice(&std::fs::read(dir.path().join(path)).unwrap()).unwrap();
+    assert_eq!(value, json!({"traceparent": traceparent}));
+}

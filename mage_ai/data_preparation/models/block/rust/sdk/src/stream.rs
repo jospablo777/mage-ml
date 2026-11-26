@@ -659,6 +659,7 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
                 variables: Vars(job.variables.clone()),
                 scratch_dir: scratch_dir.clone(),
                 block_sha256: None,
+                traceparent: None,
             },
             send: step.send,
             held: Held {
@@ -1000,6 +1001,7 @@ mod tests {
                 variables: Vars(serde_json::Map::from_iter([("rate".into(), json!(2.0))])),
                 scratch_dir: std::env::temp_dir(),
                 block_sha256: None,
+                traceparent: None,
             },
             send,
             held: Held {

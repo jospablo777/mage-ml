@@ -482,6 +482,18 @@ pub enum Language {
     Window,
 }
 
+impl Language {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Language::Python => "python",
+            Language::Rust => "rust",
+            Language::R => "r",
+            Language::Sql => "sql",
+            Language::Window => "window",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Block {

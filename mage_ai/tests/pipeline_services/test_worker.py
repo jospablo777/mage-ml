@@ -329,6 +329,31 @@ class ProtocolTest(WorkerTestCase):
         self.assertEqual([r.get('ok') for r in replies[1:4]], [True, False, True])
         self.assertEqual(replies[2]['error']['phase'], 'run')
 
+    def test_the_engines_span_is_the_blocks_traceparent_for_that_request_only(self):
+        seen = os.path.join(self.directory, 'seen.txt')
+        reads = self.block(f'''
+            import os
+
+            @transformer
+            def f():
+                with open({seen!r}, 'a') as file:
+                    file.write(os.environ.get('TRACEPARENT', 'none') + '\\n')
+        ''', name='reads')
+        traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+        out = os.path.join(self.directory, 'out')
+        requests = io.StringIO('\n'.join(json.dumps(r) for r in [
+            dict(op='run', id='1', block=reads, inputs=[], output_dir=out,
+                 traceparent=traceparent),
+            dict(op='run', id='2', block=reads, inputs=[], output_dir=out),
+        ]) + '\n')
+        os.environ.pop('TRACEPARENT', None)
+
+        worker.serve(requests, io.StringIO())
+
+        with open(seen) as file:
+            self.assertEqual(file.read().split(), [traceparent, 'none'])
+        self.assertNotIn('TRACEPARENT', os.environ)
+
 
 class LeftoversTest(WorkerTestCase):
     """What a block leaves in its process does not reach the next request."""

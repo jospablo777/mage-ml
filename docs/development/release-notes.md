@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Traces
+
+- Pipeline services send OpenTelemetry traces when `OTEL_EXPORTER_OTLP_ENDPOINT` is set:
+  each API request, run and block attempt is a span, a caller's `traceparent` header makes
+  them part of its trace, and block code gets its span as `TRACEPARENT` (Rust blocks also as
+  `BlockContext::traceparent`). OTLP over HTTP as JSON, sent by a thread from a bounded queue:
+  about 2 µs a span, and a slow collector drops spans (counted on `/metrics`) instead of
+  delaying runs. The gateway traces `/api/` requests and passes its span to the server.
+
 ### Stream services
 
 - The engine allocates with jemalloc in the published wheels and exported images: a Kafka

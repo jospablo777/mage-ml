@@ -2408,3 +2408,143 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
     }
     found
 }
+
+/// An OpenTelemetry collector on a local port: the spans of each OTLP/HTTP JSON request.
+fn collector() -> (String, std::sync::mpsc::Receiver<Value>) {
+    use std::io::{BufRead, BufReader};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let (mut path, mut length) = (String::new(), 0);
+            reader.read_line(&mut path).unwrap();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            assert!(path.starts_with("POST /v1/traces "), "{path}");
+            let request: Value = serde_json::from_slice(&body).unwrap();
+            for span in request["resourceSpans"][0]["scopeSpans"][0]["spans"]
+                .as_array()
+                .unwrap()
+            {
+                let _ = tx.send(span.clone());
+            }
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}");
+        }
+    });
+    (url, rx)
+}
+
+#[test]
+fn a_run_is_traced_from_the_api_request_into_the_block_code() {
+    let (endpoint, spans) = collector();
+    let mut service = Service::with_manifest(
+        &json!({
+            "schema_version": 1,
+            "service": {"name": "traced-service", "project": "proj",
+                        "exported_at": "2026-10-10T00:00:00Z", "mage_version": "test",
+                        "source_sha256": "abc"},
+            "pipelines": [{"uuid": "traced", "name": "traced", "max_concurrent_runs": 1,
+                "blocks": [{"uuid": "traced", "type": "data_loader", "language": "python",
+                            "file": "data_loaders/traced.py", "sha256": "0", "upstream": []}]}]
+        }),
+        &[(
+            "data_loaders/traced.py",
+            "import os\n\n@data_loader\ndef traced(*args, **kwargs):\n    return {'traceparent': os.environ.get('TRACEPARENT')}\n",
+        )],
+    );
+    service.start(&[("OTEL_EXPORTER_OTLP_ENDPOINT", &endpoint)]);
+    let trace = "4bf92f3577b34da6a3ce929d0e0e4736";
+    let caller = "00f067aa0ba902b7";
+
+    let (status, run) = service
+        .request_with(
+            "POST",
+            "/v1/pipelines/traced/runs?wait=60&output=traced",
+            Some(TOKEN),
+            "{}",
+            &[("traceparent", &format!("00-{trace}-{caller}-01"))],
+        )
+        .unwrap();
+    assert_eq!(status, 201, "{run}");
+
+    let mut by_name = std::collections::BTreeMap::new();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while by_name.len() < 3 && Instant::now() < deadline {
+        if let Ok(span) = spans.recv_timeout(Duration::from_millis(200)) {
+            by_name.insert(span["name"].as_str().unwrap().to_string(), span);
+        }
+    }
+    let names: Vec<&String> = by_name.keys().collect();
+    let request = &by_name["POST /v1/pipelines/{pipeline}/runs"];
+    let run_span = by_name
+        .get("run traced")
+        .unwrap_or_else(|| panic!("{names:?}"));
+    let block = by_name
+        .get("block traced")
+        .unwrap_or_else(|| panic!("{names:?}"));
+    for span in [request, run_span, block] {
+        assert_eq!(span["traceId"], trace, "{span}");
+    }
+    // The caller's span, the request, the run, the block: one chain of parents.
+    assert_eq!(request["parentSpanId"], caller);
+    assert_eq!(request["kind"], 2);
+    assert_eq!(run_span["parentSpanId"], request["spanId"]);
+    assert_eq!(block["parentSpanId"], run_span["spanId"]);
+    let attribute = |span: &Value, key: &str| {
+        span["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["key"] == key)
+            .map(|a| a["value"].clone())
+    };
+    assert_eq!(
+        attribute(run_span, "mage.run_id"),
+        Some(json!({"stringValue": run["id"]}))
+    );
+    assert_eq!(
+        attribute(block, "mage.attempt"),
+        Some(json!({"intValue": "1"}))
+    );
+    assert_eq!(
+        attribute(request, "http.response.status_code"),
+        Some(json!({"intValue": "201"}))
+    );
+    // Block code sees the block's span, so its own spans join the trace.
+    assert_eq!(
+        run["output"]["traceparent"],
+        format!("00-{trace}-{}-01", block["spanId"].as_str().unwrap())
+    );
+    // Health checks are not traced.
+    service.get("/healthz");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        spans.try_iter().all(|s| s["name"] != "GET /healthz"),
+        "a health check was traced"
+    );
+    let (_, metrics) = service.get("/metrics");
+    let sent: u64 = metrics
+        .as_str()
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix("mage_service_trace_spans_total{outcome=\"sent\"} "))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(sent >= 3, "{sent} spans sent");
+}

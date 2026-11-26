@@ -32,6 +32,9 @@ pub struct Job {
     /// The digest of the block's code, which a pipeline service sends for audit records.
     #[serde(default)]
     pub block_sha256: Option<String>,
+    /// The span of this attempt, when the service traces runs.
+    #[serde(default)]
+    pub traceparent: Option<String>,
     /// A chain of blocks to run in this process, each taking the previous block's output
     /// in memory (see `run_chain`); `block_uuid` and `block_type` are the first block's.
     #[serde(default)]
