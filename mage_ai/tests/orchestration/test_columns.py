@@ -64,11 +64,32 @@ class ColumnReadsTest(TestCase):
         self.assertEqual(columns.column_reads('x = 1\n'), {})
 
 
+class ColumnUsesTest(TestCase):
+    def test_only_subscripts_of_the_input_are_known_uses(self):
+        code = textwrap.dedent('''
+            @transformer
+            def t(orders, customers, *args, **kwargs):
+                orders['total'] = orders['amount'] * orders['qty']
+                ids = customers[['id', 'region']]
+                customers = customers.rename(columns={'id': 'cid'})
+                return customers
+        ''')
+        # customers.rename(...) reads the input whole; what follows is not the input.
+        self.assertEqual(columns.column_uses(code), {'orders': {'amount', 'qty'},
+                                                     'customers': None})
+
+    def test_an_input_returned_or_passed_on_may_have_any_column_read(self):
+        for body in ('return df', 'return helper(df)', 'return df.head()', 'return len(df)'):
+            code = f'@transformer\ndef t(df, *args, **kwargs):\n    x = df["a"]\n    {body}\n'
+            self.assertEqual(columns.column_uses(code), {'df': None}, body)
+
+
 class ColumnCheckTest(DBTestCase):
     def setUp(self):
         super().setUp()
         compilation._compilations.clear()
         columns._cache.clear()
+        columns._files.clear()
 
     def pipeline(self, contract=None):
         pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
@@ -110,6 +131,50 @@ class ColumnCheckTest(DBTestCase):
         self.assertEqual(finding['line'], 5)
         self.assertIn('reads discount from', finding['message'])
         self.assertIn('its last stored output has no column of that name', finding['message'])
+
+    def wide(self, pipeline, block, partition=None):
+        """An output with two read columns and a wide one no block reads (about 2 MB)."""
+        root = Path(pipeline.variable_manager.pipeline_path(pipeline.uuid), '.variables')
+        directory = root / (partition or '') / block.uuid / 'output_0'
+        directory.mkdir(parents=True, exist_ok=True)
+        rows = 20000
+        pq.write_table(pa.table({
+            'amount': list(range(rows)),
+            'qty': list(range(rows)),
+            'notes': [os.urandom(48).hex() for _ in range(rows)],
+        }), directory / 'data.parquet')
+
+    def test_columns_no_downstream_block_reads_are_measured_and_reported(self):
+        pipeline, load = self.pipeline()
+        total = pipeline.get_block(f'{self._testMethodName}_total')
+        Path(total.file_path).write_text(textwrap.dedent('''
+            @transformer
+            def total(orders, *args, **kwargs):
+                return orders['amount'] * orders['qty']
+        '''))
+        self.wide(pipeline, load)
+
+        [finding] = compilation.summary_for(pipeline)['unused_columns']
+
+        self.assertEqual(finding['upstream'], load.uuid)
+        self.assertEqual(finding['read'], ['amount', 'qty'])
+        self.assertEqual(finding['columns'], 3)
+        self.assertGreater(finding['unused_bytes'] / finding['output_bytes'], 0.8)
+        self.assertIn('reads 2 of 3 columns', finding['message'])
+        self.assertRegex(finding['message'], r'the other 1 are 8\d% of its last stored output')
+
+    def test_a_reader_that_may_use_any_column_leaves_the_output_alone(self):
+        pipeline, load = self.pipeline()
+        total = pipeline.get_block(f'{self._testMethodName}_total')
+        Path(total.file_path).write_text(textwrap.dedent('''
+            @transformer
+            def total(orders, *args, **kwargs):
+                orders['total'] = orders['amount'] * orders['qty']
+                return orders
+        '''))
+        self.wide(pipeline, load)
+
+        self.assertNotIn('unused_columns', compilation.summary_for(pipeline))
 
     def test_a_column_the_contract_lacks_fails_the_compilation(self):
         contracts = Path(self.repo_path, 'contracts')

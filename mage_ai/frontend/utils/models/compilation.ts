@@ -41,6 +41,7 @@ export type CompilationSummaryType = {
   // Columns a block reads that its upstream block does not give (orchestration/columns.py):
   // an error against its contract, a warning against its last stored output.
   columns?: ColumnFindingType[];
+  unused_columns?: UnusedColumnsType[];
   // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
   stream?: StreamPlanType;
 };
@@ -158,5 +159,16 @@ export type ColumnFindingType = {
   missing: string[];
   severity: 'error' | 'warning';
   source: 'contract' | 'last output';
+  upstream: string;
+};
+
+/** Columns of a block's output that no downstream block reads, measured in its last output. */
+export type UnusedColumnsType = {
+  columns: number;
+  message: string;
+  output_bytes: number;
+  read: string[];
+  readers: string[];
+  unused_bytes: number;
   upstream: string;
 };

@@ -49,6 +49,24 @@ The Compile panel lists each one under **Columns between blocks**, with the bloc
 that name (it has amount, qty).` A renamed column then shows before an hour of upstream
 work, not after.
 
+### Columns no block reads
+
+The other way, compiling measures what a block loads that nothing reads. When every block
+downstream of a block uses its output only as `df['x']` or `df[['x', 'y']]`, the columns
+they leave are measured in its last stored output, from the sizes in the Parquet file's
+footer. When they are at least half of an output of 1 MB or more, the Compile panel lists
+it under **Columns no block reads**:
+
+```text
+total reads 2 of 37 columns of load_orders (amount, qty); the other 35 are 86% of its last
+stored output (1.0 GB). Selecting only these where load_orders loads its data reads and
+passes less.
+```
+
+A downstream block that uses the output any other way (returns it, passes it to a
+function, calls a method on it) may read any column, so nothing is reported for its
+upstream block.
+
 ## SQL chains
 
 In a production run, a ClickHouse, DuckDB or PostgreSQL SQL block followed in its stage by a SQL block

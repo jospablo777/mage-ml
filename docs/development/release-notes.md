@@ -33,6 +33,9 @@
   with nothing to declare: a column missing from the upstream block's data contract fails
   the compilation, one missing from its last stored output is a warning. The Compile panel
   lists them under Columns between blocks, with the line.
+- The Compile panel also lists columns no downstream block reads, under Columns no block
+  reads, when they are at least half of the upstream block's last stored output (1 MB or
+  more), measured from the Parquet footer: the loader can select only the columns read.
 
 ### Workers page: R and Rust
 

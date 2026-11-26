@@ -549,6 +549,18 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
           </Spacing>
             )}
 
+          {summary?.unused_columns?.length >= 1 && (
+          <Spacing mt={2}>
+            <Text bold small>Columns no block reads</Text>
+            {summary.unused_columns.map(finding => (
+              <Text key={finding.upstream} small>
+                <Text inline monospace small>{finding.upstream}</Text>
+                <Text inline muted small> {finding.message}</Text>
+              </Text>
+            ))}
+          </Spacing>
+            )}
+
           {stops.length >= 1 && (
           <Spacing mt={2}>
             <Text bold small>Where chains stop</Text>

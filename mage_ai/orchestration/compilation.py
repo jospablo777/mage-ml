@@ -243,6 +243,13 @@ def summary_for(pipeline) -> Dict:
         found = []
     if found:
         summary['columns'] = found
+    # Columns no downstream block reads, measured in the stored output.
+    try:
+        unused = [finding.to_dict() for finding in columns.unused(pipeline)]
+    except Exception:
+        unused = []
+    if unused:
+        summary['unused_columns'] = unused
     return summary
 
 

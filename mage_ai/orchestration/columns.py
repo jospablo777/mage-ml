@@ -14,6 +14,11 @@ block gives:
 A column the block assigns before it reads it is its own, and a parameter the block binds
 again (`df = df.rename(...)`) is not checked after that: the check reports what it is
 sure of.
+
+The other way, `unused` finds an upstream block whose readers use few of its columns: when
+every block downstream of it uses its output only as `df['x']` or `df[['x', 'y']]`, the
+columns they leave are measured in its last stored output (the Parquet footer's sizes), and
+a large share is reported, so the loader can select only what is read.
 """
 import ast
 import glob
@@ -141,6 +146,174 @@ def column_reads(code: str) -> Dict[str, Dict[str, int]]:
     return {p: r.columns for p, r in reads.items() if r.columns}
 
 
+def column_uses(code: str) -> Dict[str, Optional[set]]:
+    """
+    Per input parameter, every column the block can read from it: None when the block uses
+    the input other than as `param['x']` or `param[['x', 'y']]` (returns it, passes it on,
+    calls a method on it), since any column may then be read. Uses after the parameter is
+    bound again are not of the input.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return {}
+    function = _decorated_function(tree)
+    if function is None:
+        return {}
+    params = [a.arg for a in function.args.posonlyargs + function.args.args]
+    parents = {}
+    for node in ast.walk(function):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    rebound: Dict[str, Tuple[int, int]] = {}
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in params:
+                    position = (node.end_lineno or 0, 1 << 30)
+                    rebound[target.id] = min(rebound.get(target.id, position), position)
+    uses: Dict[str, Optional[set]] = {p: set() for p in params}
+    for node in ast.walk(function):
+        if not (isinstance(node, ast.Name) and node.id in params
+                and isinstance(node.ctx, ast.Load)):
+            continue
+        if node.id in rebound and _position(node) > rebound[node.id]:
+            continue
+        if uses[node.id] is None:
+            continue
+        parent = parents.get(node)
+        columns = _strings(parent.slice) if isinstance(parent, ast.Subscript) \
+            and parent.value is node else []
+        if columns and isinstance(parent.ctx, ast.Load):
+            uses[node.id].update(columns)
+        elif not (columns and isinstance(parent.ctx, ast.Store)):
+            uses[node.id] = None
+    return uses
+
+
+# Reported when the columns no block reads are at least this share of a stored output of at
+# least this size: smaller savings are not worth a finding.
+UNUSED_SHARE = 0.5
+UNUSED_MIN_BYTES = 1 << 20
+
+
+@dataclass
+class UnusedColumns:
+    upstream: str
+    readers: List[str]
+    read: List[str]
+    columns: int
+    unused_bytes: int
+    output_bytes: int
+
+    def to_dict(self) -> Dict:
+        share = round(100 * self.unused_bytes / self.output_bytes)
+        readers = ' and '.join(self.readers)
+        return dict(
+            columns=self.columns,
+            message=(
+                f'{readers} read{"s" if len(self.readers) == 1 else ""} {len(self.read)} of '
+                f'{self.columns} columns of {self.upstream} ({", ".join(self.read)}); the '
+                f'other {self.columns - len(self.read)} are {share}% of its last stored '
+                f'output ({_size(self.output_bytes)}). Selecting only these where '
+                f'{self.upstream} loads its data reads and passes less.'
+            ),
+            output_bytes=self.output_bytes,
+            read=self.read,
+            readers=self.readers,
+            unused_bytes=self.unused_bytes,
+            upstream=self.upstream,
+        )
+
+
+def _size(n: int) -> str:
+    for unit in ('bytes', 'KB', 'MB', 'GB'):
+        if n < 1024 or unit == 'GB':
+            return f'{n:.0f} {unit}' if unit == 'bytes' else f'{n:.1f} {unit}'
+        n /= 1024
+    return ''
+
+
+# Footer sizes by (file, modification time): the compile status is polled.
+_sizes: Dict[Tuple[str, float], Dict[str, int]] = {}
+
+
+def _column_bytes(path: str) -> Dict[str, int]:
+    """Each top-level column's compressed bytes in a Parquet file, from its footer."""
+    key = (path, os.path.getmtime(path))
+    if key not in _sizes:
+        if len(_sizes) > 256:
+            _sizes.clear()
+        _sizes[key] = _read_column_bytes(path)
+    return _sizes[key]
+
+
+def _read_column_bytes(path: str) -> Dict[str, int]:
+    import pyarrow.parquet as pq
+
+    metadata = pq.read_metadata(path)
+    sizes: Dict[str, int] = {}
+    for group in range(metadata.num_row_groups):
+        row_group = metadata.row_group(group)
+        for index in range(row_group.num_columns):
+            column = row_group.column(index)
+            name = column.path_in_schema.split('.')[0]
+            sizes[name] = sizes.get(name, 0) + column.total_compressed_size
+    return {n: b for n, b in sizes.items() if not n.startswith('__index_level_')}
+
+
+def unused(pipeline) -> List[UnusedColumns]:
+    """Upstream blocks whose downstream blocks all read known columns, and few of them."""
+    findings = []
+    for source in pipeline.blocks_by_uuid.values():
+        readers = [pipeline.get_block(u) for u in source.downstream_block_uuids or []]
+        if not readers or any(r is None for r in readers):
+            continue
+        read: set = set()
+        for reader in readers:
+            language = str(getattr(reader.language, 'value', reader.language))
+            if language != 'python':
+                read = None
+                break
+            try:
+                code = reader.content or ''
+            except Exception:
+                read = None
+                break
+            uses = column_uses(code)
+            # The parameters in order, as column_uses keys them: the upstream blocks'
+            # outputs arrive in that order.
+            names = list(uses)
+            position = (reader.upstream_block_uuids or []).index(source.uuid)
+            if position >= len(names) or uses[names[position]] is None:
+                read = None
+                break
+            read |= uses[names[position]]
+        if not read:
+            continue
+        path = _stored_file(pipeline, source)
+        if path is None:
+            continue
+        try:
+            sizes = _column_bytes(path)
+        except Exception:
+            continue
+        total = sum(sizes.values())
+        unused_bytes = sum(b for n, b in sizes.items() if n not in read)
+        if total < UNUSED_MIN_BYTES or unused_bytes < UNUSED_SHARE * total:
+            continue
+        findings.append(UnusedColumns(
+            columns=len(sizes),
+            output_bytes=total,
+            read=sorted(c for c in read if c in sizes),
+            readers=[r.uuid for r in readers],
+            unused_bytes=unused_bytes,
+            upstream=source.uuid,
+        ))
+    return findings
+
+
 def _contract_columns(block) -> Optional[List[str]]:
     from mage_ai.data_preparation import contracts
 
@@ -165,13 +338,45 @@ def _stored_columns(pipeline, block) -> Optional[List[str]]:
     """The columns of the block's most recent stored output_0, read from its footer."""
     import time
 
-    from mage_ai.column_atlas.sources import DATAFRAME_FILE
-    from mage_ai.data_preparation.models.variable import VARIABLE_DIR
-
     key = (pipeline.uuid, block.uuid)
     cached = _cache.get(key)
     if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
         return cached[1]
+    path = _stored_file(pipeline, block)
+    columns = None
+    if path:
+        try:
+            import pyarrow.parquet as pq
+
+            names = pq.read_schema(path).names
+            # pandas keeps a named index as a column.
+            columns = [n for n in names if not n.startswith('__index_level_')]
+        except Exception:
+            columns = None
+    _cache[key] = (time.monotonic(), columns)
+    return columns
+
+
+_files: Dict[Tuple[str, str], Tuple[float, Optional[str]]] = {}
+
+
+def _stored_file(pipeline, block) -> Optional[str]:
+    """The block's most recent stored output_0 Parquet file: the editor's or a run's."""
+    import time
+
+    key = (pipeline.uuid, block.uuid)
+    cached = _files.get(key)
+    if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
+        return cached[1]
+    path = _find_stored_file(pipeline, block)
+    _files[key] = (time.monotonic(), path)
+    return path
+
+
+def _find_stored_file(pipeline, block) -> Optional[str]:
+    from mage_ai.column_atlas.sources import DATAFRAME_FILE
+    from mage_ai.data_preparation.models.variable import VARIABLE_DIR
+
     root = os.path.join(pipeline.variable_manager.pipeline_path(pipeline.uuid), VARIABLE_DIR)
     try:
         runs = sorted(
@@ -187,18 +392,7 @@ def _stored_columns(pipeline, block) -> Optional[List[str]]:
             glob.escape(run.path), '**', glob.escape(block.uuid), 'output_0', DATAFRAME_FILE,
         ), recursive=True)
     files = [f for f in candidates if os.path.isfile(f)]
-    columns = None
-    if files:
-        try:
-            import pyarrow.parquet as pq
-
-            names = pq.read_schema(max(files, key=os.path.getmtime)).names
-            # pandas keeps a named index as a column.
-            columns = [n for n in names if not n.startswith('__index_level_')]
-        except Exception:
-            columns = None
-    _cache[key] = (time.monotonic(), columns)
-    return columns
+    return max(files, key=os.path.getmtime) if files else None
 
 
 def check(pipeline) -> List[ColumnFinding]:
