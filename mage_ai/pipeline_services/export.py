@@ -1637,8 +1637,8 @@ def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optiona
     windows = [b.get('uuid') for b in blocks if b.get('window')]
     if windows:
         problems.append(
-            f'{prefix}: delivery: exactly_once does not keep block state yet, and '
-            f'{", ".join(windows)} keep{"s" if len(windows) == 1 else ""} windows.'
+            f'{prefix}: delivery: exactly_once does not keep windows yet, and '
+            f'{", ".join(windows)} keep{"s" if len(windows) == 1 else ""} them.'
         )
         return None
     capture_.notes.append(

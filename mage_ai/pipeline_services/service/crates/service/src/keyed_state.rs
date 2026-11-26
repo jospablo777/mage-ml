@@ -14,6 +14,13 @@
 //! `<data>/state/<pipeline>/<block>/partition-<n>.json`, or in the object store of
 //! MAGE_SERVICE_STATE_URL (state_files.rs). A restart loads it and, with offsets, skips the
 //! messages it already holds.
+//!
+//! With exactly-once delivery (Kafka transactions) a message the saved state holds is not
+//! done: the transaction that wrote its outputs may not have committed, and skipped, its
+//! outputs would be lost. So the file also keeps the state as of the last committed
+//! transaction (`committed`), and the first message read in a partition after a load tells
+//! which one stands: when the newest state already holds it, its transaction did not commit,
+//! and the committed state is used instead (`reconcile`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -32,6 +39,19 @@ struct Saved {
     /// Per key, when its timer fires.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     timers: BTreeMap<String, i64>,
+    /// Exactly-once: the state as of the last committed transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    committed: Option<Box<Saved>>,
+}
+
+impl Saved {
+    /// This state without its committed one (which is never nested).
+    fn alone(&self) -> Saved {
+        Saved {
+            committed: None,
+            ..self.clone()
+        }
+    }
 }
 
 /// A batch's changes: a key's new value, or None when the key was removed.
@@ -56,12 +76,17 @@ pub struct Partition {
     applied: Option<i64>,
     /// Each batch's changes, by its last position, oldest first.
     pending: Vec<(Option<i64>, Update)>,
+    /// Exactly-once: the state as of the last committed transaction, once reconciled.
+    committed: Option<Saved>,
+    /// Exactly-once: the partition's first message since the load was looked at.
+    reconciled: bool,
 }
 
 pub struct KeyedState {
     files: crate::state_files::StateFiles,
     /// Shared with the service API, which reads keys (`view`).
     partitions: StateView,
+    exactly_once: bool,
 }
 
 /// A block's keyed state as the service API reads it: the partitions this instance holds.
@@ -129,7 +154,15 @@ impl KeyedState {
         KeyedState {
             files: files.into(),
             partitions: StateView::default(),
+            exactly_once: false,
         }
+    }
+
+    /// Exactly-once delivery: the saved state falls back to the last committed one (module
+    /// docs).
+    pub fn exactly_once(mut self, on: bool) -> KeyedState {
+        self.exactly_once = on;
+        self
     }
 
     pub fn view(&self) -> StateView {
@@ -162,6 +195,8 @@ impl KeyedState {
                     applied: saved.applied,
                     saved,
                     pending: Vec::new(),
+                    committed: None,
+                    reconciled: false,
                 })
             }
         };
@@ -171,6 +206,48 @@ impl KeyedState {
     /// The last position the state holds in the partition.
     pub fn applied(&mut self, partition: u32) -> Result<Option<i64>, String> {
         self.with(partition, |state| state.applied)
+    }
+
+    /// Exactly-once, at the partition's first message since the state was loaded (`first`,
+    /// the first offset its assignment reads): a saved state that already holds it was saved
+    /// for a transaction that did not commit, so the last committed state stands. Returns
+    /// whether it fell back.
+    pub fn reconcile(&mut self, partition: u32, first: i64) -> Result<bool, String> {
+        let exactly_once = self.exactly_once;
+        self.with(partition, |state| {
+            if !exactly_once || state.reconciled {
+                return false;
+            }
+            state.reconciled = true;
+            let committed = state.saved.committed.take();
+            if state.saved.applied.is_some_and(|applied| first <= applied) {
+                let base = committed.map(|c| c.alone()).unwrap_or_default();
+                state.current = base.values.clone();
+                state.timers = base.timers.clone();
+                state.applied = base.applied;
+                state.pending.clear();
+                state.committed = Some(base.clone());
+                state.saved = base;
+                true
+            } else {
+                state.committed = Some(state.saved.alone());
+                false
+            }
+        })
+    }
+
+    /// Exactly-once: the transaction with these positions committed, so the state saved
+    /// for them is the committed state now.
+    pub fn transaction_committed(&mut self, commits: &[Commit]) {
+        if !self.exactly_once {
+            return;
+        }
+        let mut partitions = self.partitions.write().unwrap_or_else(|p| p.into_inner());
+        for commit in commits {
+            if let Some(state) = partitions.get_mut(&commit.partition.0) {
+                state.committed = Some(state.saved.alone());
+            }
+        }
     }
 
     /// The values of these keys, for a batch.
@@ -253,6 +330,10 @@ impl KeyedState {
                     if let Some(at) = at {
                         state.saved.applied = Some(state.saved.applied.map_or(at, |a| a.max(at)));
                     }
+                }
+                if self.exactly_once {
+                    // Written with the new state: the transaction may not commit.
+                    state.saved.committed = state.committed.clone().map(Box::new);
                 }
                 serde_json::to_vec(&state.saved).map_err(|e| e.to_string())?
             };
@@ -368,9 +449,26 @@ impl BlockStates {
             .map(|(_, field, _)| field.as_str())
     }
 
+    /// Exactly-once delivery for every block's state (KeyedState::exactly_once).
+    pub fn exactly_once(mut self, on: bool) -> BlockStates {
+        self.blocks = self
+            .blocks
+            .into_iter()
+            .map(|(block, field, store)| (block, field, store.exactly_once(on)))
+            .collect();
+        self
+    }
+
     /// The last position the state holds in the partition, when positions are stable: a
-    /// message at or before it was run before a restart and is not run again.
-    pub fn held(&mut self, partition: u32) -> Result<Option<i64>, String> {
+    /// message at or before it was run before a restart and is not run again. `first` is
+    /// the batch's first message position: with exactly-once, the state of a transaction
+    /// that did not commit gives way to the committed one first (KeyedState::reconcile).
+    pub fn held(&mut self, partition: u32, first: Option<i64>) -> Result<Option<i64>, String> {
+        if let Some(first) = first {
+            for (_, _, store) in &mut self.blocks {
+                store.reconcile(partition, first)?;
+            }
+        }
         match self.blocks.first_mut() {
             Some((_, _, store)) if self.stable => store.applied(partition),
             _ => Ok(None),
@@ -495,6 +593,12 @@ impl BlockStates {
         Ok(())
     }
 
+    pub fn transaction_committed(&mut self, commits: &[Commit]) {
+        for (_, _, store) in &mut self.blocks {
+            store.transaction_committed(commits);
+        }
+    }
+
     pub fn revoked(&mut self, partition: u32) {
         for (_, _, store) in &mut self.blocks {
             store.revoked(partition);
@@ -597,6 +701,84 @@ mod tests {
             again.due(0, 1_000).unwrap(),
             BTreeMap::from_iter([("b".to_string(), 300)])
         );
+    }
+
+    fn value_of(state: &mut KeyedState, key: &str) -> Option<Value> {
+        state
+            .slice(0, &[key.to_string()])
+            .unwrap()
+            .get(key)
+            .cloned()
+    }
+
+    #[test]
+    fn exactly_once_falls_back_to_the_last_committed_state_after_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = KeyedState::new(dir.path().to_path_buf()).exactly_once(true);
+        state.reconcile(0, 0).unwrap();
+        state
+            .apply(0, Some(10), values(&[("a", Some(json!(1)))]))
+            .unwrap();
+        state.save(&[commit(10)]).unwrap();
+        state.transaction_committed(&[commit(10)]);
+        // A timer batch saves between commits; then the next commit's save, and a crash
+        // before its transaction commits.
+        state
+            .apply(0, Some(15), values(&[("a", Some(json!(2)))]))
+            .unwrap();
+        state.save(&[commit(15)]).unwrap();
+        state
+            .apply(0, Some(20), values(&[("a", Some(json!(3)))]))
+            .unwrap();
+        state.save(&[commit(20)]).unwrap();
+
+        // The source reads from 11 again: the state of 15 and 20 never committed.
+        let mut restarted = KeyedState::new(dir.path().to_path_buf()).exactly_once(true);
+        assert!(restarted.reconcile(0, 11).unwrap());
+        assert_eq!(value_of(&mut restarted, "a"), Some(json!(1)));
+        assert_eq!(restarted.applied(0).unwrap(), Some(10));
+        // Asked again (each batch asks), it does not fall back twice.
+        restarted
+            .apply(0, Some(12), values(&[("a", Some(json!(9)))]))
+            .unwrap();
+        assert!(!restarted.reconcile(0, 13).unwrap());
+        assert_eq!(value_of(&mut restarted, "a"), Some(json!(9)));
+    }
+
+    #[test]
+    fn exactly_once_keeps_the_state_of_a_committed_transaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = KeyedState::new(dir.path().to_path_buf()).exactly_once(true);
+        state.reconcile(0, 0).unwrap();
+        state
+            .apply(0, Some(10), values(&[("a", Some(json!(1)))]))
+            .unwrap();
+        state.save(&[commit(10)]).unwrap();
+        state.transaction_committed(&[commit(10)]);
+        state
+            .apply(0, Some(20), values(&[("a", Some(json!(2)))]))
+            .unwrap();
+        state.save(&[commit(20)]).unwrap();
+        state.transaction_committed(&[commit(20)]);
+
+        // Committed through 20: the source reads from 21.
+        let mut restarted = KeyedState::new(dir.path().to_path_buf()).exactly_once(true);
+        assert!(!restarted.reconcile(0, 21).unwrap());
+        assert_eq!(value_of(&mut restarted, "a"), Some(json!(2)));
+    }
+
+    #[test]
+    fn at_least_once_holds_what_it_saved_and_skips_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = KeyedState::new(dir.path().to_path_buf());
+        state
+            .apply(0, Some(20), values(&[("a", Some(json!(3)))]))
+            .unwrap();
+        state.save(&[commit(20)]).unwrap();
+        let mut restarted = KeyedState::new(dir.path().to_path_buf());
+        assert!(!restarted.reconcile(0, 11).unwrap());
+        assert_eq!(restarted.applied(0).unwrap(), Some(20));
+        assert_eq!(value_of(&mut restarted, "a"), Some(json!(3)));
     }
 
     #[test]

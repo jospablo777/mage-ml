@@ -109,6 +109,12 @@ impl TransformSession for ChainedSession {
         })
     }
 
+    fn transaction_committed(&mut self, commits: &[mage_stream_ports::Commit]) {
+        for (session, _) in &mut self.runs {
+            session.transaction_committed(commits);
+        }
+    }
+
     fn revoked(&mut self, partition: mage_stream_ports::PartitionId) {
         for (session, _) in &mut self.runs {
             session.revoked(partition);

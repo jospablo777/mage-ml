@@ -249,8 +249,13 @@ runs as fast as at least once (67,500 against 66,000 messages a second on a lapt
 - Each instance writes with its own `transactional.id`, `mageml-<pipeline>-<instance>`
   (`MAGE_SERVICE_INSTANCE_ID`, else the host name), so a restarted instance fences the one
   it replaces. Kafka's group generation fences an instance that lost its partitions.
-- Blocks that keep state (windows) are refused for now: their state is saved apart from the
-  transaction.
+- Keyed state (`state_key`) is saved with the state of the last committed transaction
+  next to it; after a crash, a state saved for a transaction that did not commit gives way
+  to that one, so each message counts once. Tested by ending the engine right after a state
+  save, before its transaction commits: each key's count came out 1, 2, ... with no gap or
+  repeat. Windows are refused for now.
+- With several instances, keep state in an object store (`MAGE_SERVICE_STATE_URL`): a
+  partition that moves to another instance then finds its state there.
 - Consumers that read with `read_uncommitted` (kafka-python's default, not librdkafka's)
   also see the messages of aborted transactions.
 

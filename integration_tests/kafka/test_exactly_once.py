@@ -1,12 +1,15 @@
 """
 Kafka to Kafka exactly once (I-36, delivery: exactly_once): the engine is killed (SIGKILL)
 three times while it streams 100,000 messages, and a consumer that reads with read_committed
-finds each input message's output once, none lost and none twice. The test runs its own
-broker.
+finds each input message's output once, none lost and none twice; a block that counts per
+key with keyed state counts each message once. The test runs its own broker.
 """
 import json
+import textwrap
 import time
 import uuid
+from collections import defaultdict
+from pathlib import Path
 
 from kafka.admin import KafkaAdminClient, NewTopic
 
@@ -92,6 +95,117 @@ def test_each_message_is_written_once_through_killed_engines(
         assert sorted(set(ids)) == list(range(TOTAL)), 'a message was lost'
         assert reached < TOTAL, 'the last kill came after the stream had committed all'
         assert len(ids) == TOTAL, f'{len(ids) - TOTAL} messages written twice'
+    except AssertionError:
+        if service:
+            explain(service, bootstrap, group, topics[0])
+        raise
+    finally:
+        if service and service.process and service.process.poll() is None:
+            service.stop()
+        pipeline.delete()
+
+
+COUNT = '''
+@transformer
+def count(messages, *args, **kwargs):
+    state = kwargs['state']
+    out = []
+    for m in messages:
+        state[m['key']] = state.get(m['key'], 0) + 1
+        out.append(dict(m, seen=state[m['key']]))
+    return out
+'''
+
+
+def counting_pipeline(project, topics, group):
+    """Kafka, a block that counts per key with keyed state, Kafka; exactly once."""
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'counting_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING, repo_path=project)
+
+    def add(suffix, kind, code, language, upstream=(), configuration=None):
+        block = Block.create(f'{name}_{suffix}', kind, project, language=language,
+                             configuration=configuration)
+        Path(block.file_path).write_text(textwrap.dedent(code))
+        pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+        return block
+
+    source = add('source', 'data_loader', f'''
+        connector_type: kafka
+        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+        topic: {topics[0]}
+        consumer_group: {group}
+        auto_offset_reset: earliest
+        batch_size: 100
+        timeout_ms: 200
+        delivery: exactly_once
+    ''', 'yaml')
+    counted = add('count', 'transformer', COUNT, 'python', [source],
+                  configuration=dict(state_key='key'))
+    add('kafka_out', 'data_exporter', f'''
+        connector_type: kafka
+        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+        topic: {topics[1]}
+    ''', 'yaml', [counted])
+    return pipeline
+
+
+def test_keyed_state_counts_each_message_once_through_killed_engines(
+    broker, mage_project, tmp_path,  # noqa: F811
+):
+    from kafka import KafkaProducer
+
+    _, bootstrap = broker
+    topics = [f'it_in_{uuid.uuid4().hex[:10]}', f'it_out_{uuid.uuid4().hex[:10]}']
+    admin = KafkaAdminClient(bootstrap_servers=bootstrap)
+    admin.create_topics([NewTopic(t, num_partitions=2, replication_factor=1) for t in topics])
+    admin.close()
+    group = f'g_{uuid.uuid4().hex[:8]}'
+    pipeline = counting_pipeline(mage_project, topics, group)
+    service = None
+    try:
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        producer = KafkaProducer(bootstrap_servers=bootstrap,
+                                 key_serializer=lambda k: k.encode(),
+                                 value_serializer=lambda v: json.dumps(v).encode())
+        for i in range(TOTAL):
+            # One key per partition's worth of messages: a key's messages stay in order.
+            key = f'k{i % 10}'
+            producer.send(topics[0], key=key, value=dict(id=i, key=key))
+        producer.flush()
+        producer.close()
+        binary = stream_service_binary()
+        reached = 0
+        for kill in range(KILLS):
+            # The engine ends itself after its 5th state save, before that transaction
+            # commits: the state saved is ahead of the committed offsets, and a restart
+            # must fall back to the committed state (a kill from outside rarely lands there).
+            service = RunningService(binary, directory, tmp_path / 'data',
+                                     KAFKA_BOOTSTRAP=bootstrap,
+                                     MAGE_SERVICE_FAULT_STATE_SAVES='5')
+            service.start()
+            wait_for(lambda service=service: service.process.poll() is not None, timeout=300)
+            reached = committed_now(bootstrap, group, topics[0])
+            print(f'crashed {kill + 1}: {reached} of {TOTAL} committed')
+        service = RunningService(binary, directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=bootstrap)
+        service.start()
+        wait_for(lambda: committed_now(bootstrap, group, topics[0]) == TOTAL, timeout=600)
+
+        out = read_committed(bootstrap, topics[1])
+        ids = [m['id'] for m in out]
+        assert sorted(set(ids)) == list(range(TOTAL)), 'a message was lost'
+        assert len(ids) == TOTAL, f'{len(ids) - TOTAL} messages written twice'
+        assert reached < TOTAL, 'the last kill came after the stream had committed all'
+        # Each key counted each of its messages once: 1, 2, ... with no gap and no repeat.
+        seen = defaultdict(list)
+        for m in out:
+            seen[m['key']].append(m['seen'])
+        for key, counts in seen.items():
+            assert sorted(counts) == list(range(1, len(counts) + 1)), key
     except AssertionError:
         if service:
             explain(service, bootstrap, group, topics[0])

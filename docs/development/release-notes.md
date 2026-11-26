@@ -13,8 +13,9 @@
   `read_committed` consumers see each output once through crashes, restarts and
   rebalances. With the engine killed three times mid-stream, 100,000 messages came out once
   each (at least once wrote 2,520 of 20,000 twice), at the throughput of at least once. The
-  source and every sink must be Kafka on one cluster; blocks that keep state are refused for
-  now.
+  source and every sink must be Kafka on one cluster. Keyed state counts each message once
+  too: after a crash, a state saved for a transaction that did not commit gives way to the
+  last committed one. Windows are refused for now.
 
 ### Compiling
 

@@ -213,6 +213,8 @@ enum LaneJob {
         tokio::sync::oneshot::Sender<Result<(), String>>,
     ),
     Revoked(PartitionId),
+    /// Exactly-once: the transaction with these positions committed.
+    TransactionCommitted(Vec<mage_stream_core::Commit>),
 }
 
 enum Internal {
@@ -493,6 +495,12 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         None => Ok(()),
                     };
                     let _ = reply.send(saved);
+                    continue;
+                }
+                LaneJob::TransactionCommitted(commits) => {
+                    if let Some(session) = transform.as_mut() {
+                        session.transaction_committed(&commits);
+                    }
                     continue;
                 }
                 LaneJob::Revoked(partition) => {
@@ -930,10 +938,19 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             );
                             continue;
                         }
+                        if keeps_state && parts.transaction.is_some() {
+                            crash_after_state_save();
+                        }
                         // Exactly-once: the positions commit with the open transaction.
                         let outcome = match &parts.transaction {
                             Some(transaction) => match transaction.commit(&commits).await {
-                                Ok(()) => CommitOutcome::Committed,
+                                Ok(()) => {
+                                    if keeps_state {
+                                        let _ = lane_tx
+                                            .send(LaneJob::TransactionCommitted(commits.clone()));
+                                    }
+                                    CommitOutcome::Committed
+                                }
                                 Err(error) => {
                                     // Nothing of it is visible: stop, and a restart reads
                                     // from the last committed positions.
@@ -1086,6 +1103,24 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
         sink.flush().await;
     }
     parts.source.close().await;
+}
+
+/// Tests only (MAGE_SERVICE_FAULT_STATE_SAVES=n): the process ends at once after the n-th
+/// state save of an exactly-once stream, before its transaction commits, the window a crash
+/// rarely lands in from outside (integration_tests/kafka/test_exactly_once.py).
+fn crash_after_state_save() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SAVES: AtomicU64 = AtomicU64::new(0);
+    let Some(limit) = std::env::var("MAGE_SERVICE_FAULT_STATE_SAVES")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    else {
+        return;
+    };
+    if SAVES.fetch_add(1, Ordering::SeqCst) + 1 == limit {
+        eprintln!("MAGE_SERVICE_FAULT_STATE_SAVES: ending after state save {limit}");
+        std::process::abort();
+    }
 }
 
 fn set_state(status: &SharedStatus, state: StreamState) {

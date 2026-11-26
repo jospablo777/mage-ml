@@ -76,6 +76,14 @@ pub enum MessageShape {
     RawText,
 }
 
+/// Whether the pipeline's stream commits its outputs and positions in transactions.
+pub(crate) fn exactly_once(pipeline: &Pipeline) -> bool {
+    pipeline
+        .stream
+        .as_ref()
+        .is_some_and(|stream| stream.delivery == mage_service_core::manifest::Delivery::ExactlyOnce)
+}
+
 impl PythonStreamSession {
     pub fn new(
         pool: Arc<PythonPool>,
@@ -94,7 +102,8 @@ impl PythonStreamSession {
             stable_positions,
             time,
         } = options;
-        let state = crate::keyed_state::BlockStates::new(order, &state_dir, stable_positions, time);
+        let state = crate::keyed_state::BlockStates::new(order, &state_dir, stable_positions, time)
+            .exactly_once(exactly_once(pipeline));
         let chain = order
             .iter()
             .map(|block| {
@@ -372,7 +381,14 @@ impl TransformSession for PythonStreamSession {
             let mut messages = Vec::with_capacity(envelopes.len());
             // With keyed state and offsets: messages the saved state already holds (read
             // again after a restart) are done; they are not run again.
-            let held = self.state.held(partition).map_err(TransformError::Crash)?;
+            let first = envelopes
+                .iter()
+                .filter(|e| !mage_stream_ports::is_timer_tick(e))
+                .find_map(|e| e.position);
+            let held = self
+                .state
+                .held(partition, first)
+                .map_err(TransformError::Crash)?;
             let mut batch_keys = self.state.batch();
             // A timer batch's envelope: never a message; its partition's due timers fire
             // (a chain passes it on with the messages of the run before).
@@ -536,6 +552,10 @@ impl TransformSession for PythonStreamSession {
         commits: &'a [mage_stream_ports::Commit],
     ) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move { self.state.save(commits) })
+    }
+
+    fn transaction_committed(&mut self, commits: &[mage_stream_ports::Commit]) {
+        self.state.transaction_committed(commits);
     }
 
     fn revoked(&mut self, partition: mage_stream_ports::PartitionId) {

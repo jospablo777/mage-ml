@@ -612,12 +612,20 @@ fn exactly_once_parts(
     }
     let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
     let transform = transform_session(service, pipeline, log, tap)?;
-    if transform.as_ref().is_some_and(|t| t.keeps_state()) {
-        return Err(
-            "delivery: exactly_once does not keep block state yet: state is saved apart from \
-             the transaction, so a crash between the two would count replayed messages twice."
-                .to_string(),
-        );
+    // Keyed state falls back to its last committed state after a crash (keyed_state.rs);
+    // windows do not yet.
+    let windows: Vec<&str> = pipeline
+        .blocks
+        .iter()
+        .filter(|b| b.window.is_some())
+        .map(|b| b.uuid.as_str())
+        .collect();
+    if !windows.is_empty() {
+        return Err(format!(
+            "delivery: exactly_once does not keep windows yet, and {} keep{} them.",
+            windows.join(", "),
+            if windows.len() == 1 { "s" } else { "" },
+        ));
     }
     let source =
         kafka_source(pipeline, settings(service, &stream.source)).map_err(|e| e.message)?;

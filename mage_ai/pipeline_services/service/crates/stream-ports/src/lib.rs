@@ -248,6 +248,9 @@ pub trait TransformSession: Send {
     }
 
     /// The partition went to another reader: its state here is no longer current.
+    /// Exactly-once: the transaction with these positions committed (after `committed`
+    /// saved the state for them).
+    fn transaction_committed(&mut self, _commits: &[Commit]) {}
     fn revoked(&mut self, _partition: PartitionId) {}
 
     /// Whether the session keeps state that `committed` saves. A session that keeps none
