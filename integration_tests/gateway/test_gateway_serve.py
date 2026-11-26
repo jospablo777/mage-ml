@@ -60,6 +60,12 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
     while not owner.get(f'{api}/block_runs?pipeline_uuid={uuid}', timeout=60).json()['block_runs']:
         assert time.monotonic() < deadline, 'the scheduler made no block runs'
         time.sleep(1)
+    # Compared once the run is over: its logs grew between the gateway's read and the
+    # server's, and a log file could appear between them (CI, I-527).
+    while owner.get(f"{api}/pipeline_runs/{run['id']}", timeout=60).json()[
+            'pipeline_run']['status'] not in ('completed', 'failed', 'cancelled'):
+        assert time.monotonic() < deadline, 'the run did not finish'
+        time.sleep(1)
 
     before = served_count(gateway)
     for path in (f'block_runs?pipeline_uuid={uuid}', 'block_runs?_limit=5',
