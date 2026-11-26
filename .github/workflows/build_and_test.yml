@@ -32,11 +32,13 @@ on:
       - ".github/workflows/build_and_test.yml"
   workflow_dispatch:
 
-# A push replaces the runs of older commits of its branch: they tested code that is gone,
-# held the runners for an hour and reported failures already fixed.
+# On a branch, a push replaces the runs of older commits: they tested code that is gone. On
+# master the running run finishes and the newest push waits behind it (GitHub keeps one
+# waiting run per group, the latest), so pushing never throws away a run half done and
+# every master run reports.
 concurrency:
   group: build-and-test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   ENV: test_mage
