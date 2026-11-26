@@ -73,7 +73,11 @@ def _run_cleanup(cleanup: Optional[Callable[[], None]], timeout: float = CLEANUP
 
 
 def _parent_identity():
-    parent = os.getppid()
+    # The process that spawned this one, when multiprocessing did: os.getppid() is the
+    # process this one was handed to when its parent died before it got here (the
+    # scheduler, still importing on a busy machine, then watched init forever).
+    spawner = multiprocessing.parent_process()
+    parent = spawner.pid if spawner is not None and spawner.pid else os.getppid()
     try:
         return parent, psutil.Process(parent).create_time()
     except (psutil.Error, OSError, RuntimeError):

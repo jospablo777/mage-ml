@@ -86,6 +86,22 @@ def _child_with_stuck_cleanup(directory):
     time.sleep(120)
 
 
+def _slow_child(directory):
+    # Imports that take long on a busy machine: the parent is killed before the child
+    # watches it.
+    _write(os.path.join(directory, 'started'), str(os.getpid()))
+    while not os.path.exists(os.path.join(directory, 'parent_gone')):
+        time.sleep(0.05)
+    exit_with_parent(interval=0.2)
+    _write(os.path.join(directory, 'child.tmp'), str(os.getpid()))
+    os.replace(os.path.join(directory, 'child.tmp'), os.path.join(directory, 'child'))
+    time.sleep(120)
+
+
+def _parent_of_slow_child(directory):
+    _parent_of_watched_child(directory, _slow_child)
+
+
 def _terminated_child(directory):
     stop_on_terminate(lambda: _write(os.path.join(directory, 'cleaned'), 'yes'))
     grandchild = subprocess.Popen(SLEEPER)
@@ -123,6 +139,18 @@ class ProcessLifetimeTest(unittest.TestCase):
         parent.join()
 
         self.assertEqual(_wait_gone([child, grandchild]), [])
+
+    def test_a_child_whose_parent_died_before_it_watched_exits(self):
+        """CI: a server killed while its scheduler still imported left the scheduler behind;
+        it took init, its new parent, for the one to watch."""
+        parent = self.context.Process(target=_parent_of_slow_child, args=(self.directory,))
+        parent.start()
+        [child] = _read_pids(os.path.join(self.directory, 'started'), 1)
+        parent.kill()
+        parent.join()
+        _write(os.path.join(self.directory, 'parent_gone'), 'yes')
+
+        self.assertEqual(_wait_gone([child]), [])
 
     def test_child_stays_while_its_parent_lives(self):
         parent = self.context.Process(target=_parent_of_watched_child, args=(self.directory,))
