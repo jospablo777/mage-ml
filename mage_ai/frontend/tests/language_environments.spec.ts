@@ -43,7 +43,7 @@ test('the Rust environment is set up and its crates changed from the Workers pag
   await page.goto('/workers');
   const table = page.getByRole('table', { name: 'R and Rust' });
   await expect(table).toBeVisible();
-  await expect(table.getByRole('link', { name: 'Open R', exact: true })).toBeVisible();
+  await expect(table.getByRole('link', { exact: true, name: 'Open R' })).toBeVisible();
   await table.getByRole('link', { name: 'Open Rust' }).click();
   await expect(page).toHaveURL(/\/workers\/languages\/rust$/);
 
@@ -66,7 +66,7 @@ test('the Rust environment is set up and its crates changed from the Workers pag
   await expect(refused).toContainText('cargo cannot resolve these crates; nothing changed.', {
     timeout: 120_000,
   });
-  await refused.getByText("Show cargo's output").click();
+  await refused.getByText('Show cargo\'s output').click();
   await expect(refused).toContainText('no matching package named `no-such-crate-mageml-e2e`');
   const after = await api.call('GET', 'language_environments/rust');
   expect(after.language_environment.manifest_text).toEqual(original);
@@ -86,12 +86,14 @@ test('the R environment says how to set it up or what stops its blocks', async (
   const commands = page.getByLabel('Commands');
   await expect(commands).toContainText('mage r', { timeout: 60_000 });
   const shown = (await api.call('GET', 'language_environments/r')).language_environment;
+  // The state the server reports: on a machine without R, what stops R blocks.
+  const label = shown.problems?.length ? 'Needs attention' : (
+    shown.exists ? 'Ready' : 'Not set up');
+  await expect(page.getByText(label, { exact: true })).toBeVisible();
   if (!shown.exists) {
-    await expect(page.getByText('Not set up', { exact: true })).toBeVisible();
     await expect(commands).toContainText('mage r init');
-  } else {
-    await expect(page.getByText(shown.problems?.length ? 'Needs attention' : 'Ready', {
-      exact: true,
-    })).toBeVisible();
+  }
+  for (const problem of shown.problems || []) {
+    await expect(page.getByText(problem, { exact: true })).toBeVisible();
   }
 });
