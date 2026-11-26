@@ -522,10 +522,20 @@ impl RunnerMachine {
             }
         }
         if self.config.exactly_once && !self.stopped {
-            // A full partition waits for a commit, and a stopping stream commits what it
-            // wrote: commit now, not at the next tick.
+            // A partition half way to its in-flight limit commits now, while it reads the
+            // other half (waiting until it was full serialized reading and committing, at
+            // 57% of at-least-once's throughput); so do a full one and a stopping stream.
+            let half = (self.config.tracker.max_in_flight_batches / 2).max(1);
+            let filling = self.transaction.iter().fold(
+                BTreeMap::<PartitionId, usize>::new(),
+                |mut counts, id| {
+                    *counts.entry(id.partition).or_default() += 1;
+                    counts
+                },
+            );
             self.barrier |=
-                (!self.paused.is_empty() || self.stopping) && !self.transaction.is_empty();
+                (!self.paused.is_empty() || self.stopping || filling.values().any(|n| *n >= half))
+                    && !self.transaction.is_empty();
             self.commit_transaction(&mut effects);
         }
         let drained: Vec<(PartitionId, AssignmentEpoch)> = self
@@ -1536,31 +1546,37 @@ mod tests {
         }
 
         #[test]
-        fn a_full_partition_commits_and_reads_on() {
+        fn a_partition_half_way_to_its_limit_commits_while_it_reads_on() {
             let mut m = eos();
             let mut all = Vec::new();
-            for seq in 0..8 {
+            for seq in 0..3 {
                 let meta = on(P, seq);
                 all.extend(m.step(Event::BatchRead(meta.clone())));
                 all.extend(done(&mut m, meta.id));
             }
-            // The ninth fills the partition: it pauses, and the barrier commits the eight.
-            let ninth = on(P, 8);
-            all.extend(m.step(Event::BatchRead(ninth.clone())));
-            assert!(all.contains(&Effect::Pause(P)), "{all:?}");
-            let committed = commits(&all);
-            assert_eq!(committed.len(), 1, "{all:?}");
-            assert!(writes(&m.step(Event::TransformDone(ninth.id))).is_empty());
+            assert!(commits(&all).is_empty(), "{all:?}");
+            // The fourth is half the limit of eight: the transaction commits.
+            let fourth = on(P, 3);
+            m.step(Event::BatchRead(fourth.clone()));
+            let effects = done(&mut m, fourth.id);
+            let committed = commits(&effects);
+            assert_eq!(committed.len(), 1, "{effects:?}");
+            assert_eq!(committed[0].position, Position::Offset(39));
+            // Reading goes on meanwhile; the fifth's writes wait for the commit.
+            let fifth = on(P, 4);
+            let effects = m.step(Event::BatchRead(fifth.clone()));
+            assert!(
+                effects.contains(&Effect::Transform(fifth.id)),
+                "{effects:?}"
+            );
+            assert!(writes(&m.step(Event::TransformDone(fifth.id))).is_empty());
             let effects = m.step(Event::Committed(committed[0].clone()));
-            assert!(effects.contains(&Effect::Resume(P)), "{effects:?}");
-            assert_eq!(writes(&effects), vec![ninth.id]);
-            // The next transaction commits at a tick.
+            assert_eq!(writes(&effects), vec![fifth.id]);
             m.step(Event::SinkReceipt {
-                id: ninth.id,
+                id: fifth.id,
                 sink: REQUIRED,
             });
-            let effects = m.step(Event::Tick);
-            assert_eq!(commits(&effects).len(), 1, "{effects:?}");
+            assert_eq!(commits(&m.step(Event::Tick)).len(), 1);
         }
 
         #[test]

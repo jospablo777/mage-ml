@@ -1,7 +1,8 @@
 """
 Kafka to Kafka exactly once (I-36, delivery: exactly_once): the engine is killed (SIGKILL)
-three times while it streams, and a consumer that reads with read_committed finds each input
-message's output once, none lost and none twice. The test runs its own broker.
+three times while it streams 100,000 messages, and a consumer that reads with read_committed
+finds each input message's output once, none lost and none twice. The test runs its own
+broker.
 """
 import json
 import time
@@ -22,7 +23,8 @@ from integration_tests.kafka.test_broker_restart import (  # noqa: F401 (fixture
 from integration_tests.kafka.test_exported_stream import produce
 from integration_tests.kafka.test_stream_conformance import make_pipeline, wait_for
 
-TOTAL = 20000
+# Enough that each kill lands mid-stream: the stream commits thousands a second.
+TOTAL = 100000
 KILLS = 3
 
 
@@ -73,7 +75,7 @@ def test_each_message_is_written_once_through_killed_engines(
                                      KAFKA_BOOTSTRAP=bootstrap)
             service.start()
             # Killed once more has committed: mid-stream, with a transaction open.
-            target = min(TOTAL - 1, reached + 2000)
+            target = min(TOTAL - 1, reached + 5000)
             wait_for(lambda target=target: committed_now(bootstrap, group, topics[0]) >= target,
                      timeout=180)
             reached = committed_now(bootstrap, group, topics[0])
@@ -83,11 +85,12 @@ def test_each_message_is_written_once_through_killed_engines(
         service = RunningService(binary, directory, tmp_path / 'data',
                                  KAFKA_BOOTSTRAP=bootstrap)
         service.start()
-        wait_for(lambda: committed_now(bootstrap, group, topics[0]) == TOTAL, timeout=180)
+        wait_for(lambda: committed_now(bootstrap, group, topics[0]) == TOTAL, timeout=300)
 
         ids = [m['id'] for m in read_committed(bootstrap, topics[1])]
 
         assert sorted(set(ids)) == list(range(TOTAL)), 'a message was lost'
+        assert reached < TOTAL, 'the last kill came after the stream had committed all'
         assert len(ids) == TOTAL, f'{len(ids) - TOTAL} messages written twice'
     except AssertionError:
         if service:

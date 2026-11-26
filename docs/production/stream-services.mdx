@@ -235,13 +235,14 @@ delivery: exactly_once
 ```
 
 With `delivery: exactly_once` on the source, the sinks' messages and the source's offsets
-commit in one Kafka transaction, about once a second (sooner when a partition holds as many
-batches as it may), so a consumer that reads with `isolation.level=read_committed` sees each
-output once, through crashes, restarts and rebalances. The default, `at_least_once`, can
-write again the batches in flight at a crash. Tested with 20,000 messages and the engine
-killed (SIGKILL) three times mid-stream: each output once with `exactly_once`, 2,520
-written twice with `at_least_once`
-(`integration_tests/kafka/test_exactly_once.py`).
+commit in one Kafka transaction, about once a second or sooner, so a consumer that reads
+with `isolation.level=read_committed` sees each output once, through crashes, restarts and
+rebalances. The default, `at_least_once`, can write again the batches in flight at a
+crash. Tested with 100,000 messages and the engine killed (SIGKILL) three times
+mid-stream: each output once (`integration_tests/kafka/test_exactly_once.py`); the same
+test at least once wrote 2,520 of 20,000 twice. A transaction commits as soon as a
+partition holds half the batches it may, while it reads the other half, so Kafka to Kafka
+runs as fast as at least once (67,500 against 66,000 messages a second on a laptop).
 
 - The source and every sink, the dead-letter sink included, must be Kafka on the source's
   cluster: the export and the service refuse anything else, saying which connector is not.
