@@ -27,6 +27,25 @@ blocks in one process. Each switch between languages ends a chain and converts t
 a pipeline in one language runs fastest. See
 [Pipeline performance](../../production/pipeline-performance.md) for the measurements.
 
+## Columns between blocks
+
+Compiling also checks that each Python block reads columns its upstream blocks give, with
+nothing to declare. The reads are found in the block's code: `df['amount']`,
+`df[['id', 'region']]`, and `pl.col('amount')` in a block with one input. A column the
+block assigns first (`df['total'] = ...`, `.assign(...)`, `.alias(...)`) is its own, and a
+parameter it binds again (`df = df.rename(...)`) is not checked after that.
+
+| The upstream block has | A column it does not give |
+| --- | --- |
+| A [data contract](../blocks/data-contracts.md) | An error: the compilation fails |
+| A stored output (from the editor or a run) | A warning: the next run can output other columns |
+| Neither | Not checked |
+
+The Compile panel lists each one under **Columns between blocks**, with the block's line:
+`total:5 total reads discount from load, which its last stored output has no column of
+that name (it has amount, qty).` A renamed column then shows before an hour of upstream
+work, not after.
+
 ## SQL chains
 
 In a production run, a ClickHouse, DuckDB or PostgreSQL SQL block followed in its stage by a SQL block

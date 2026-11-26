@@ -12,6 +12,13 @@
   source and every sink must be Kafka on one cluster; blocks that keep state are refused for
   now.
 
+### Compiling
+
+- Compiling checks the columns Python blocks read against what their upstream blocks give,
+  with nothing to declare: a column missing from the upstream block's data contract fails
+  the compilation, one missing from its last stored output is a warning. The Compile panel
+  lists them under Columns between blocks, with the line.
+
 ### Workers page: R and Rust
 
 - R and Rust environments are on the Workers page: tools and versions, what stops the

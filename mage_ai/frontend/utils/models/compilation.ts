@@ -38,6 +38,9 @@ export type CompilationSummaryType = {
   sql_chains?: { blocks: string[]; views: string[] }[];
   // SQL blocks followed by another that stay out of a chain, with the reason.
   sql_left_out?: { block: string; reason: string }[];
+  // Columns a block reads that its upstream block does not give (orchestration/columns.py):
+  // an error against its contract, a warning against its last stored output.
+  columns?: ColumnFindingType[];
   // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
   stream?: StreamPlanType;
 };
@@ -146,3 +149,14 @@ export function polyglotHint(summary?: CompilationSummaryType): string | null {
     + 'next block can read it. Written in one language, the blocks pass their data directly '
     + 'and compile into one optimized chain.';
 }
+
+export type ColumnFindingType = {
+  available: string[];
+  block: string;
+  line: number;
+  message: string;
+  missing: string[];
+  severity: 'error' | 'warning';
+  source: 'contract' | 'last output';
+  upstream: string;
+};

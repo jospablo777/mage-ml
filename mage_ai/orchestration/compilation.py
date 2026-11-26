@@ -50,7 +50,7 @@ class CompileError(Exception):
 
 @dataclass
 class Unit:
-    kind: str  # python_check, r_check, rust_chain, rust_block, r_environment
+    kind: str  # python_check, r_check, rust_chain, rust_block, r_environment, column_check
     label: str
     language: str
     block_uuids: List[str]
@@ -234,6 +234,15 @@ def summary_for(pipeline) -> Dict:
         from mage_ai.streaming.plan import stream_plan
 
         summary['stream'] = stream_plan(pipeline)
+    # Columns blocks read that their upstream blocks do not give (columns.py).
+    try:
+        from mage_ai.orchestration import columns
+
+        found = [finding.to_dict() for finding in columns.check(pipeline)]
+    except Exception:
+        found = []
+    if found:
+        summary['columns'] = found
     return summary
 
 
@@ -782,6 +791,25 @@ def _run(compilation: Compilation, pipeline) -> None:
             unit.state = 'failed'
             unit.error = str(error) or traceback.format_exc()[-2000:]
         unit.seconds = round(time.monotonic() - started, 2)
+    # A block that reads a column its upstream block's contract does not list fails the
+    # compilation; one inferred from a stored output only warns (columns.py).
+    try:
+        from mage_ai.orchestration import columns
+
+        found = columns.check(pipeline)
+    except Exception:
+        found = []
+    if found:
+        declared = [f for f in found if f.severity == 'error']
+        compilation.units.append(Unit(
+            kind='column_check',
+            label='Columns between blocks',
+            language='python',
+            block_uuids=sorted({f.block for f in found}),
+            state='failed' if declared else 'checked',
+            error='\n'.join(f.to_dict()['message'] for f in declared) or None,
+            warnings=[f.to_dict()['message'] for f in found if f.severity != 'error'],
+        ))
     compilation.finished_at = time.time()
     # The code as it started, the Rust workspace as the builds left it: a build adds its
     # crate to Cargo.lock, which is no change to what was compiled.

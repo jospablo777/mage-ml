@@ -525,6 +525,30 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
           </Spacing>
             )}
 
+          {summary?.columns?.length >= 1 && (
+          <Spacing mt={2}>
+            <Text bold small>Columns between blocks</Text>
+            {summary.columns.map(finding => (
+              <Text key={`${finding.upstream}:${finding.block}`} small>
+                <Text
+                  danger={finding.severity === 'error'}
+                  inline
+                  small
+                  warning={finding.severity !== 'error'}
+                >
+                  {finding.severity === 'error' ? 'Error' : 'Warning'}
+                </Text>
+                <Text inline monospace small> {finding.block}:{finding.line}</Text>
+                <Text inline muted small> {finding.message}</Text>
+              </Text>
+            ))}
+            <Text muted xsmall>
+              Checked against the upstream block&apos;s data contract, or else its last
+              stored output, which the next run can change.
+            </Text>
+          </Spacing>
+            )}
+
           {stops.length >= 1 && (
           <Spacing mt={2}>
             <Text bold small>Where chains stop</Text>
