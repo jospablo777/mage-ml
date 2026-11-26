@@ -150,3 +150,27 @@ a new pipeline, add 1 data loader block, and add 1 transformer block.
    MageML.
 
 <img src="https://mage-ai.github.io/assets/mage-airflow.jpg" alt="MageML in Airflow" />
+
+## What each task runs with
+
+Each Airflow task runs one block, in Airflow's process, with what `mage run` gives it:
+
+- **Variables.** The pipeline's own variables (Variables in the pipeline editor), and the
+  run's date as `kwargs['execution_date']`: Airflow's logical date, or the start of its
+  data interval when a manual Airflow 3 run has none.
+- **Packages.** Airflow's environment, so MageML and Airflow must resolve together (MageML
+  0.4.0 and Airflow 3.4.0 do). A block whose packages clash with Airflow's runs in its
+  [Python worker](../../guides/pipelines/python-workers.md) instead: a block on pandas 2 runs in
+  its worker from a DAG whose Airflow has pandas 3. Prepare the workers where Airflow runs,
+  once after each change of their `uv.lock`:
+
+```bash
+  mage workers prepare --project dags/demo_project
+  ```
+
+- **Inputs.** A block reads its upstream blocks' outputs from the project's variables, so
+  the Airflow workers that run a DAG's tasks must share the project folder.
+
+A failing block fails its Airflow task with the block's error. To run whole pipelines as
+services without MageML in Airflow's environment, use the
+[service operator](index.md) instead.

@@ -130,6 +130,8 @@ arguments to `mage_ai.run()`:
 mage_ai.run('sample_pipeline', 'repos/default_repo', filepath = 'path/to/my/file.csv', row_limit=1000)
 ```
 
+Variables you do not pass keep the pipeline's own values, as with `mage run`.
+
 ## Example - Aggregating Daily Logs
 
 A common use of ETL pipelines is to process and analyze daily events. In the

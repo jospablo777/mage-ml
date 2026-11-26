@@ -1,121 +1,151 @@
 ---
 title: "Run MageML pipelines in Prefect"
 sidebarTitle: "Prefect"
-description: "Run pipelines in Prefect flows."
+description: "Run MageML pipelines, or each of their blocks, as Prefect 3 tasks."
 ---
 
-First install MageML in the environment that runs Prefect, on Python 3.12:
+Install MageML and Prefect in the environment that runs your flows, on Python 3.12, in two
+commands:
 
 ```bash
-uv add mage-ml prefect --index mageml=https://jospablo777.github.io/mage-ml/simple/
+uv add mage-ml --index mageml=https://jospablo777.github.io/mage-ml/simple/
+uv add prefect
 ```
 
-With pip, install the release's requirements file:
-`python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.4.0/base.txt prefect`
-(`pip install mage-ai` installs upstream Mage). Then download the project code into your
-Prefect directory, for example as a git submodule.
+`uv add` takes every package it names from the index given with `--index`, and Prefect is
+not on MageML's index: `uv add mage-ml prefect --index ...` fails with "prefect was not
+found in the package registry". With pip:
+`python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.4.0/base.txt prefect`.
 
-The examples below use the Prefect 1 API (`Flow`, `ShellTask`).
+Put the MageML project next to your flows (a folder, or a git submodule). The examples
+below use a project in `demo_project/` and a pipeline `daily_sales` whose exporter writes
+to the path in the `output_path` variable. They were run with Prefect 3.9.5 and MageML
+0.4.0, and a failing block fails the Prefect task and the flow with the block's error.
 
-There are two ways to run pipelines in Prefect.
+| | One task per pipeline | One process per pipeline | One task per block |
+| --- | --- | --- | --- |
+| Prefect shows | the pipeline | the pipeline | each block |
+| A retry runs | the whole pipeline | the whole pipeline | the failed block |
+| Memory | stays in the flow's process | freed when the pipeline ends | stays in the flow's process |
+| Branches run at once | as MageML runs them | as MageML runs them | as Prefect tasks |
 
-1. Run pipeline in as a task or ShellTask.
-2. Run pipeline as a Prefect Flow.
+## One task per pipeline
 
-## Run pipeline as a Prefect task
+```python flows/pipeline_task.py
+from pathlib import Path
 
-```python Example code
-from prefect import task, Flow
 import mage_ai
-import os
+from prefect import flow, task
+
+PROJECT = str(Path(__file__).resolve().parents[1] / 'demo_project')
 
 
-ABSOLUTE_PATH = os.path.abspath(os.path.dirname(__file__))
-project_path = os.path.join(ABSOLUTE_PATH, 'project_path')
-pipeline_name = 'pipeline_name'
+@task(retries=2, retry_delay_seconds=30)
+def run_pipeline(pipeline_uuid: str, **variables):
+    # Runs every block in this process; a failing block raises and fails the task.
+    mage_ai.run(pipeline_uuid, PROJECT, **variables)
 
-@task
-def run_pipeline():
-    mage_ai.run(pipeline_name, project_path)
 
-with Flow('My Mage Flow') as flow:
-    run_pipeline()
+@flow(log_prints=True)
+def daily_sales(output_path: str = 'totals.csv'):
+    run_pipeline('daily_sales', output_path=output_path)
 
-flow.run()
+
+if __name__ == '__main__':
+    daily_sales()
 ```
 
-## Run pipeline in a ShellTask
+Keyword arguments of `mage_ai.run` are the pipeline's runtime variables
+(`kwargs['output_path']` in a block).
 
-```python Example code
-from prefect import task, Flow
-from prefect.tasks.shell import ShellTask
-from prefect.triggers import all_finished
-import mage_ai
-import os
-import prefect
+## One process per pipeline
 
-ABSOLUTE_PATH = os.path.abspath(os.path.dirname(__file__))
-project_path = os.path.join(ABSOLUTE_PATH, 'project_path')
-pipeline_name = 'pipeline_name'
+```python flows/pipeline_process.py
+import json
+import subprocess
+from pathlib import Path
 
-mage_task = ShellTask(return_all=True)
+from prefect import flow, task
 
-@task(trigger=all_finished)
-def output_print(output):
-    logger = prefect.context.get("logger")
-    for o in output:
-        logger.info(o)
-
-with Flow('My Mage Flow') as flow:
-    run_pipeline = mage_task(command=f'mage run {project_path} {pipeline_name}')
-    output = output_print(run_pipeline)
-
-flow.run()
-```
-
-## Run pipeline as a Prefect flow
-
-```python Example code
-from prefect import Task, Flow
-from mage_ai.data_preparation.models.pipeline import Pipeline
-import asyncio
-import os
+PROJECT = str(Path(__file__).resolve().parents[1] / 'demo_project')
 
 
-ABSOLUTE_PATH = os.path.abspath(os.path.dirname(__file__))
-project_path = os.path.join(ABSOLUTE_PATH, 'prefect_repo')
-pipeline_name = 'default_pipeline'
-
-pipeline = Pipeline(pipeline_name, repo_path=project_path)
-
-tasks = {}
-
-class ExecuteBlock(Task):
-    def run(self, block):
-        asyncio.run(
-            block.execute(
-                analyze_outputs=False,
-                update_status=False,
-            )
-        )
-
-flow = Flow('My Mage Flow')
-blocks_by_uuid = pipeline.blocks_by_uuid
-
-for uuid, b in blocks_by_uuid.items():
-    if b.type == 'scratchpad':
-        continue
-    task = ExecuteBlock()
-    tasks[uuid] = task
-
-for uuid, task in tasks.items():
-    flow.set_dependencies(
-        task=task,
-        upstream_tasks=[
-            tasks[block_uuid] for block_uuid in blocks_by_uuid[uuid].upstream_block_uuids
-        ],
-        keyword_tasks=dict(block=blocks_by_uuid[uuid])
+@task(retries=2, retry_delay_seconds=30)
+def run_pipeline(pipeline_uuid: str, variables: dict):
+    # The pipeline in a process of its own: its memory is freed when it ends, and its
+    # output goes to the task's log.
+    result = subprocess.run(
+        ['mage', 'run', PROJECT, pipeline_uuid, '--runtime-vars', json.dumps(variables)],
+        capture_output=True, text=True,
     )
+    print(result.stdout[-5000:])
+    if result.returncode != 0:
+        raise RuntimeError(f'mage run {pipeline_uuid} failed:\n{result.stderr[-5000:]}')
 
-flow.run()
+
+@flow(log_prints=True)
+def daily_sales(output_path: str = 'totals.csv'):
+    run_pipeline('daily_sales', {'output_path': output_path})
+
+
+if __name__ == '__main__':
+    daily_sales()
+```
+
+## One task per block
+
+```python flows/block_tasks.py
+from pathlib import Path
+
+import mage_ai
+from mage_ai.data_preparation.models.pipeline import Pipeline
+from prefect import flow, task
+
+PROJECT = str(Path(__file__).resolve().parents[1] / 'demo_project')
+
+
+@task(task_run_name='{block_uuid}', retries=2, retry_delay_seconds=30)
+def run_block(pipeline_uuid: str, block_uuid: str, variables: dict):
+    # One block; it reads its upstream blocks' outputs from the project's variables.
+    mage_ai.run(pipeline_uuid, PROJECT, block_uuid=block_uuid, **variables)
+
+
+@flow(log_prints=True)
+def pipeline_blocks(pipeline_uuid: str, variables: dict | None = None):
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=PROJECT)
+    blocks = {
+        uuid: block for uuid, block in pipeline.blocks_by_uuid.items()
+        if block.type not in ('scratchpad', 'markdown')
+    }
+    futures = {}
+    # Each block starts once its upstream blocks finished; blocks without a path between
+    # them run at the same time.
+    while len(futures) < len(blocks):
+        for uuid, block in blocks.items():
+            upstream = [u for u in block.upstream_block_uuids if u in blocks]
+            if uuid not in futures and all(u in futures for u in upstream):
+                futures[uuid] = run_block.submit(
+                    pipeline_uuid, uuid, variables or {},
+                    wait_for=[futures[u] for u in upstream],
+                )
+    for future in futures.values():
+        future.result()
+
+
+if __name__ == '__main__':
+    pipeline_blocks('daily_sales', {'output_path': 'totals.csv'})
+```
+
+Each block reads its upstream blocks' outputs from the project's variables, as when MageML
+runs it, so a retried block gets the same inputs. Blocks in a [Python
+worker](/guides/pipelines/python-workers) run in that worker here too.
+
+## Schedule a flow
+
+Prefect schedules flows; a MageML trigger on the same pipeline would run it twice. Serve
+the flow with its schedule:
+
+```python
+if __name__ == '__main__':
+    daily_sales.serve(name='daily-sales', cron='0 6 * * *')
 ```

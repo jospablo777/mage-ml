@@ -3,6 +3,7 @@ The inherited Airflow helper (orchestration/airflow.py, I-26): a DAG per pipelin
 block, with the schedule under the name the installed Airflow takes.
 """
 from datetime import datetime
+from unittest.mock import patch
 
 from mage_ai.orchestration.airflow import create_dags
 from mage_ai.tests.base_test import TestCase
@@ -61,3 +62,25 @@ class AirflowHelperTest(TestCase):
     def test_older_airflow_gets_schedule_interval(self):
         dag = self.dags(Airflow2Dag, dag_settings=dict(schedule='@hourly'))
         self.assertEqual(dag.settings['schedule_interval'], '@hourly')
+
+    def test_a_task_runs_its_block_with_the_runs_date_and_no_other_variables(self):
+        dag = self.dags(Airflow3Dag)
+        operators = {}
+        found = {}
+        calls = []
+
+        class Operator(PythonOperator):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                operators[self.task_id] = self
+
+        create_dags(self.repo_path, Airflow3Dag, Operator, globals_dict=found)
+        self.assertTrue(dag)
+        date = datetime(2026, 11, 26, 6)
+        with patch('mage_ai.run', side_effect=lambda *a, **k: calls.append((a, k))):
+            # Airflow 3 passes the task's context; a manual run has no logical date.
+            operators['block1'].python_callable(logical_date=date, ds='2026-11-26', ti=object())
+            operators['block2'].python_callable(logical_date=None, data_interval_start=None)
+        self.assertEqual(calls[0][1], dict(project_path=self.repo_path, block_uuid='block1',
+                                           execution_date=date))
+        self.assertEqual(calls[1][1], dict(project_path=self.repo_path, block_uuid='block2'))

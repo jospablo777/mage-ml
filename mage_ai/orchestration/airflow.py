@@ -25,6 +25,17 @@ def _schedule_settings(dag_class, dag_settings: Dict[str, Any]) -> Dict[str, Any
     return settings
 
 
+def _run_variables(context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    The variables a MageML trigger gives a block, from Airflow's task context: the run's
+    date as execution_date. Keywords meant for the executor (analyze_outputs, update_status)
+    reached each block as variables before.
+    """
+    date = next((context[key] for key in ('logical_date', 'data_interval_start', 'execution_date')
+                 if context.get(key) is not None), None)
+    return dict(execution_date=date) if date is not None else {}
+
+
 def create_dag(
     project_path: str,
     pipeline_uuid: str,
@@ -43,14 +54,14 @@ def create_dag(
     tasks = []
 
     def build_execute_block(block):
-        # Airflow v1.x will error unless we use *args instead of ds explicitly.
-        def _callable(*args, **kwargs):
+        # Airflow v1.x will error unless we use *args instead of ds explicitly. Airflow 2 and
+        # 3 pass the task's context as keyword arguments.
+        def _callable(*args, **context):
             mage_ai.run(
                 pipeline_uuid,
                 project_path=project_path,
                 block_uuid=block.uuid,
-                analyze_outputs=False,
-                update_status=False,
+                **_run_variables(context),
             )
 
         return _callable

@@ -11,6 +11,19 @@
 - A block that adds a log handler each time it runs logs each line once in a warm
   process, as in a new one, instead of once more per block.
 
+### Orchestrators
+
+- `mage_ai.run`, the Python API, gives blocks the pipeline's own variables under the ones
+  passed to it, as `mage run` does; a block that read one failed when run from Airflow or
+  Prefect.
+- The Airflow helper (`create_dags`) gives each block Airflow's run date as
+  `execution_date`, and no longer `analyze_outputs` and `update_status` as variables.
+  Checked with Airflow 3.4.0, including a block in a Python worker with other packages
+  than Airflow's.
+- The Prefect guide uses Prefect 3: a task per pipeline, a process per pipeline or a task
+  per block, each run with Prefect 3.9.5. Its install command failed: `uv add` took
+  Prefect from MageML's index.
+
 ### Releases
 
 - Each wheel a release builds, the package index archive and the SBOMs carry a signed
