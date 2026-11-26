@@ -1510,16 +1510,27 @@ def run_integration_stream(
 SCHEDULE_LOCK_SECONDS = 60
 
 
+# metadata.yaml parsed once per change: admission reads it for every block run it queues.
+_metadata: Dict[str, tuple] = {}
+
+
 def _project_metadata(repo_path: str) -> Dict:
     """The project's metadata.yaml as written, with settings RepoConfig does not keep."""
     import yaml
 
     path = os.path.join(repo_path, 'metadata.yaml')
     try:
+        stat = os.stat(path)
+        version = (stat.st_mtime_ns, stat.st_size)
+        cached = _metadata.get(path)
+        if cached and cached[0] == version:
+            return cached[1]
         with open(path, encoding='utf-8') as file:
-            return yaml.safe_load(file) or {}
+            config = yaml.safe_load(file) or {}
     except (OSError, yaml.YAMLError):
         return {}
+    _metadata[path] = (version, config)
+    return config
 
 
 # Peaks of recent block runs by (pipeline, block): read once a minute per scheduler, not at
