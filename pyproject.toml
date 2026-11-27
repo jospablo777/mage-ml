@@ -7,11 +7,13 @@ name = "mage-ml"
 version = "0.4.0"
 description = "Data and ML pipelines in Python, R, Rust and SQL, built for ML engineers. Based on Mage."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.15"
 authors = [{ name = "MageML contributors" }, { name = "Mage authors (upstream project)" }]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",

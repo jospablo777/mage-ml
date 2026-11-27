@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Python 3.14
+
+- MageML runs on Python 3.12 to 3.14; CI tests 3.12 and 3.14. pandas 3.1 deprecations in
+  the data cleaner and the Oracle export are fixed, and the web terminal starts its shell
+  with `posix_spawn` instead of forking the server, which crashed on macOS with 3.14.
+
 ### Broadcast values
 
 - Streams read named values (thresholds, rules, flags, model versions) that change through

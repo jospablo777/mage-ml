@@ -14,8 +14,7 @@ pipelines. Each step is a block, a file of Python, SQL, R or Rust that you run a
 in the editor, then schedule. It is based on [Mage](https://github.com/mage-ai/mage-ai)
 0.9.79 and builds on the work of the Mage team and its contributors, to whom we are
 grateful. It keeps Mage's `mage_ai` package and `mage` command, and runs on Python 3.12
-with pandas 3, Polars 2, pyarrow 26, NumPy 2 and SQLAlchemy 2. Support for Python 3.14 is
-planned.
+to 3.14 with pandas 3, Polars 2, pyarrow 26, NumPy 2 and SQLAlchemy 2.
 
 MageML was built with machine learning engineers in mind.
 
@@ -150,7 +149,8 @@ including the data-type fixes needed for pandas 3, Polars 2 and pyarrow 26.
 
 MageML installs from its own package index, with prebuilt packages for Python 3.12 on
 Linux (x86_64, arm64) and macOS on Apple silicon; on Windows, use WSL 2. No Rust or
-compiler is needed to install. We recommend [uv](https://docs.astral.sh/uv/):
+compiler is needed to install. On Python 3.13 and 3.14, a few dependencies without
+prebuilt packages for them build from source until the next release adds them. We recommend [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv init --python 3.12 my-pipelines

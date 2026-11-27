@@ -126,3 +126,12 @@ CI runs pytest for Mage, connectors, and the Singer compatibility package. Requi
 Python now requires `>=3.12,<3.13`, the version the Docker images and runtimes use. Python
 3.11 is no longer supported, and the lockfile no longer keeps its resolutions. Support for
 Python 3.14 is planned.
+
+## Follow-up: Python 3.12 to 3.14, 2026-11-27
+
+Python now requires `>=3.12,<3.15` for MageML, `mage_integrations` and the Singer package;
+the lockfile resolves 3.12, 3.13 and 3.14 with the same versions. CI runs the backend tests
+on 3.12 and 3.14, the ends of the range. The Docker images and `runtimes/` stay on 3.12.
+The full suite on 3.14 found no fault of 3.14 itself in MageML's code; it found pandas 3.1
+deprecations, a kubernetes 37 and freezegun interaction in tests, and a web terminal crash
+on macOS from forking the server (I-553 to I-555), all fixed.
