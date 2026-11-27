@@ -103,8 +103,9 @@ def load(*args, **kwargs):
   an offset, a cursor or the files done, not data. A key is letters, digits, `-`, `_` and
   `.`.
 - Each save is atomic: an attempt killed during a save leaves the value saved before it.
-- Rust blocks have the same, as `context.checkpoint` (`load`, `load_or`, `save`), reading
-  and writing the same files.
+- R blocks have `checkpoint_load(key, default)` and `checkpoint_save(key, value)`, and Rust
+  blocks `context.checkpoint` (`load`, `load_or`, `save`), reading and writing the same
+  files, so a block keeps its checkpoints when it moves to another language.
 - MageML keeps them under the pipeline's variables (`.checkpoints/<pipeline run>/<block>`);
   exported services under the run's folder. Outside a pipeline run, in the editor, a
   checkpoint lasts for the one execution.

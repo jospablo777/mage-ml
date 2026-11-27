@@ -249,6 +249,16 @@ class GlobalsTest(TestCase):
         self.assertEqual(skipped, ['circular'])
         self.assertIsNotNone(Opaque)
 
+    def test_a_checkpoint_becomes_its_runs_folder(self):
+        from mage_ai.pipeline_services.runtime.checkpoints import Checkpoint
+
+        values, skipped = exchange.globals_for_r(
+            {'checkpoint': Checkpoint('/runs/7/folder__pages', block='folder/pages')})
+        self.assertEqual((values, skipped), ({'checkpoint_root': '/runs/7'}, []))
+        # In memory (the editor): R keeps its own for the execution.
+        values, _ = exchange.globals_for_r({'checkpoint': Checkpoint(None)})
+        self.assertEqual(values, {})
+
 
 class ReadOutputTest(ExchangeTestCase):
     def test_frames_get_nullable_types(self):

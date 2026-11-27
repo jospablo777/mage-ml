@@ -225,6 +225,18 @@ limit <- variable("limit", default = 100)
 `context()` returns a named list with `block_uuid`, `block_type`, `pipeline_uuid` and
 `execution_partition`.
 
+`checkpoint_save(key, value)` keeps a long block's progress for the next attempt of its
+block run, and `checkpoint_load(key, default)` returns it, so a retried attempt resumes
+where the last one saved ([checkpoints](../../orchestration/pipeline-runs/retrying-block-runs.md#resume-a-long-block-with-checkpoints)):
+
+```r
+start <- checkpoint_load("page", default = 0)
+for (page in seq(start, pages - 1)) {
+  write_page(fetch_page(page))
+  checkpoint_save("page", page + 1)
+}
+```
+
 `variable()`, `context()`, the registration functions and the I/O functions below come
 from Mage's `mageml` package and are available in every block without `library()`. Their
 help pages are in R, such as `?mageml::write_table`.

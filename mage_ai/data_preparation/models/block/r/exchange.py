@@ -60,7 +60,7 @@ DOUBLE_DIGITS = 15
 # Marks a column of JSON text.
 JSON_FIELD_METADATA = {b'mage.json': b'true'}
 # Values R blocks cannot use.
-SKIPPED_GLOBALS = frozenset(['checkpoint', 'logger'])
+SKIPPED_GLOBALS = frozenset(['logger'])
 
 _PANDAS_TYPES = {
     pa.int8(): pd.Int8Dtype(),
@@ -294,6 +294,12 @@ def globals_for_r(global_vars: Optional[Dict]) -> Tuple[Dict, List[str]]:
     skipped = []
     for key, value in (global_vars or {}).items():
         if key in SKIPPED_GLOBALS:
+            continue
+        if key == 'checkpoint':
+            # R finds its block's checkpoints in the run's folder (mageml's checkpoint.R).
+            directory = getattr(value, 'directory', None)
+            if directory:
+                result['checkpoint_root'] = os.path.dirname(directory)
             continue
         try:
             text = json_for_r(value, default=encode_complex)

@@ -1,3 +1,9 @@
+# mageml (development version)
+
+* `checkpoint_load()` and `checkpoint_save()` keep a long block's progress
+  across the attempts of its block run, in the files Python and Rust blocks
+  use, so a retried attempt resumes where the last one saved.
+
 # mageml 0.1.0
 
 * First release, with MageML 0.1.0. Runs R data loaders, transformers, data

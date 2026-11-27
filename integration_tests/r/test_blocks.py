@@ -189,6 +189,30 @@ def test_global_variables_cross_as_json():
     )
 
 
+def test_a_retried_r_block_resumes_from_its_last_checkpoint(tmp_path):
+    from mage_ai.pipeline_services.runtime.checkpoints import Checkpoint
+
+    code = """
+data_loader(function(...) {
+  start <- checkpoint_load("page", default = 0)
+  for (page in seq(start, 4)) {
+    checkpoint_save("page", page + 1)
+    if (page == 2 && start == 0) stop("the source went away")
+  }
+  start
+})
+"""
+    checkpoint = Checkpoint(str(tmp_path / 'run' / 'pages'), block='pages')
+    options = dict(global_vars=dict(checkpoint=checkpoint), block_uuid='pages')
+
+    with pytest.raises(RBlockError, match='the source went away'):
+        execute_r_code(BlockType.DATA_LOADER, code, **options)
+    # Python reads what R saved, as the next attempt in any language would.
+    assert checkpoint.load('page') == 3
+
+    assert execute_r_code(BlockType.DATA_LOADER, code, **options).outputs[0] == 3
+
+
 def test_r_errors_name_the_block_lines():
     code = '''transformer(function(df_1) {
   validate(df_1)

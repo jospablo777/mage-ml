@@ -7,9 +7,9 @@
 - `kwargs['checkpoint'].save(key, value)` and `.load(key, default)` keep a block's progress
   across the attempts of its block run, in MageML's runs and exported services, so a
   retried attempt (or a retried pipeline run) resumes where the last one saved. Values are
-  JSON up to 1 MB, saved atomically, removed when the block run completes. Rust blocks have
-  `context.checkpoint` with the same files; Python workers without MageML installed get it
-  too.
+  JSON up to 1 MB, saved atomically, removed when the block run completes. R blocks have
+  `checkpoint_load()` and `checkpoint_save()`, Rust blocks `context.checkpoint`, with the
+  same files; Python workers without MageML installed get it too.
 
 ### Traces
 

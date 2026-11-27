@@ -113,6 +113,7 @@ execute_block <- function(job_dir) {
   state$block_type <- block_type
   state$block_function <- NULL
   state$tests <- list()
+  state$checkpoints <- NULL
   state$context <- list(
     block_uuid = manifest$block_uuid,
     block_type = block_type,
@@ -165,6 +166,7 @@ execute_chain_step <- function(job_dir, step, inputs, manifest, globals) {
   state$block_type <- block_type
   state$block_function <- NULL
   state$tests <- list()
+  state$checkpoints <- NULL
   state$context <- list(
     block_uuid = step$block_uuid,
     block_type = block_type,

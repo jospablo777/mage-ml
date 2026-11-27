@@ -570,6 +570,9 @@ def run_r_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, f
     variables = {
         key: value for key, value in _kwargs(request, block).items() if key != 'logger'
     }
+    # The run's checkpoints folder: mageml's checkpoint functions find the block's in it.
+    if request.get('checkpoint_root'):
+        variables['checkpoint_root'] = request['checkpoint_root']
     started = time.monotonic()
     try:
         run = execution.execute_r_code(
@@ -621,6 +624,8 @@ def run_r_chain(
     variables = {
         key: value for key, value in _kwargs(request, blocks[0]).items() if key != 'logger'
     }
+    if request.get('checkpoint_root'):
+        variables['checkpoint_root'] = request['checkpoint_root']
     try:
         run = execution.execute_r_chain(
             steps,

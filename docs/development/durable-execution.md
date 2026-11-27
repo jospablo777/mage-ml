@@ -56,7 +56,7 @@ So the implementation adds attempts to block runs instead of a new queue.
 1. **Interrupted blocks start over, unless they keep checkpoints.** A block interrupted by
    a scheduler restart runs again from the beginning, unless it saved its progress with
    `kwargs['checkpoint']` (`pipeline_services/runtime/checkpoints.py`), which every attempt
-   of the block run reads. R blocks have no checkpoints yet.
+   of the block run reads (Python, R and Rust blocks).
 2. **Stale outputs, narrowed.** Outputs are stored per partition and block without an
    attempt. Before each output write (`VariableManager.add_variable`, each chunk of a
    chunked output included) a worker checks in one query that its block run is RUNNING
