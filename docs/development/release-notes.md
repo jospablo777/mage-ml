@@ -9,6 +9,8 @@
   Its page adds packages or crates the same way, keeping the file's comments; `mage r add`
   and `mage rust add` do from a terminal, and `mage rust init` takes `--crate` and
   `--toolchain`.
+- A Python worker starts from a `pyproject.toml` you paste, keeping its packages, Python range
+  and uv settings.
 
 ### SQL stream blocks
 

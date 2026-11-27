@@ -118,6 +118,27 @@ class PythonWorkersTest(DBTestCase):
         with self.assertRaisesRegex(environments.PipelineEnvironmentError, 'exists already'):
             python_workers.create(self.repo_path, 'scoring', dependencies=['six==1.16.0'])
 
+    def test_a_worker_starts_from_a_pyproject_people_bring(self):
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'brought')
+        self.addCleanup(shutil.rmtree, folder, True)
+        brought = (
+            '[project]\nname = "their-tool"\nversion = "1.2.0"\nrequires-python = ">=3.12"\n'
+            'dependencies = ["six==1.16.0", "pandas"]\n\n'
+            '# Their uv settings stay.\n[tool.uv]\nresolution = "highest"\n'
+        )
+        created = python_workers.create(self.repo_path, 'brought', label='Theirs',
+                                        pyproject_text=brought)
+        self.assertEqual(created['name'], 'brought')
+        text = (folder / 'pyproject.toml').read_text()
+        self.assertIn('name = "mageml-worker-brought"', text)
+        self.assertIn('"six==1.16.0"', text)
+        self.assertIn('pyarrow', text, 'pandas reads the tables blocks get with pyarrow')
+        self.assertIn('resolution = "highest"', text)
+        self.assertIn('# Their uv settings stay.', text)
+        self.assertEqual(environments.named_workers(self.repo_path)['brought'].label, 'Theirs')
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError, r'\[project\]'):
+            python_workers.create(self.repo_path, 'other', pyproject_text='[tool.uv]\n')
+
     def test_packages_change_only_when_uv_locks_them(self):
         folder = self.worker()
         before = {n: (folder / n).read_text() for n in ('pyproject.toml', 'uv.lock')}

@@ -53,8 +53,10 @@ how many workers need attention.
 
 ### 2. Add a worker
 
-**New worker** starts from a template (Feast, MLflow, ML inference, Polars or empty) and
-asks for:
+**New worker** starts from a template (Feast, MLflow, ML inference, Polars or empty), or
+from a `pyproject.toml` you paste: its packages, `requires-python` and `[tool.uv]` settings
+are kept, the project name becomes the worker's, and pyarrow is added with pandas. It asks
+for:
 
 - **Name**: the worker's folder, `python_workers/<name>/`, and the name blocks select it by.
 - **Display name**: how the editor shows it, such as "Feature store".

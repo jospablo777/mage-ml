@@ -39,7 +39,7 @@ PythonWorkerPolicy.allow_write(
     # pipeline_uuid combines workers for a pipeline.
     # accept_older: go on when the lock has a package below its newest release.
     ['accept_older', 'combine', 'dependencies', 'description', 'label', 'name',
-     'pipeline_uuid', 'python', 'template'],
+     'pipeline_uuid', 'pyproject_text', 'python', 'template'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

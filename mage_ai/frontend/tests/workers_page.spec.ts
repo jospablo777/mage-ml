@@ -22,8 +22,10 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 });
 
 test.afterAll(async () => {
-  await api.call('DELETE', `folders/${encodeURIComponent(`python_workers/${NAME}`)}`)
-    .catch(() => null);
+  for (const folder of [NAME, `${NAME}-file`]) {
+    await api.call('DELETE', `folders/${encodeURIComponent(`python_workers/${folder}`)}`)
+      .catch(() => null);
+  }
   await apiContext.dispose();
 });
 
@@ -204,3 +206,28 @@ test('a worker whose pyproject.toml cannot be read is shown broken, with why, an
         .catch(() => null);
     }
   });
+
+test('a worker starts from a pyproject.toml people paste', async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.goto('/workers');
+  await page.getByRole('button', { name: /^(New worker|Add the first worker)$/ }).click();
+  await page.getByRole('radio', { name: /^pyproject\.toml/ }).click();
+  await page.getByLabel('Name', { exact: true }).fill(`${NAME}-file`);
+  await page.getByLabel('pyproject.toml').fill([
+    '[project]',
+    'name = "their-tool"',
+    'version = "1.0.0"',
+    'requires-python = ">=3.12"',
+    'dependencies = ["six==1.16.0"]',
+    '',
+    '[tool.uv]',
+    'resolution = "highest"',
+  ].join('\n'));
+  await page.getByRole('button', { name: 'Create and prepare' }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/workers/${NAME}-file$`), { timeout: 120_000 });
+  const worker = await api.call('GET', `python_workers/${NAME}-file`);
+  const text = JSON.stringify(worker.python_worker);
+  expect(text).toContain('six');
+  expect(text).toContain('mageml-worker-');
+});

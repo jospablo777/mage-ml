@@ -61,7 +61,7 @@ class PythonWorkerResource(GenericResource):
             except environments.PipelineEnvironmentError as error:
                 raise ApiError(dict(code=400, message=str(error)))
             template = 'combined'
-        elif template or payload.get('dependencies') is not None:
+        elif template or payload.get('dependencies') is not None or payload.get('pyproject_text'):
             import asyncio
 
             from mage_ai.data_preparation import python_workers
@@ -80,6 +80,7 @@ class PythonWorkerResource(GenericResource):
                     dependencies=dependencies,
                     python=payload.get('python') or None,
                     accept_older=bool(payload.get('accept_older')),
+                    pyproject_text=payload.get('pyproject_text') or None,
                 )
             except environments.PipelineEnvironmentError as error:
                 raise ApiError(dict(code=400, message=str(error)))

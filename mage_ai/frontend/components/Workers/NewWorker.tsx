@@ -10,6 +10,7 @@ import PackageEditor from './PackageEditor';
 import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
+import TextArea from '@oracle/elements/Inputs/TextArea';
 import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
@@ -106,8 +107,12 @@ function NewWorker({ onCancel, onCreated, workers }: {
   const [python, setPython] = useState('');
   const [error, setError] = useState<string>(null);
   const [confirm, setConfirm] = useState<HeldPackageType[]>(null);
+  // Starting from a pyproject.toml people bring, in place of a template.
+  const [fromFile, setFromFile] = useState(false);
+  const [pyproject, setPyproject] = useState('');
 
   const choose = (chosen: WorkerTemplateType) => {
+    setFromFile(false);
     setTemplate(chosen);
     setName(SUGGESTED_NAMES[chosen.id] || chosen.id);
     setLabel(chosen.label || '');
@@ -148,11 +153,12 @@ function NewWorker({ onCancel, onCreated, workers }: {
     // @ts-ignore
     create({ python_worker: {
       accept_older: acceptOlder || undefined,
-      dependencies: packages,
+      dependencies: fromFile ? undefined : packages,
       label: label || undefined,
       name: folder,
+      pyproject_text: fromFile ? pyproject : undefined,
       python: python || undefined,
-      template: template?.id || 'empty',
+      template: fromFile ? 'empty' : (template?.id || 'empty'),
     } });
   };
 
@@ -182,6 +188,19 @@ function NewWorker({ onCancel, onCreated, workers }: {
                 <Text muted small>{item.description}</Text>
               </TemplateStyle>
             ))}
+            <TemplateStyle
+              aria-checked={fromFile}
+              onClick={() => {
+                setFromFile(true);
+                setError(null);
+              }}
+              role="radio"
+              selected={fromFile}
+              type="button"
+            >
+              <TitleStyle>pyproject.toml</TitleStyle>
+              <Text muted small>A project&apos;s own, pasted: its packages, Python and uv settings.</Text>
+            </TemplateStyle>
           </TemplatesStyle>
         </Spacing>
       </Spacing>
@@ -238,21 +257,41 @@ function NewWorker({ onCancel, onCreated, workers }: {
         </FieldsStyle>
       </Spacing>
 
-      <Spacing mt={3}>
-        <Text bold small>Packages</Text>
-        <Text muted xsmall>
-          Tables reach the worker as Arrow: keep pyarrow, with pandas or Polars.
-        </Text>
-        <Spacing mt={1}>
-          <PackageEditor
-            onChange={(next) => {
-              setConfirm(null);
-              setPackages(next);
-            }}
-            value={packages}
-          />
+      {fromFile ? (
+        <Spacing mt={3}>
+          <Text bold small>pyproject.toml</Text>
+          <Text muted xsmall>
+            Its [project] packages and requires-python, and its [tool.uv] settings, are kept;
+            the name is the worker&apos;s, and pyarrow is added with pandas.
+          </Text>
+          <Spacing mt={1}>
+            <TextArea
+              aria-label="pyproject.toml"
+              fullWidth
+              monospace
+              onChange={e => setPyproject(e.target.value)}
+              rows={12}
+              value={pyproject}
+            />
+          </Spacing>
         </Spacing>
-      </Spacing>
+      ) : (
+        <Spacing mt={3}>
+          <Text bold small>Packages</Text>
+          <Text muted xsmall>
+            Tables reach the worker as Arrow: keep pyarrow, with pandas or Polars.
+          </Text>
+          <Spacing mt={1}>
+            <PackageEditor
+              onChange={(next) => {
+                setConfirm(null);
+                setPackages(next);
+              }}
+              value={packages}
+            />
+          </Spacing>
+        </Spacing>
+      )}
 
       {error && (
         <Spacing mt={2}>
@@ -273,7 +312,7 @@ function NewWorker({ onCancel, onCreated, workers }: {
       <Spacing mt={2}>
         <FlexContainer alignItems="center">
           <Button
-            disabled={!!problem || isLoading}
+            disabled={!!problem || isLoading || (fromFile && !pyproject.trim())}
             loading={isLoading}
             onClick={() => submit(false)}
             primary

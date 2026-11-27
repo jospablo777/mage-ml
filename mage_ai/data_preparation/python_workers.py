@@ -307,10 +307,13 @@ def create(
     dependencies: Optional[List[str]] = None,
     python: Optional[str] = None,
     accept_older: bool = False,
+    pyproject_text: Optional[str] = None,
 ) -> Dict:
     """
     Adds a worker: its pyproject.toml from a template (its packages replaced by
-    dependencies when given), locked by uv in a scratch folder, and only then
+    dependencies when given), or the pyproject.toml people bring (pyproject_text: its
+    packages, Python range and uv settings, with the worker's name and label, and pyarrow when
+    it lists pandas), locked by uv in a scratch folder, and only then
     python_workers/<name>/ with both files, prepared in the background. A package that does
     not resolve leaves no worker behind. Unless accept_older, a lock with a package below
     its newest release that does not fit (_older_releases) adds nothing and comes back in
@@ -331,6 +334,8 @@ def create(
         if environments.normalized_alias(name) in environments.named_workers(repo_path):
             raise PipelineEnvironmentError(f'A Python worker named {folder.name} exists already.')
         document = tomlkit.parse((folder / 'pyproject.toml').read_text())
+        if pyproject_text is not None:
+            document = _brought(document, pyproject_text, notes)
         if dependencies is not None:
             array = tomlkit.array()
             array.multiline(True)
@@ -371,6 +376,35 @@ def create(
         os.replace(staging, target)
     return dict(name=folder.name, job=environments.start_prepare(repo_path, folder.name),
                 notes=notes)
+
+
+def _brought(template, text: str, notes: List[str]):
+    """A pyproject.toml people bring, as a worker's: its name and MageML table from the
+    template, and pyarrow with pandas (_with_pyarrow)."""
+    import tomlkit
+
+    try:
+        document = tomlkit.parse(text)
+    except Exception as error:
+        raise PipelineEnvironmentError(f'The pyproject.toml is not valid TOML: {error}')
+    project = document.get('project')
+    if not isinstance(project, dict):
+        raise PipelineEnvironmentError('The pyproject.toml needs a [project] table.')
+    project['name'] = template['project']['name']
+    project.setdefault('version', '0')
+    packages, note = _with_pyarrow(_check_requirements(
+        [str(d) for d in project.get('dependencies') or []]))
+    if note:
+        notes.append(note)
+    array = tomlkit.array()
+    array.multiline(True)
+    for package in packages:
+        array.append(package)
+    project['dependencies'] = array
+    tool = document.setdefault('tool', tomlkit.table())
+    mageml = tool.setdefault('mageml', tomlkit.table())
+    mageml['worker'] = template['tool']['mageml']['worker']
+    return document
 
 
 # ---- changing a worker: locked in a copy first -------------------------------------------
