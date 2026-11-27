@@ -5,6 +5,7 @@ export enum PageNameEnum {
   DOCUMENTATION = 'documentation',
   EDIT = 'edit',
   MONITOR = 'monitor',
+  PARTITIONS = 'partitions',
   PIPELINE_LOGS = 'pipeline_logs',
   PIPELINE_RUNS = 'pipeline_runs',
   RUNS = 'runs',

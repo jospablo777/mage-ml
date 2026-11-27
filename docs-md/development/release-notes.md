@@ -10,7 +10,8 @@
   missing, queued, running, failed, done, or stale when the code changed since it ran or a
   declared upstream pipeline's same partition ran after it. `mage partitions` and
   `/api/pipeline_partitions` show them, run the missing, stale or failed ones, and accept the
-  current code for changes that do not change results.
+  current code for changes that do not change results; the pipeline's Partitions tab shows
+  them as a calendar with the same actions.
 
 ### Checkpoints inside long blocks
 

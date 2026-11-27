@@ -1,6 +1,7 @@
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import {
   BackfillV2,
+  CalendarDate,
   Code,
   DocumentIcon,
   Lightning,
@@ -72,6 +73,15 @@ export function buildNavigationItems(
       linkProps: {
         as: `/pipelines/${pipelineUUID}/backfills`,
         href: '/pipelines/[pipeline]/backfills',
+      },
+    }, {
+      Icon: CalendarDate,
+      id: PageNameEnum.PARTITIONS,
+      isSelected: () => PageNameEnum.PARTITIONS === pageName,
+      label: () => 'Partitions',
+      linkProps: {
+        as: `/pipelines/${pipelineUUID}/partitions`,
+        href: '/pipelines/[pipeline]/partitions',
       },
     });
   }

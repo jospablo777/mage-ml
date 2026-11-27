@@ -43,6 +43,8 @@ export type CompilationSummaryType = {
   columns?: ColumnFindingType[];
   unused_columns?: UnusedColumnsType[];
   advice?: AdviceType[];
+  /** Problems of the pipeline's partitions declaration (partition_state.check). */
+  partitions?: { problems: string[] };
   // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
   stream?: StreamPlanType;
 };

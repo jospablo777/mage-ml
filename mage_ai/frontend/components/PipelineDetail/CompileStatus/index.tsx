@@ -549,6 +549,15 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
           </Spacing>
             )}
 
+          {summary?.partitions?.problems?.length >= 1 && (
+          <Spacing mt={2}>
+            <Text bold small>Partitions</Text>
+            {summary.partitions.problems.map(problem => (
+              <Text danger key={problem} small>{problem}</Text>
+            ))}
+          </Spacing>
+            )}
+
           {summary?.advice?.length >= 1 && (
           <Spacing mt={2}>
             <Text bold small>From recent runs</Text>

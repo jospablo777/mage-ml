@@ -78,6 +78,15 @@ run when you ask.
 
 ## Run and inspect them
 
+The pipeline's **Partitions** tab shows the counts as its headline ("1 failed, 5 stale,
+7 missing of 57 partitions"), a grid of the partitions colored by state (a calendar of weeks
+for daily partitions, a row per day for hourly ones), each linking to its latest run, and the
+actions: Run missing, Run stale, Run failed and Accept current code. Hovering a stale
+partition says why. The Compile panel shows a declaration's errors and upstream pipelines
+whose partitions differ.
+
+The same from a terminal:
+
 ```bash
 mage partitions my_project daily_sales                     # every partition and its state
 mage partitions my_project daily_sales --state stale       # only the stale ones, and why
