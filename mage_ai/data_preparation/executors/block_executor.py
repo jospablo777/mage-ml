@@ -635,6 +635,7 @@ class BlockExecutor:
                         # Update global_vars dictionary without copying it so that 'context' arg
                         # can be shared across blocks
                         global_vars.update(dict(retry=self.retry_metadata))
+                        global_vars['checkpoint'] = self._checkpoint(global_vars)
 
                         # A block of a stage gets its input from memory on the first
                         # attempt; a failed attempt may have changed it in place, so later
@@ -766,6 +767,9 @@ class BlockExecutor:
 
             if should_finish:
                 self.logger.info(f'Finish executing block with {self.__class__.__name__}.', **tags)
+                # The block run completed: its progress is not resumed again.
+                if getattr(self, '_checkpoint_store', None) is not None:
+                    self._checkpoint_store.clear()
 
                 # This is passed in from the pipeline scheduler
                 if on_complete is not None:
@@ -813,6 +817,29 @@ class BlockExecutor:
             # if not self.block_run and block_run_id:
             #     self.block_run = BlockRun.get_by_id(block_run_id)
             self.logger_manager.output_logs_to_destination()
+
+    def _checkpoint(self, global_vars: Dict):
+        """
+        The block run's checkpoints (runtime/checkpoints.py): under the pipeline's variables,
+        by pipeline run and block, so every attempt of the block run and a retry of the run
+        find them.
+        """
+        from mage_ai.pipeline_services.runtime.checkpoints import (
+            Checkpoint,
+            block_folder,
+        )
+
+        run_id = (global_vars or {}).get('pipeline_run_id')
+        if not run_id or self.pipeline is None:
+            return Checkpoint(None, block=self.block_uuid)
+        root = os.path.join(
+            self.pipeline.variable_manager.pipeline_path(self.pipeline.uuid),
+            '.checkpoints', str(run_id),
+        )
+        self._checkpoint_store = Checkpoint(
+            os.path.join(root, block_folder(self.block_uuid)), block=self.block_uuid,
+        )
+        return self._checkpoint_store
 
     def _execute(
         self,

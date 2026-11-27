@@ -80,6 +80,37 @@ retry_config:
 ```
 The retry logs show in the same block run log page.
 
+## Resume a long block with checkpoints
+
+A retried attempt runs the block again from its start. A long block (a paginated export, a
+backfill of many files) can keep its progress with `kwargs['checkpoint']`, so the next
+attempt resumes where the last one saved:
+
+```python
+@data_loader
+def load(*args, **kwargs):
+    checkpoint = kwargs['checkpoint']
+    start = checkpoint.load('page', 0)
+    for page in range(start, 100):
+        write_page(fetch(page))
+        checkpoint.save('page', page + 1)
+```
+
+- A checkpoint belongs to the block run: every attempt of it, and a retry of the failed
+  pipeline run later (Retry incomplete blocks), loads what the last attempt saved.
+- When the block run completes, its checkpoints are removed, so the next run starts fresh.
+- Values are JSON (numbers, strings, lists, mappings), at most 1 MB each: progress such as
+  an offset, a cursor or the files done, not data. A key is letters, digits, `-`, `_` and
+  `.`.
+- Each save is atomic: an attempt killed during a save leaves the value saved before it.
+- Rust blocks have the same, as `context.checkpoint` (`load`, `load_or`, `save`), reading
+  and writing the same files.
+- MageML keeps them under the pipeline's variables (`.checkpoints/<pipeline run>/<block>`);
+  exported services under the run's folder. Outside a pipeline run, in the editor, a
+  checkpoint lasts for the one execution.
+- The checkpoint is the progress, not the effect: a page written but not yet saved as done
+  is written again on the next attempt, so writes should be idempotent (keys, upserts).
+
 ## Retry incomplete blocks
 
 - Supported pipeline types: Standard and Integration pipelines

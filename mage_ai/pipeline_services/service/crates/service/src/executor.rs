@@ -282,6 +282,7 @@ async fn run_blocks(
                         inputs,
                         cancel: cancel.clone(),
                         trace,
+                        checkpoints: run_dir.join("checkpoints"),
                     };
                     tasks.spawn(task.run());
                     continue;
@@ -297,6 +298,7 @@ async fn run_blocks(
                     inputs,
                     cancel: cancel.clone(),
                     trace,
+                    checkpoints: run_dir.join("checkpoints"),
                 };
                 tasks.spawn(task.run());
             }
@@ -465,6 +467,8 @@ struct BlockTask {
     cancel: CancellationToken,
     /// The run's span: each attempt is a span under it.
     trace: Option<SpanContext>,
+    /// The run's checkpoints folder: blocks keep progress there across their attempts.
+    checkpoints: PathBuf,
 }
 
 /// An attempt's span, with the attributes every block attempt has.
@@ -581,6 +585,9 @@ impl BlockTask {
                         None,
                         &records,
                     );
+                    // Done: its progress is not resumed again.
+                    let _ =
+                        std::fs::remove_dir_all(self.checkpoints.join(sanitize(&self.block.uuid)));
                     self.service
                         .keep_outputs(&self.run_id, &self.block.uuid, &records);
                     self.log.info(
@@ -721,6 +728,7 @@ impl BlockTask {
         if let Some(traceparent) = traceparent {
             request["traceparent"] = json!(traceparent);
         }
+        request["checkpoint_root"] = json!(self.checkpoints);
         let reply = pool
             .run(
                 request,
@@ -790,6 +798,7 @@ impl BlockTask {
             "block_sha256": self.block.sha256,
             // A resident program started before this attempt: the job says it.
             "traceparent": traceparent,
+            "checkpoint_dir": self.checkpoints.join(sanitize(&self.block.uuid)),
         });
         std::fs::write(self.output_dir.join("job.json"), job.to_string())
             .map_err(|e| BlockFailure::retryable(format!("could not write the job: {e}")))?;
@@ -1139,6 +1148,7 @@ struct ChainTask {
     inputs: Vec<Vec<Value>>,
     cancel: CancellationToken,
     trace: Option<SpanContext>,
+    checkpoints: PathBuf,
 }
 
 impl ChainTask {
@@ -1254,6 +1264,8 @@ impl ChainTask {
                             block_finished,
                             outputs,
                         );
+                        let _ =
+                            std::fs::remove_dir_all(self.checkpoints.join(sanitize(&block.uuid)));
                         self.service
                             .keep_outputs(&self.run_id, &block.uuid, outputs);
                         let message = if planned {
@@ -1418,6 +1430,7 @@ impl ChainTask {
             "output_dir": self.output_dir,
             "run_tests": true,
             "traceparent": traceparent,
+            "checkpoint_root": self.checkpoints,
         });
         let reply = pool
             .run(request, self.log.clone(), &head.uuid, timeout, &self.cancel)
@@ -1498,6 +1511,7 @@ impl ChainTask {
                     "entry": b.entry,
                     "keep_output": keep_outputs(),
                     "block_sha256": b.sha256,
+                    "checkpoint_dir": self.checkpoints.join(sanitize(&b.uuid)),
                 })
             })
             .collect();

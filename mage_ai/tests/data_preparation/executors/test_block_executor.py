@@ -452,7 +452,7 @@ class BlockExecutorTest(BaseApiTestCase):
                 dynamic_block_uuid=None,
                 dynamic_upstream_block_uuids=None,
                 execution_partition=pipeline_run.execution_partition,
-                global_vars=dict(retry=dict(attempts=1), logger=ANY),
+                global_vars=dict(retry=dict(attempts=1), checkpoint=ANY, logger=ANY),
                 input_from_output=None,
                 logger=ANY,
                 logging_tags=dict(

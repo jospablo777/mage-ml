@@ -3803,6 +3803,13 @@ class Block(
         global_vars['configuration'] = self.configuration
         if 'context' not in global_vars:
             global_vars['context'] = dict()
+        # Progress kept across a block run's attempts; a pipeline run's block executor gives
+        # one in the run's folder, and anything else (the editor) one that lasts the run.
+        from mage_ai.pipeline_services.runtime.checkpoints import Checkpoint
+
+        checkpoint = global_vars.get('checkpoint')
+        if not isinstance(checkpoint, Checkpoint) or checkpoint.block != self.uuid:
+            global_vars['checkpoint'] = Checkpoint(None, block=self.uuid)
 
         # Add pipeline uuid and block uuid to global_vars
         global_vars['pipeline_uuid'] = self.pipeline_uuid

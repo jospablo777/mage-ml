@@ -234,6 +234,7 @@ pub fn run_job<Args, F: BlockFn<Args>>(
         scratch_dir,
         block_sha256: job.block_sha256.clone(),
         traceparent: job.traceparent.clone(),
+        checkpoint: crate::checkpoint::Checkpoint::in_dir(job.checkpoint_dir.clone()),
     };
     let upstream = job.inputs.len();
     let mut inputs = Inputs {
@@ -579,6 +580,7 @@ fn run_chain_job(entries: &ChainEntries, job_dir: &Path) -> anyhow::Result<()> {
             scratch_dir: scratch_dir.clone(),
             block_sha256: step.block_sha256.clone(),
             traceparent: job.traceparent.clone(),
+            checkpoint: crate::checkpoint::Checkpoint::in_dir(step.checkpoint_dir.clone()),
         };
         let mut inputs = Inputs {
             context: &context,

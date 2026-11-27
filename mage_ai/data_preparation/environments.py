@@ -1381,6 +1381,10 @@ def run_block(
             output_dir=str(directory / 'outputs'),
             run_tests=True,
         )
+        # The block run's checkpoints folder, which the worker opens as the block's.
+        checkpoint = (global_vars or {}).get('checkpoint')
+        if getattr(checkpoint, 'directory', None):
+            request['checkpoint_root'] = os.path.dirname(checkpoint.directory)
         repo_path = getattr(block, 'repo_path', None) or os.getcwd()
         from mage_ai.data_preparation import warm_workers
 

@@ -52,4 +52,6 @@ pub struct BlockContext {
     /// The W3C `traceparent` of the block's span when the service traces runs
     /// (OpenTelemetry): spans the block makes with it as their parent join the run's trace.
     pub traceparent: Option<String>,
+    /// Progress kept across the attempts of this block run (`checkpoint` module).
+    pub checkpoint: crate::checkpoint::Checkpoint,
 }

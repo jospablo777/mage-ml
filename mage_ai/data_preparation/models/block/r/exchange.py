@@ -60,7 +60,7 @@ DOUBLE_DIGITS = 15
 # Marks a column of JSON text.
 JSON_FIELD_METADATA = {b'mage.json': b'true'}
 # Values R blocks cannot use.
-SKIPPED_GLOBALS = frozenset(['logger'])
+SKIPPED_GLOBALS = frozenset(['checkpoint', 'logger'])
 
 _PANDAS_TYPES = {
     pa.int8(): pd.Int8Dtype(),

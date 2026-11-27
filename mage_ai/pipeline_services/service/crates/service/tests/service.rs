@@ -2548,3 +2548,40 @@ fn a_run_is_traced_from_the_api_request_into_the_block_code() {
         .unwrap();
     assert!(sent >= 3, "{sent} spans sent");
 }
+
+#[test]
+fn a_retried_attempt_resumes_from_the_blocks_last_checkpoint() {
+    let mut service = Service::with_manifest(
+        &json!({
+            "schema_version": 1,
+            "service": {"name": "checkpoints", "project": "proj",
+                        "exported_at": "2026-10-10T00:00:00Z", "mage_version": "test",
+                        "source_sha256": "abc"},
+            "pipelines": [{"uuid": "pages", "name": "pages", "max_concurrent_runs": 1,
+                "blocks": [{"uuid": "pages", "type": "data_loader", "language": "python",
+                            "file": "data_loaders/pages.py", "sha256": "0", "upstream": [],
+                            "retry": {"retries": 1, "delay_seconds": 0.1,
+                                      "max_delay_seconds": 1.0,
+                                      "exponential_backoff": false}}]}]
+        }),
+        &[(
+            "data_loaders/pages.py",
+            "@data_loader\ndef load(*args, **kwargs):\n    checkpoint = kwargs['checkpoint']\n    start = checkpoint.load('page', 0)\n    for page in range(start, 5):\n        checkpoint.save('page', page + 1)\n        if page == 2 and start == 0:\n            raise RuntimeError('the source went away')\n    return {'started_at': start}\n",
+        )],
+    );
+    service.start(&[]);
+
+    let (status, run) = service.post("/v1/pipelines/pages/runs?wait=60&output=pages", json!({}));
+
+    assert_eq!(status, 201, "{run}");
+    assert_eq!(run["status"], "completed", "{run}");
+    // The second attempt started at page 3, where the first stopped.
+    assert_eq!(run["output"], json!({"started_at": 3}), "{run}");
+    // Completed: no checkpoints are left for the block.
+    let left: Vec<PathBuf> = walk(service.dir.path())
+        .into_iter()
+        .filter(|p| p.components().any(|c| c.as_os_str() == "checkpoints"))
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}

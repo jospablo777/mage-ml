@@ -13,7 +13,8 @@ class HookBlock(Block):
             poll_interval=10,
             strategies=[HookStrategy.RAISE],
             with_trigger=True,
-            **(global_vars or {}),
+            # A hook runs no block code: it keeps no checkpoints.
+            **{k: v for k, v in (global_vars or {}).items() if k != 'checkpoint'},
         )
 
         output = None

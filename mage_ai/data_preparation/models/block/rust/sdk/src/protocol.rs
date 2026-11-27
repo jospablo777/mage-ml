@@ -35,6 +35,9 @@ pub struct Job {
     /// The span of this attempt, when the service traces runs.
     #[serde(default)]
     pub traceparent: Option<String>,
+    /// The block run's checkpoints folder; none outside a run.
+    #[serde(default)]
+    pub checkpoint_dir: Option<PathBuf>,
     /// A chain of blocks to run in this process, each taking the previous block's output
     /// in memory (see `run_chain`); `block_uuid` and `block_type` are the first block's.
     #[serde(default)]
@@ -54,6 +57,8 @@ pub struct ChainStep {
     pub keep_output: bool,
     #[serde(default)]
     pub block_sha256: Option<String>,
+    #[serde(default)]
+    pub checkpoint_dir: Option<PathBuf>,
 }
 
 /// What a chain reports: the last block's outputs, every block's tests (named

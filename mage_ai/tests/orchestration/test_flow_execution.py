@@ -437,6 +437,38 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(self.output.read_text(), '42')
         self.assertEqual(Path(str(self.output) + '.attempts').read_text(), '12')
 
+    def test_a_retried_attempt_resumes_from_the_blocks_last_checkpoint(self):
+        load = self.block('pages', 'data_loader', '''
+            @data_loader
+            def load(**kwargs):
+                checkpoint = kwargs['checkpoint']
+                start = checkpoint.load('page', 0)
+                for page in range(start, 5):
+                    checkpoint.save('page', page + 1)
+                    if page == 2 and kwargs['retry']['attempts'] == 1:
+                        raise RuntimeError('the source went away')
+                return start
+        ''')
+        load.retry_config = {'retries': 1, 'delay': 0}
+        self.pipeline.save()
+        self.block('export', 'data_exporter', '''
+            from pathlib import Path
+            @data_exporter
+            def export(value, **kwargs):
+                Path(kwargs['output_path']).write_text(str(value))
+        ''', upstream=[load])
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        # The second attempt started at page 3, where the first stopped.
+        self.assertEqual(self.output.read_text(), '3')
+        # Completed: the block run's checkpoints are gone.
+        folder = Path(self.pipeline.variable_manager.pipeline_path(self.pipeline.uuid),
+                      '.checkpoints', str(run.id), load.uuid)
+        self.assertFalse(folder.exists())
+
     def test_the_pipelines_retry_config_applies_when_the_block_leaves_it_null(self):
         load = self.block('retry', 'data_loader', '''
             @data_loader

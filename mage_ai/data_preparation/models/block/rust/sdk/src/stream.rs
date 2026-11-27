@@ -660,6 +660,7 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
                 scratch_dir: scratch_dir.clone(),
                 block_sha256: None,
                 traceparent: None,
+                checkpoint: Default::default(),
             },
             send: step.send,
             held: Held {
@@ -1002,6 +1003,7 @@ mod tests {
                 scratch_dir: std::env::temp_dir(),
                 block_sha256: None,
                 traceparent: None,
+                checkpoint: Default::default(),
             },
             send,
             held: Held {

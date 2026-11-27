@@ -470,6 +470,35 @@ def _kwargs(request: Dict, block: Dict) -> Dict:
     return values
 
 
+def _checkpoints():
+    """
+    checkpoints.py beside this file, loaded by its path: named workers' environments pin
+    their own packages, and MageML is not imported there (I-19).
+    """
+    name = 'mage_worker_checkpoints'
+    module = sys.modules.get(name)
+    if module is None:
+        import importlib.util
+
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'checkpoints.py')
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules[name] = module
+    return module
+
+
+def _checkpoint(request: Dict, block: Dict):
+    """
+    The block's checkpoints: in `checkpoint_root`/<block> (the engine's name for the block's
+    folder, with / as __), or in memory without a root.
+    """
+    Checkpoint = _checkpoints().Checkpoint
+    root = request.get('checkpoint_root')
+    name = block['uuid'].replace('/', '__').replace('\\', '__')
+    return Checkpoint(os.path.join(root, name) if root else None, block=block['uuid'])
+
+
 _R_EXECUTION = None
 
 
@@ -847,6 +876,8 @@ def execute_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List,
             f"Block {block['uuid']} has no function decorated with @{block_type}.",
         )
     kwargs = _kwargs(request, block)
+    # Progress kept across the attempts of this block run (checkpoints.py).
+    kwargs['checkpoint'] = _checkpoint(request, block)
 
     started = time.monotonic()
     try:
