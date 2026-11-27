@@ -12,6 +12,8 @@ The pipeline declares them in its metadata.yaml:
         timezone: UTC           # where days, weeks and months begin
         close_after: 2h         # a partition closes this long after its end (late data)
       upstream: [orders_raw]    # optional: pipelines with the same partitions it reads
+      schedule: on_close        # optional: run each partition when it closes
+      catch_up: 30              # at most this many closed partitions queued at once
 
 or fixed values:
 
@@ -52,6 +54,9 @@ class Declaration:
     close_after: timedelta = timedelta(0)
     values: List[str] = field(default_factory=list)
     upstream: List[str] = field(default_factory=list)
+    # 'on_close': the scheduler queues each partition when it closes (partition_schedule.py).
+    schedule: Optional[str] = None
+    catch_up: int = 30
 
     @property
     def zone(self) -> ZoneInfo:
@@ -108,7 +113,7 @@ def parse(document: Any) -> Optional[Declaration]:
             f'partitions: give one of {", ".join(KINDS)}'
             + (f'; {" and ".join(kinds)} were given.' if kinds else '.')
         )
-    unknown = set(document) - set(KINDS) - {'key', 'upstream'}
+    unknown = set(document) - set(KINDS) - {'key', 'upstream', 'schedule', 'catch_up'}
     if unknown:
         raise PartitionError(f'partitions: unknown settings {", ".join(sorted(unknown))}.')
     upstream = document.get('upstream') or []
@@ -116,7 +121,18 @@ def parse(document: Any) -> Optional[Declaration]:
         upstream = [upstream]
     if not isinstance(upstream, list) or not all(isinstance(u, str) and u for u in upstream):
         raise PartitionError('partitions: upstream is a list of pipeline UUIDs.')
+    schedule = document.get('schedule')
+    if schedule not in (None, 'on_close'):
+        raise PartitionError('partitions: schedule is on_close, or left out to run them when '
+                             'asked.')
+    catch_up = document.get('catch_up', 30)
+    if isinstance(catch_up, bool) or not isinstance(catch_up, int) or catch_up < 1:
+        raise PartitionError('partitions: catch_up is how many closed partitions are queued '
+                             'at once, 1 or more.')
     kind = kinds[0]
+    if kind == 'values' and schedule:
+        raise PartitionError('partitions: schedule: on_close is for time partitions; values '
+                             'do not close.')
     if kind == 'values':
         values = document['values']
         if not isinstance(values, list) or not values:
@@ -128,7 +144,8 @@ def parse(document: Any) -> Optional[Declaration]:
                 f'partitions: a value is letters, digits, _, . and -, not {bad[0]!r}.')
         if len(set(values)) != len(values):
             raise PartitionError('partitions: each value is listed once.')
-        return Declaration(key=key, kind=kind, values=values, upstream=list(upstream))
+        return Declaration(key=key, kind=kind, values=values, upstream=list(upstream),
+                           catch_up=catch_up)
     settings = document[kind] or {}
     if not isinstance(settings, dict):
         raise PartitionError(f'partitions: {kind} is a mapping with start.')
@@ -155,7 +172,7 @@ def parse(document: Any) -> Optional[Declaration]:
     declaration = Declaration(
         key=key, kind=kind, start=start, end=end, timezone=str(zone_name),
         close_after=_duration(settings.get('close_after'), f'partitions: {kind}.close_after'),
-        upstream=list(upstream),
+        upstream=list(upstream), schedule=schedule, catch_up=catch_up,
     )
     # Starts on a partition's boundary: a daily start at 13:00 would name days by noon.
     first = begin(declaration, value_of(declaration, start))

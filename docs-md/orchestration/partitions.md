@@ -20,6 +20,8 @@ partitions:
     timezone: America/New_York
     close_after: 2h         # wait this long after a day ends, for late data
   upstream: [orders_raw]    # optional: pipelines with the same partitions it reads
+  schedule: on_close        # optional: run each partition when it closes
+  catch_up: 30              # at most this many closed partitions queued at once
 ```
 
 or a fixed list:
@@ -38,6 +40,8 @@ partitions:
 | `close_after` | How long after its end a time partition exists, such as `2h` or `1d` (default none) |
 | `values` | Fixed partitions, such as regions or tenants |
 | `upstream` | Pipelines with the same partitions whose output this one reads |
+| `schedule` | `on_close`: the scheduler queues each time partition when it closes, so a daily pipeline runs each day for the day before. Left out, partitions run when you ask |
+| `catch_up` | With `on_close`, how many closed partitions that never ran are queued at once, newest first (default 30). After downtime the partitions that closed meanwhile are queued; when `on_close` is first turned on, older partitions wait for Run missing |
 
 A partition is named `2026-11-01T13` (hourly), `2026-11-01` (daily), `2026-11-02` (weekly: its
 Monday), `2026-11` (monthly), or its value. A time partition exists once it has closed: the
@@ -71,8 +75,8 @@ stale, since MageML cannot know which blocks import it. When a change does not c
 (a comment, a log line), **accept the current code** for those partitions: they are done again
 without running.
 
-Nothing reruns by itself: running a year of days costs time and money, so stale partitions
-run when you ask.
+Nothing reruns by itself: running a year of days costs time and money, so stale and failed
+partitions run when you ask. `schedule: on_close` only queues partitions that never ran.
 
 ## Run and inspect them
 

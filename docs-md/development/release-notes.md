@@ -11,7 +11,8 @@
   declared upstream pipeline's same partition ran after it. `mage partitions` and
   `/api/pipeline_partitions` show them, run the missing, stale or failed ones, and accept the
   current code for changes that do not change results; the pipeline's Partitions tab shows
-  them as a calendar with the same actions.
+  them as a calendar with the same actions. With `schedule: on_close` the scheduler queues
+  each time partition when it closes, catching up after downtime (at most `catch_up` at once).
 
 ### Checkpoints inside long blocks
 

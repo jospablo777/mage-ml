@@ -2306,6 +2306,18 @@ def _schedule_all():
         )
     )
 
+    # Partitions that run when they close (partition_schedule.py).
+    try:
+        from mage_ai.orchestration import partition_schedule
+
+        partition_schedule.tick(
+            pipeline for pipeline in (
+                Pipeline.get(uuid, check_if_exists=True) for uuid in repo_pipelines
+            ) if pipeline is not None
+        )
+    except Exception as error:
+        logger.warning(f'Queuing closed partitions failed: {error}')
+
     # Sync schedules from yaml file to DB
     try:
         sync_schedules(list(repo_pipelines))
