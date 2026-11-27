@@ -14,6 +14,8 @@
 
 ### SQL stream blocks
 
+- A SQL stream block declares columns (`configuration: columns: {amount: float}`): there in
+  every batch, of their type, null where a message has none or one that does not fit.
 - A SQL query that groups by a window of event time (`GROUP BY card_id,
   TUMBLE(INTERVAL '1 minute')`, `HOP`, `SESSION`) runs as the engine's window, with
   `count`, `count(DISTINCT)`, `sum`, `min`, `max` and `avg`; YAML windows take `key_as`.

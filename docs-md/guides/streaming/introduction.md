@@ -307,7 +307,19 @@ filter in a SQL block before it. Windowed queries run where windows run, in expo
 services and the Run tab.
 
 Columns follow the batch, in the order fields first appear: a field that no message of a
-batch has is not a column of that batch, and a query that names it fails the batch. A column
+batch has is not a column of that batch, and a query that names it fails the batch. To
+have a column in every batch, declare it in the block's configuration (its settings, or
+`metadata.yaml`), with `text`, `integer`, `float`, `boolean` or `json`:
+
+```yaml
+configuration:
+  columns:
+    amount: float
+    card: text
+```
+
+A declared column is in every batch, of its type: null where a message has none, or one
+that does not fit the type, such as `"x"` for a float. A column
 is Boolean, a 64-bit integer, a float or text by its values; a field with mixed types, an
 object or an array is its JSON text. A message that is not a JSON object fails on its own,
 to the dead-letter sink when the stream has one.

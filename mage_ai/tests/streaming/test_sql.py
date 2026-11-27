@@ -79,6 +79,23 @@ class StreamSqlTest(unittest.TestCase):
         )
 
 
+class DeclaredColumnsTest(unittest.TestCase):
+    def test_declared_columns_are_there_of_their_type_whatever_the_batch_holds(self):
+        # The same case and text as stream_sql.rs's test of the same name.
+        rows = sql.run(
+            'SELECT card, amount, flag, n FROM messages',
+            [dict(card=7, amount=3, n=2.5), dict(card='b', amount='x')],
+            columns=dict(amount='float', card='text', flag='boolean', n='integer'),
+        )
+        self.assertEqual(
+            [json.dumps(row, separators=(',', ':')) for row in rows],
+            ['{"card":"7","amount":3.0,"flag":null,"n":null}',
+             '{"card":"b","amount":null,"flag":null,"n":null}'],
+        )
+        with self.assertRaisesRegex(sql.StreamSqlError, 'integer, float'):
+            sql.columns_of(dict(columns=dict(a='number')))
+
+
 class WindowedSqlTest(unittest.TestCase):
     """A query grouped by a window of event time is a window block (export._window_spec)."""
 

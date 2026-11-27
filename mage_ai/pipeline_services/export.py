@@ -2248,9 +2248,14 @@ def _stream_sql_entry(pipeline, block, project: Path, prefix: str, capture_: Cap
             upstream=list(block.upstream_block_uuids or []),
             window=spec,
         )
+    try:
+        columns = stream_sql.columns_of(block.configuration)
+    except stream_sql.StreamSqlError as error:
+        problems.append(f'{where}: {error}.')
+        return None
     capture_.files.add(path)
     capture_.has_stream_sql = True
-    return dict(
+    entry = dict(
         uuid=block.uuid,
         type='transformer',
         language='sql',
@@ -2258,6 +2263,10 @@ def _stream_sql_entry(pipeline, block, project: Path, prefix: str, capture_: Cap
         sha256=_digest(path),
         upstream=list(block.upstream_block_uuids or []),
     )
+    if columns:
+        # The engine reads the declared columns from the block's configuration.
+        entry['configuration'] = dict(columns=_json_safe(block.configuration['columns']))
+    return entry
 
 
 def _is_lookup(pipeline, block) -> bool:

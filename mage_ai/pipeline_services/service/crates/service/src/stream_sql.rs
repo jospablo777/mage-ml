@@ -14,7 +14,9 @@
 //! Mage's `{{ df_1 }}` names `messages` too. The query is stateless: each batch on its own.
 //!
 //! Columns follow the batch: a field no message of a batch has is not a column of it, and
-//! numbers are read as 64-bit integers or floats. A message that is not a JSON object fails
+//! numbers are read as 64-bit integers or floats. The block's configuration `columns`
+//! declares some (`{amount: float, card: text}`): they are always there, of that type, null
+//! where a message has none or one that does not fit. A message that is not a JSON object fails
 //! on its own (to dead letters when the stream has a sink for them); a query that fails, such
 //! as one naming a column the batch does not have, fails the batch.
 
@@ -34,6 +36,38 @@ pub struct SqlSession {
     block: String,
     query: Arc<str>,
     broadcast: Arc<Broadcast>,
+    columns: Arc<Vec<(String, Kind)>>,
+}
+
+/// The columns a SQL block declares (configuration `columns`, name to type), in order.
+pub fn columns_of(
+    configuration: &serde_json::Map<String, Value>,
+) -> Result<Vec<(String, Kind)>, String> {
+    let Some(columns) = configuration.get("columns") else {
+        return Ok(Vec::new());
+    };
+    let Value::Object(columns) = columns else {
+        return Err("columns maps each column to its type, such as {amount: float}".into());
+    };
+    columns
+        .iter()
+        .map(|(name, kind)| {
+            let kind = match kind.as_str().unwrap_or("") {
+                "text" => Kind::Text,
+                "integer" => Kind::Int,
+                "float" => Kind::Float,
+                "boolean" => Kind::Bool,
+                "json" => Kind::Json,
+                other => {
+                    return Err(format!(
+                        "column {name} is {other:?}: a type is text, integer, float, boolean or \
+                         json"
+                    ));
+                }
+            };
+            Ok((name.clone(), kind))
+        })
+        .collect()
 }
 
 /// The query of a SQL block: Mage's `{{ df_1 }}`, its one upstream, is `messages`.
@@ -67,11 +101,17 @@ pub fn query_of(text: &str) -> Result<String, String> {
 }
 
 impl SqlSession {
-    pub fn new(block: &str, text: &str, broadcast: Arc<Broadcast>) -> Result<SqlSession, String> {
+    pub fn new(
+        block: &str,
+        text: &str,
+        broadcast: Arc<Broadcast>,
+        columns: Vec<(String, Kind)>,
+    ) -> Result<SqlSession, String> {
         Ok(SqlSession {
             block: block.to_string(),
             query: query_of(text)?.into(),
             broadcast,
+            columns: Arc::new(columns),
         })
     }
 }
@@ -102,9 +142,9 @@ impl<'de> serde::Deserialize<'de> for Fields {
     }
 }
 
-/// A column's type, from its values in the batch.
+/// A column's type, from its values in the batch or declared.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
+pub enum Kind {
     Null,
     Bool,
     Int,
@@ -134,11 +174,13 @@ fn merge(a: Kind, b: Kind) -> Kind {
     }
 }
 
-fn column(name: &str, cells: &[Option<&Value>]) -> Column {
-    let kind = cells
-        .iter()
-        .flatten()
-        .fold(Kind::Null, |kind, value| merge(kind, kind_of(value)));
+fn column(name: &str, cells: &[Option<&Value>], declared: Option<Kind>) -> Column {
+    let kind = declared.unwrap_or_else(|| {
+        cells
+            .iter()
+            .flatten()
+            .fold(Kind::Null, |kind, value| merge(kind, kind_of(value)))
+    });
     let name = PlSmallStr::from(name);
     let series = match kind {
         Kind::Null => Series::full_null(name, cells.len(), &DataType::Null),
@@ -181,7 +223,7 @@ fn column(name: &str, cells: &[Option<&Value>]) -> Column {
 /// JSON objects as a frame: a column per field, in the order fields first appear, typed by
 /// its values (Boolean, Int64, Float64 or String; mixed types and nested values as their
 /// JSON text). streaming/sql.py builds the editor's frames by the same rules.
-fn frame(objects: &[Fields]) -> PolarsResult<DataFrame> {
+fn frame(objects: &[Fields], declared: &[(String, Kind)]) -> PolarsResult<DataFrame> {
     let mut names: Vec<&str> = Vec::new();
     let mut index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for object in objects {
@@ -190,6 +232,13 @@ fn frame(objects: &[Fields]) -> PolarsResult<DataFrame> {
                 index.insert(name, names.len());
                 names.push(name);
             }
+        }
+    }
+    // Declared columns no message has: there, all null.
+    for (name, _) in declared {
+        if !index.contains_key(name.as_str()) {
+            index.insert(name, names.len());
+            names.push(name);
         }
     }
     let mut cells: Vec<Vec<Option<&Value>>> = vec![vec![None; objects.len()]; names.len()];
@@ -201,7 +250,10 @@ fn frame(objects: &[Fields]) -> PolarsResult<DataFrame> {
     let columns: Vec<Column> = names
         .iter()
         .zip(&cells)
-        .map(|(name, cells)| column(name, cells))
+        .map(|(name, cells)| {
+            let kind = declared.iter().find(|(d, _)| d == name).map(|(_, k)| *k);
+            column(name, cells, kind)
+        })
         .collect();
     DataFrame::new(objects.len(), columns)
 }
@@ -272,12 +324,13 @@ pub fn run(
     query: &str,
     lines: &[u8],
     broadcast: Option<&Snapshot>,
+    columns: &[(String, Kind)],
 ) -> Result<Vec<Vec<u8>>, String> {
     let mut context = SQLContext::new();
     let messages = objects(lines).map_err(|e| format!("reading the messages: {e}"))?;
     context.register(
         "messages",
-        frame(&messages)
+        frame(&messages, columns)
             .map_err(|e| format!("reading the messages: {e}"))?
             .lazy(),
     );
@@ -286,7 +339,7 @@ pub fn run(
             .map_err(|e| format!("reading the broadcast values: {e}"))?;
         context.register(
             "broadcast",
-            frame(&values)
+            frame(&values, &[])
                 .map_err(|e| format!("reading the broadcast values: {e}"))?
                 .lazy(),
         );
@@ -343,8 +396,14 @@ impl TransformSession for SqlSession {
             if count > 0 {
                 let query = self.query.clone();
                 let values = snapshot.clone();
+                let columns = self.columns.clone();
                 let rows = tokio::task::spawn_blocking(move || {
-                    run(&query, &lines, with_values.then_some(values.as_ref()))
+                    run(
+                        &query,
+                        &lines,
+                        with_values.then_some(values.as_ref()),
+                        &columns,
+                    )
                 })
                 .await
                 .map_err(|e| TransformError::Crash(e.to_string()))?
@@ -405,6 +464,7 @@ mod tests {
              WHERE amount > 100 ORDER BY card",
             lines,
             None,
+            &[],
         )
         .unwrap();
         assert_eq!(
@@ -429,6 +489,7 @@ mod tests {
              WHERE amount > threshold GROUP BY card ORDER BY card",
             lines,
             Some(&broadcast.current()),
+            &[],
         )
         .unwrap();
         assert_eq!(
@@ -449,6 +510,7 @@ mod tests {
              UNION ALL SELECT 'z' AS card, 'none' AS level FROM messages WHERE amount > 1000",
             lines,
             None,
+            &[],
         )
         .unwrap();
         assert_eq!(
@@ -463,6 +525,7 @@ mod tests {
             "SELECT * FROM messages WHERE amount > (SELECT 1 AS t FROM messages)",
             lines,
             None,
+            &[],
         )
         .unwrap_err();
         assert!(error.contains("subquery"), "{error}");
@@ -475,7 +538,7 @@ mod tests {
         let lines = br#"{"id": 1, "ok": true, "score": 1.5, "tags": ["a"], "mixed": 1}
 {"id": 2, "ok": null, "score": 2, "user": {"b": 1, "a": "x"}, "mixed": "two", "big": 18446744073709551615}
 "#;
-        let out = run("SELECT * FROM messages", lines, None).unwrap();
+        let out = run("SELECT * FROM messages", lines, None, &[]).unwrap();
         let text: Vec<String> = out
             .into_iter()
             .map(|row| String::from_utf8(row).unwrap())
@@ -489,6 +552,42 @@ mod tests {
         );
     }
 
+    /// The same case is in mage_ai/tests/streaming/test_sql.py.
+    #[test]
+    fn declared_columns_are_there_of_their_type_whatever_the_batch_holds() {
+        let configuration = serde_json::json!({"columns": {
+            "amount": "float", "card": "text", "flag": "boolean", "n": "integer"
+        }});
+        let columns = columns_of(configuration.as_object().unwrap()).unwrap();
+        let lines = br#"{"card": 7, "amount": 3, "n": 2.5}
+{"card": "b", "amount": "x"}
+"#;
+        let out = run(
+            "SELECT card, amount, flag, n FROM messages",
+            lines,
+            None,
+            &columns,
+        )
+        .unwrap();
+        let text: Vec<String> = out
+            .into_iter()
+            .map(|row| String::from_utf8(row).unwrap())
+            .collect();
+        assert_eq!(
+            text,
+            vec![
+                r#"{"card":"7","amount":3.0,"flag":null,"n":null}"#,
+                r#"{"card":"b","amount":null,"flag":null,"n":null}"#,
+            ]
+        );
+        let bad = serde_json::json!({"columns": {"a": "number"}});
+        assert!(
+            columns_of(bad.as_object().unwrap())
+                .unwrap_err()
+                .contains("integer, float")
+        );
+    }
+
     #[test]
     fn mages_upstream_reference_reads_messages_and_others_are_explained() {
         assert_eq!(
@@ -498,7 +597,7 @@ mod tests {
         let error = query_of("SELECT * FROM {{ df_2 }}").unwrap_err();
         assert!(error.contains("df_2"), "{error}");
         assert!(query_of("  ;  ").is_err());
-        let error = run("SELECT nope FROM messages", b"{\"a\": 1}\n", None).unwrap_err();
+        let error = run("SELECT nope FROM messages", b"{\"a\": 1}\n", None, &[]).unwrap_err();
         assert!(error.contains("nope"), "{error}");
     }
 
@@ -508,7 +607,7 @@ mod tests {
         let broadcast =
             Arc::new(Broadcast::open(&StateFiles::Local(dir.path().to_path_buf())).unwrap());
         let mut session =
-            SqlSession::new("pick", "SELECT a + 1 AS b FROM messages", broadcast).unwrap();
+            SqlSession::new("pick", "SELECT a + 1 AS b FROM messages", broadcast, vec![]).unwrap();
         let mut builder = EnvelopeBuilder::new();
         for value in [&b"{\"a\": 1}"[..], b"[1, 2]", b"{\"a\": 2}", b"not json"] {
             builder.push(&Envelope {

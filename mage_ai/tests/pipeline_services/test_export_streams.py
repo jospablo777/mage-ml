@@ -562,9 +562,10 @@ class StreamSqlExportTest(StreamExportTestCase):
         FROM {{ df_1 }} CROSS JOIN broadcast;
     """
 
-    def picked(self, query):
+    def picked(self, query, configuration=None):
         source = self.add('source', 'data_loader', SOURCE, language='yaml')
-        pick = self.add('pick', 'transformer', query, upstream=[source], language='sql')
+        pick = self.add('pick', 'transformer', query, upstream=[source], language='sql',
+                        configuration=configuration)
         self.add('out', 'data_exporter', SINK, upstream=[pick], language='yaml')
         return pick
 
@@ -598,6 +599,19 @@ class StreamSqlExportTest(StreamExportTestCase):
             aggregates=[['payments', 'count'], ['total', {'sum': 'amount'}]],
         ))
         self.assertNotIn('sql', capture_.engine_features, 'windows need no SQL engine')
+
+    def test_declared_columns_go_to_the_engine(self):
+        pick = self.picked('SELECT card, amount FROM messages',
+                           configuration=dict(columns=dict(amount='float', card='text')))
+        [entry] = [b for b in export.capture(self.repo_path, [self.pipeline.uuid])
+                   .manifest['pipelines'][0]['blocks'] if b['uuid'] == pick.uuid]
+        self.assertEqual(entry['configuration'],
+                         dict(columns=dict(amount='float', card='text')))
+
+    def test_a_declared_type_that_is_not_one_is_explained(self):
+        self.picked('SELECT amount FROM messages',
+                    configuration=dict(columns=dict(amount='money')))
+        self.assertIn('a type is text, integer, float, boolean or json', self.problems())
 
     def test_other_references_are_explained(self):
         self.picked('SELECT * FROM {{ df_2 }} JOIN {{ variables("x") }}')

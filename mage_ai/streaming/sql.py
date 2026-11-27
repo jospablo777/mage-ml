@@ -11,6 +11,8 @@ where windows run, in exported services and the Run tab.
 Frames are built and rows written by the engine's rules (stream_sql.rs): a column per field
 in the order fields first appear, typed by its values (Boolean, Int64, Float64, String;
 mixed types and nested values as their JSON text), and rows in the query's column order.
+The block's configuration `columns` declares some ({amount: float, card: text}): always
+there, of that type, null where a message has none or one that does not fit.
 """
 import json
 import math
@@ -82,20 +84,61 @@ def _text(value: Any) -> Optional[str]:
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
 
-def _frame(objects: List[Dict]):
+TYPES = {'text': 'text', 'integer': 'int', 'float': 'float', 'boolean': 'bool', 'json': 'json'}
+
+
+def columns_of(configuration: Optional[Dict]) -> Dict[str, str]:
+    """The columns a SQL block declares (configuration `columns`), name to kind."""
+    columns = (configuration or {}).get('columns')
+    if columns is None:
+        return {}
+    if not isinstance(columns, dict):
+        raise StreamSqlError('columns maps each column to its type, such as {amount: float}')
+    declared = {}
+    for name, kind in columns.items():
+        if kind not in TYPES:
+            raise StreamSqlError(
+                f'column {name} is {kind!r}: a type is text, integer, float, boolean or json')
+        declared[str(name)] = TYPES[kind]
+    return declared
+
+
+def _cast(value: Any, kind: str) -> Any:
+    """A value of a declared column: None when it does not fit, as the engine reads it."""
+    if value is None:
+        return None
+    if kind == 'int':
+        fits = isinstance(value, int) and not isinstance(value, bool) and \
+            -2 ** 63 <= value < 2 ** 63
+        return value if fits else None
+    if kind == 'float':
+        return float(value) if isinstance(value, (int, float)) and \
+            not isinstance(value, bool) else None
+    if kind == 'bool':
+        return value if isinstance(value, bool) else None
+    return value
+
+
+def _frame(objects: List[Dict], declared: Optional[Dict[str, str]] = None):
     import polars as pl
 
+    declared = declared or {}
     names: List[str] = []
     for item in objects:
         for name in item:
             if name not in names:
                 names.append(name)
+    names += [name for name in declared if name not in names]
     columns = []
     for name in names:
         cells = [item.get(name) for item in objects]
-        kind = 'null'
-        for cell in cells:
-            kind = _merge(kind, _kind(cell))
+        kind = declared.get(name)
+        if kind is not None:
+            cells = [_cast(c, kind) for c in cells]
+        else:
+            kind = 'null'
+            for cell in cells:
+                kind = _merge(kind, _kind(cell))
         if kind == 'null':
             columns.append(pl.Series(name, [None] * len(cells), dtype=pl.Null))
         elif kind == 'bool':
@@ -121,7 +164,8 @@ def _value(value: Any) -> Any:
     return str(value)
 
 
-def run(text: str, messages: List, broadcast: Optional[Dict] = None) -> List[Dict]:
+def run(text: str, messages: List, broadcast: Optional[Dict] = None,
+        columns: Optional[Dict] = None) -> List[Dict]:
     """The query's rows, as messages, for a batch of JSON objects."""
     import polars as pl
 
@@ -138,7 +182,8 @@ def run(text: str, messages: List, broadcast: Optional[Dict] = None) -> List[Dic
             )
     if not messages:
         return []
-    context = pl.SQLContext(messages=_frame(messages))
+    context = pl.SQLContext(messages=_frame(messages, columns_of(dict(columns=columns))
+                                            if columns else None))
     if broadcast:
         context.register('broadcast', _frame([dict(broadcast)]))
     out = context.execute(query).collect()

@@ -361,7 +361,8 @@ def _run_sql(run: List, messages: List[Any], kwargs: Dict) -> Dict:
     for block in run:
         started = time.monotonic()
         try:
-            out = stream_sql.run(block.content or '', current, kwargs.get('broadcast'))
+            out = stream_sql.run(block.content or '', current, kwargs.get('broadcast'),
+                                 (block.configuration or {}).get('columns'))
         except Exception as error:
             part['error'] = dict(block_uuid=block.uuid, message=str(error), details=None)
             return part

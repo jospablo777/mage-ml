@@ -1022,8 +1022,14 @@ fn region_session(
             .map_err(|e| format!("SQL block {}: reading {}: {e}", block.uuid, file.display()))?;
         #[cfg(feature = "sql")]
         return Ok(Box::new(
-            crate::stream_sql::SqlSession::new(&block.uuid, &text, broadcast)
-                .map_err(|e| format!("SQL block {}: {e}", block.uuid))?,
+            crate::stream_sql::SqlSession::new(
+                &block.uuid,
+                &text,
+                broadcast,
+                crate::stream_sql::columns_of(&block.configuration)
+                    .map_err(|e| format!("SQL block {}: {e}", block.uuid))?,
+            )
+            .map_err(|e| format!("SQL block {}: {e}", block.uuid))?,
         ));
         #[cfg(not(feature = "sql"))]
         return Err(format!(

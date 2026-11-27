@@ -324,6 +324,7 @@ class StreamingPipelineExecutor(PipelineExecutor):
                             downstream_block.content or '',
                             data if isinstance(data, list) else [data],
                             kwargs.get('broadcast'),
+                            (downstream_block.configuration or {}).get('columns'),
                         )
                     except Exception as error:
                         raise Exception(f'{downstream_block.uuid}: {error}') from error
