@@ -872,8 +872,13 @@ fn transform_session(
         blocks[0].upstream.clear();
         chained.push((session(&blocks, outputs, index == 0, log.clone())?, last));
     }
+    let broadcast = service
+        .broadcast(&pipeline.uuid)
+        .map_err(|e| format!("its broadcast values: {e}"))?;
     Ok(Some(Box::new(crate::stream_chain::ChainedSession::new(
-        chained, wanted,
+        chained,
+        wanted,
+        Some(broadcast),
     ))))
 }
 
@@ -999,6 +1004,9 @@ fn region_session(
             registry.insert((pipeline.uuid.clone(), block), (field, view));
         }
     };
+    let broadcast = service
+        .broadcast(&pipeline.uuid)
+        .map_err(|e| format!("its broadcast values: {e}"))?;
     if matches!(blocks[0].language, Language::Rust | Language::R) {
         let session = crate::stream_rust::RustStreamSession::new(
             service.clone(),
@@ -1013,6 +1021,7 @@ fn region_session(
                 state_dir,
                 stable_positions,
                 time: pipeline.stream.as_ref().and_then(|s| s.time.clone()),
+                broadcast,
             },
         )?;
         register(session.state_views());
@@ -1041,6 +1050,7 @@ fn region_session(
             state_dir,
             stable_positions,
             time: pipeline.stream.as_ref().and_then(|s| s.time.clone()),
+            broadcast,
         },
     );
     register(session.state_views());
@@ -1096,6 +1106,13 @@ pub fn start(service: &Arc<Service>) -> Vec<JoinHandle<()>> {
                     .insert(pipeline.uuid.clone(), switch);
                 parts.pause = Some(receiver);
                 log::info(&format!("Stream {} starts.", pipeline.uuid));
+                if let Ok(broadcast) = service.broadcast(&pipeline.uuid) {
+                    handles.push(tokio::spawn(follow_broadcast(
+                        pipeline.uuid.clone(),
+                        broadcast,
+                        service.stream_stop.clone(),
+                    )));
+                }
                 let stop = service.stream_stop.clone();
                 handles.push(tokio::spawn(stream::run(parts, status, stop)));
             }
@@ -1103,6 +1120,51 @@ pub fn start(service: &Arc<Service>) -> Vec<JoinHandle<()>> {
         }
     }
     handles
+}
+
+/// Reads a stream's broadcast values again every second, so a value set through another
+/// instance (on a shared state store) takes effect here; a value set through this one does
+/// at once. A store that cannot be read is logged once, and the last values stay.
+async fn follow_broadcast(
+    pipeline: String,
+    broadcast: Arc<crate::broadcast::Broadcast>,
+    stop: tokio_util::sync::CancellationToken,
+) {
+    let mut failing = false;
+    loop {
+        tokio::select! {
+            _ = stop.cancelled() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+        }
+        let reading = broadcast.clone();
+        match tokio::task::spawn_blocking(move || reading.refresh()).await {
+            Ok(Ok(changed)) => {
+                if failing {
+                    log::info(&format!(
+                        "Stream {pipeline}: its broadcast values read again."
+                    ));
+                    failing = false;
+                }
+                if let Some(snapshot) = changed {
+                    log::info(&format!(
+                        "Stream {pipeline}: broadcast values now {}.",
+                        match snapshot.label() {
+                            label if label.is_empty() => "none".to_string(),
+                            label => label,
+                        }
+                    ));
+                }
+            }
+            Ok(Err(error)) if !failing => {
+                log::warn(&format!(
+                    "Stream {pipeline}: cannot read its broadcast values, so it keeps the \
+                     last ones: {error}"
+                ));
+                failing = true;
+            }
+            _ => {}
+        }
+    }
 }
 
 fn fail(status: &SharedStatus, pipeline: &str, reason: &str) {

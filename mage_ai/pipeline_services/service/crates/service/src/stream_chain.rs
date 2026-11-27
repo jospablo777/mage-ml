@@ -17,14 +17,21 @@ pub struct ChainedSession {
     runs: Vec<(Box<dyn TransformSession>, String)>,
     /// The blocks whose messages the sinks write.
     wanted: BTreeSet<String>,
+    /// The stream's broadcast values: each run takes the batch's values from one snapshot.
+    broadcast: Option<std::sync::Arc<crate::broadcast::Broadcast>>,
 }
 
 impl ChainedSession {
     pub fn new(
         runs: Vec<(Box<dyn TransformSession>, String)>,
         wanted: BTreeSet<String>,
+        broadcast: Option<std::sync::Arc<crate::broadcast::Broadcast>>,
     ) -> ChainedSession {
-        ChainedSession { runs, wanted }
+        ChainedSession {
+            runs,
+            wanted,
+            broadcast,
+        }
     }
 }
 
@@ -39,6 +46,8 @@ impl TransformSession for ChainedSession {
             let tick = mage_stream_ports::read_envelope(&batch)
                 .ok()
                 .and_then(|envelopes| envelopes.into_iter().find(mage_stream_ports::is_timer_tick));
+            let _pinned = self.broadcast.as_ref().map(|b| b.pin());
+            let mut broadcast = None;
             let mut input = batch;
             let mut outputs = BTreeMap::new();
             let mut row_errors = Vec::new();
@@ -50,6 +59,7 @@ impl TransformSession for ChainedSession {
                 if index == 0 {
                     row_errors = output.row_errors;
                 }
+                broadcast = broadcast.or(output.broadcast);
                 let next = output
                     .outputs
                     .get(last.as_str())
@@ -85,6 +95,7 @@ impl TransformSession for ChainedSession {
                 outputs,
                 row_errors,
                 blocks,
+                broadcast,
             })
         })
     }
@@ -184,6 +195,7 @@ mod tests {
                         Vec::new()
                     },
                     blocks: Vec::new(),
+                    broadcast: None,
                 })
             })
         }
@@ -232,6 +244,7 @@ mod tests {
         let mut chain = ChainedSession::new(
             vec![run(&["parse"], false, true), run(&["score"], false, true)],
             ["parse".to_string(), "score".to_string()].into(),
+            None,
         );
 
         let output = chain.transform(batch(&["a", "b"])).await.unwrap();
@@ -250,6 +263,7 @@ mod tests {
         let mut chain = ChainedSession::new(
             vec![run(&["filter"], true, false), run(&["score"], false, false)],
             ["score".to_string()].into(),
+            None,
         );
 
         let output = chain.transform(batch(&["a"])).await.unwrap();

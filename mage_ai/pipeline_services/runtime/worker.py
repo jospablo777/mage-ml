@@ -29,6 +29,7 @@ import pickle
 import sys
 import time
 import traceback
+import types
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from inspect import Parameter, signature
@@ -1285,6 +1286,19 @@ def _isolate(request: Dict, messages: List, offset: int,
         return outputs, left_failures + right_failures
 
 
+def _broadcast(request: Dict) -> types.MappingProxyType:
+    """
+    The stream's broadcast values the batch runs with, by name, read-only: one mapping for
+    every block of the batch, made from the request, so a block that changes a value inside
+    one changes it for no later batch. Empty when the stream has none.
+    """
+    view = request.get('_broadcast_view')
+    if view is None:
+        view = types.MappingProxyType(dict(request.get('broadcast') or {}))
+        request['_broadcast_view'] = view
+    return view
+
+
 def _run_stream_chain(request: Dict, messages: List, state: Optional[Dict] = None,
                       fired: bool = False) -> Dict:
     """
@@ -1315,6 +1329,7 @@ def _run_stream_chain(request: Dict, messages: List, state: Optional[Dict] = Non
             continue
         function = _stream_function(block)
         kwargs = _kwargs(request, block)
+        kwargs['broadcast'] = _broadcast(request)
         if state is not None and ('state', block['uuid']) in state:
             # The block's keyed state: the values and timers of this batch's keys, to read
             # and change, the keys whose timers fired, and the time timers follow.

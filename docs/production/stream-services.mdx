@@ -285,6 +285,24 @@ orders_counts: savepoint before-v2 with 2 state files and the offsets of 2 parti
 - Tested with a stream that counts per key: started from a savepoint after reading on past it,
   the messages after the savepoint were counted again from the counts it kept, the same as the
   first time.
+- Broadcast values are not part of a savepoint: a stream started from one keeps the values
+  set since.
+
+#### Broadcast values
+
+Thresholds, rules, flags and model versions that blocks read change while the service runs:
+
+```bash
+curl -X PUT -H "Authorization: Bearer $MAGE_SERVICE_TOKEN" \
+  "$SERVICE/v1/streams/payments/broadcast/fraud_threshold" -d '{"value": 0.92, "by": "ana"}'
+curl -H "Authorization: Bearer $MAGE_SERVICE_READ_TOKEN" "$SERVICE/v1/streams/payments/broadcast"
+```
+
+Each batch runs with the values it started with, in every block. The service log says when the
+values a stream runs with change (`broadcast values now fraud_threshold@3`), and with several
+instances on `MAGE_SERVICE_STATE_URL` each reads them every second. Every version is kept under
+`GET .../broadcast/{name}/history`. Blocks read them as [Broadcast values](/guides/streaming/introduction#broadcast-values)
+describes.
 
 #### Exactly once, Kafka to Kafka
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Broadcast values
+
+- Streams read named values (thresholds, rules, flags, model versions) that change through
+  `PUT /v1/streams/{pipeline}/broadcast/{name}` while they run. Python blocks read
+  `kwargs['broadcast']`, Rust blocks take `Broadcast`, R blocks call `broadcast_get()`. Each
+  batch runs with one version of the values in every block; every version is kept with who
+  set it and why, and each batch's trace names the versions it ran with.
+
 ### Failed runs
 
 - A failed or cancelled run's page compares it with the last run that completed before it

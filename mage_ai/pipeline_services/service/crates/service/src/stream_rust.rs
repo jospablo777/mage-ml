@@ -59,6 +59,8 @@ pub struct RustStreamSession {
     live: Option<Live>,
     next_id: u64,
     state: crate::keyed_state::BlockStates,
+    /// The stream's broadcast values (broadcast.rs).
+    broadcast: Arc<crate::broadcast::Broadcast>,
 }
 
 /// What runs the blocks.
@@ -99,6 +101,9 @@ struct Live {
     pid: u32,
     reader: Reader,
     writer: Writer,
+    /// The broadcast values the program has: a batch's header carries them only when they
+    /// changed, so a started program gets them with its first batch.
+    broadcast: Option<Arc<crate::broadcast::Snapshot>>,
 }
 
 /// How a stream's Rust session runs, besides its blocks.
@@ -116,6 +121,8 @@ pub struct RustSessionOptions {
     pub stable_positions: bool,
     /// The stream's event time, which timers of keyed state follow.
     pub time: Option<mage_service_core::manifest::EventTime>,
+    /// The stream's broadcast values (broadcast.rs).
+    pub broadcast: Arc<crate::broadcast::Broadcast>,
 }
 
 impl RustStreamSession {
@@ -261,6 +268,7 @@ impl RustStreamSession {
             live: None,
             next_id: 0,
             state,
+            broadcast: options.broadcast,
         })
     }
 
@@ -332,6 +340,7 @@ impl RustStreamSession {
                             pid,
                             reader: BufReader::with_capacity(1 << 20, read),
                             writer: BufWriter::with_capacity(1 << 20, write),
+                            broadcast: None,
                         };
                         match tokio::time::timeout(START_WITHIN, read_frame(&mut live.reader)).await
                         {
@@ -445,6 +454,7 @@ impl RustStreamSession {
         id: u64,
         values: &[Vec<u8>],
         state: Option<&crate::keyed_state::Outgoing>,
+        broadcast: &Arc<crate::broadcast::Snapshot>,
     ) -> std::io::Result<Reply> {
         let live = self.live.as_mut().expect("started");
         let mut header = json!({"id": id, "count": values.len()});
@@ -454,8 +464,9 @@ impl RustStreamSession {
             header["fired"] = state.fired.clone();
             header["watermark"] = json!(state.watermark);
         }
-        let header = header.to_string();
+        let header = with_broadcast(header, &live.broadcast, broadcast);
         write_frame(&mut live.writer, header.as_bytes()).await?;
+        live.broadcast = Some(broadcast.clone());
         for value in values {
             write_frame(&mut live.writer, value).await?;
         }
@@ -686,6 +697,30 @@ fn to_batch(messages: Vec<Vec<u8>>, partition: u32) -> Result<RecordBatch, Trans
         .map_err(|e| TransformError::Protocol(e.to_string()))
 }
 
+/// A batch's header as text, with `broadcast` (the values, exact, and their versions) when
+/// they differ from those the program has.
+fn with_broadcast(
+    header: Value,
+    sent: &Option<Arc<crate::broadcast::Snapshot>>,
+    current: &Arc<crate::broadcast::Snapshot>,
+) -> String {
+    let text = header.to_string();
+    let unchanged = match sent {
+        Some(sent) => Arc::ptr_eq(sent, current) || sent.versions == current.versions,
+        None => current.versions.is_empty(),
+    };
+    if unchanged {
+        return text;
+    }
+    // The values go as their text, so numbers keep every digit.
+    format!(
+        "{},\"broadcast\":{{\"values\":{},\"versions\":{}}}}}",
+        text.strip_suffix('}').unwrap_or(&text),
+        current.values.get(),
+        json!(current.versions)
+    )
+}
+
 impl TransformSession for RustStreamSession {
     fn transform(
         &mut self,
@@ -755,15 +790,19 @@ impl TransformSession for RustStreamSession {
             let started = std::time::Instant::now();
             let messages_in = values.len() as u64;
             let cancel = self.cancel.clone();
+            let snapshot = self.broadcast.current();
             let exchanged = tokio::select! {
                 result = async {
                     match limit {
                         Some(limit) => {
-                            tokio::time::timeout(limit, self.exchange(id, &values, state.as_ref()))
-                                .await
-                                .map_err(|_| limit)
+                            tokio::time::timeout(
+                                limit,
+                                self.exchange(id, &values, state.as_ref(), &snapshot),
+                            )
+                            .await
+                            .map_err(|_| limit)
                         }
-                        None => Ok(self.exchange(id, &values, state.as_ref()).await),
+                        None => Ok(self.exchange(id, &values, state.as_ref(), &snapshot).await),
                     }
                 } => result,
                 _ = cancel.cancelled() => {
@@ -842,6 +881,7 @@ impl TransformSession for RustStreamSession {
                 outputs,
                 row_errors,
                 blocks,
+                broadcast: (!snapshot.versions.is_empty()).then(|| snapshot.label()),
             })
         })
     }
@@ -884,6 +924,50 @@ pub(crate) fn sample_ready() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_batch_header_carries_the_broadcast_values_only_when_they_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let broadcast = crate::broadcast::Broadcast::open(&crate::state_files::StateFiles::Local(
+            dir.path().to_path_buf(),
+        ))
+        .unwrap();
+        let header = || json!({"id": 1, "state": {"a": {"n": 1}}});
+        // A stream without values sends none.
+        let empty = broadcast.current();
+        assert_eq!(
+            with_broadcast(header(), &None, &empty),
+            header().to_string()
+        );
+        let value = serde_json::value::RawValue::from_string("0.12345678901234567890".into());
+        broadcast
+            .put("threshold", value.unwrap(), None, None)
+            .unwrap();
+        let first = broadcast.current();
+        let text = with_broadcast(header(), &None, &first);
+        let parsed: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            parsed["state"],
+            json!({"a": {"n": 1}}),
+            "the header is whole"
+        );
+        assert_eq!(parsed["broadcast"]["versions"], json!({"threshold": 1}));
+        assert!(
+            text.contains("0.12345678901234567890"),
+            "exact digits: {text}"
+        );
+        // The program has them: not sent again.
+        assert_eq!(
+            with_broadcast(header(), &Some(first.clone()), &first),
+            header().to_string()
+        );
+        // All removed: the program is told it has none.
+        broadcast.remove("threshold", None, None).unwrap();
+        let none = broadcast.current();
+        let parsed: Value =
+            serde_json::from_str(&with_broadcast(header(), &Some(first), &none)).unwrap();
+        assert_eq!(parsed["broadcast"]["versions"], json!({}));
+    }
 
     #[test]
     fn a_program_of_another_protocol_is_refused_with_what_to_do() {

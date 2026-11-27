@@ -518,6 +518,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     outputs: Default::default(),
                     row_errors: Vec::new(),
                     blocks: Vec::new(),
+                    broadcast: None,
                 }),
             };
             if lane_events.send(Internal::Transformed(id, result)).is_err() {
@@ -585,6 +586,9 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     events.push(event);
                 }
                 Internal::Transformed(id, Ok(output)) => {
+                    if let Some(versions) = &output.broadcast {
+                        batch_traces.broadcast(id, versions);
+                    }
                     batch_traces.transform_finished(id, None);
                     if tapping {
                         for (block, batch) in &output.outputs {
@@ -1457,6 +1461,7 @@ mod tests {
                         outputs: [("t".to_string(), batch)].into(),
                         row_errors: vec![],
                         blocks: Vec::new(),
+                        broadcast: None,
                     })
                 }
             })
@@ -1504,6 +1509,7 @@ mod tests {
                             micros: 3_000,
                         },
                     ],
+                    broadcast: None,
                 })
             })
         }
@@ -1535,6 +1541,7 @@ mod tests {
                     outputs: [("t".to_string(), batch)].into(),
                     row_errors: vec![],
                     blocks: Vec::new(),
+                    broadcast: None,
                 })
             })
         }
@@ -1695,6 +1702,7 @@ mod tests {
                     outputs: [("t".to_string(), kept)].into(),
                     row_errors,
                     blocks: Vec::new(),
+                    broadcast: None,
                 })
             })
         }

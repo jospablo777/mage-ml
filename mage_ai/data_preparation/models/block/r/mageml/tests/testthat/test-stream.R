@@ -265,3 +265,36 @@ test_that("a timer is one time, for a block with a state_key", {
   expect_match(result$reply$error$message, "one time in milliseconds")
   expect_error(timers_fired(), "while they run")
 })
+
+test_that("blocks read the broadcast values the header brought", {
+  flag <- function(messages) {
+    messages$high <- messages$amount > broadcast_get("threshold", default = 0)
+    version <- broadcast_version("threshold")
+    messages$version <- if (is.null(version)) 0 else version
+    messages
+  }
+  old <- state$broadcast
+  on.exit(state$broadcast <- old)
+  state$broadcast <- list(values = list(), versions = list())
+  expect_equal(broadcast_names(), character())
+  run <- function() {
+    result <- run_stream_batch(
+      list(stream_step(flag)),
+      raw_messages('{"amount": 50}'),
+      FALSE
+    )
+    jsonlite::fromJSON(rawToChar(result$outputs[[1]][[1]]))
+  }
+  expect_equal(run()[c("high", "version")], list(high = TRUE, version = 0))
+
+  header <- jsonlite::fromJSON(
+    '{"broadcast": {"values": {"threshold": 100, "rules": {"max": 3}},
+      "versions": {"threshold": 2, "rules": 1}}}',
+    simplifyVector = FALSE
+  )
+  state$broadcast <- header$broadcast
+  expect_equal(run()[c("high", "version")], list(high = FALSE, version = 2))
+  expect_equal(broadcast_names(), c("rules", "threshold"))
+  expect_equal(broadcast_get("rules")$max, 3)
+  expect_null(broadcast_get("missing"))
+})

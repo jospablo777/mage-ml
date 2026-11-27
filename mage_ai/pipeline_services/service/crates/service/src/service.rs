@@ -63,6 +63,8 @@ pub struct Service {
     /// Keyed state of stream blocks, by (pipeline, block): the field that keys it and what
     /// the API reads of it (`GET /v1/streams/{pipeline}/state/{block}`).
     pub stream_state: Mutex<BTreeMap<(String, String), (String, crate::keyed_state::StateView)>>,
+    /// Each stream's broadcast values, by pipeline; filled by `streams::start`.
+    pub broadcasts: Mutex<BTreeMap<String, Arc<crate::broadcast::Broadcast>>>,
     /// Streams with an HTTP source: where the API hands their requests.
     pub ingest: Mutex<BTreeMap<String, Arc<crate::streams::HttpIngest>>>,
     /// Cancelled at shutdown: streams stop reading and drain.
@@ -220,6 +222,7 @@ impl Service {
             streams: Mutex::new(BTreeMap::new()),
             stream_pause: Mutex::new(BTreeMap::new()),
             stream_state: Mutex::new(BTreeMap::new()),
+            broadcasts: Mutex::new(BTreeMap::new()),
             ingest: Mutex::new(BTreeMap::new()),
             stream_stop: CancellationToken::new(),
             residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),
@@ -304,6 +307,19 @@ impl Service {
             &self.manifest.service.name,
             pipeline,
         )
+    }
+
+    /// A stream's broadcast values, opened on first use.
+    pub fn broadcast(&self, pipeline: &str) -> Result<Arc<crate::broadcast::Broadcast>, String> {
+        let mut broadcasts = self.broadcasts.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(broadcast) = broadcasts.get(pipeline) {
+            return Ok(broadcast.clone());
+        }
+        let broadcast = Arc::new(crate::broadcast::Broadcast::open(
+            &self.state_files(pipeline),
+        )?);
+        broadcasts.insert(pipeline.to_string(), broadcast.clone());
+        Ok(broadcast)
     }
 
     pub fn shutting_down(&self) -> bool {

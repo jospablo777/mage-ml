@@ -877,6 +877,58 @@ class StreamLoadTest(WorkerTestCase):
         self.assertTrue(all(r['rss_bytes'] > 0 for r in replies))
 
 
+class StreamBroadcastTest(WorkerTestCase):
+    """A stream's broadcast values: every block of a batch reads the same, read-only."""
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+
+    def test_every_block_of_a_batch_reads_the_same_values_and_cannot_change_them(self):
+        flag = dict(self.block('''
+            @transformer
+            def f(messages, **kwargs):
+                broadcast = kwargs['broadcast']
+                try:
+                    broadcast['threshold'] = 0
+                    changed = True
+                except TypeError:
+                    changed = False
+                return [dict(m, high=m['amount'] > broadcast['threshold'], changed=changed,
+                             seen=id(broadcast)) for m in messages]
+        ''', name='flag'), upstream=[])
+        keep = dict(self.block('''
+            @transformer
+            def f(messages, **kwargs):
+                rules = kwargs['broadcast'].get('rules', {})
+                return [dict(m, same=m['seen'] == id(kwargs['broadcast']),
+                             limit=rules.get('max')) for m in messages if m['high']]
+        ''', name='keep'), upstream=['flag'])
+
+        result = worker.run_stream_batch(dict(
+            chain=[flag, keep], messages=[{'amount': 5}, {'amount': 50}],
+            outputs=['keep'], kwargs={},
+            broadcast={'threshold': 10, 'rules': {'max': 3}},
+            broadcast_versions={'threshold': 2, 'rules': 1},
+        ))
+
+        [message] = result['outputs']['keep']
+        self.assertEqual((message['amount'], message['changed'], message['same'],
+                          message['limit']), (50, False, True, 3))
+
+    def test_a_stream_without_values_gets_an_empty_mapping(self):
+        block = dict(self.block('''
+            @transformer
+            def f(messages, **kwargs):
+                return [dict(m, threshold=kwargs['broadcast'].get('threshold', 1))
+                        for m in messages]
+        ''', name='plain'), upstream=[])
+        result = worker.run_stream_batch(dict(
+            chain=[block], messages=[{}], outputs=['plain'], kwargs={},
+        ))
+        self.assertEqual(result['outputs']['plain'], [{'threshold': 1}])
+
+
 class StreamBranchesTest(WorkerTestCase):
     """Streams branch: sinks follow different blocks, each fed its upstream's messages."""
 

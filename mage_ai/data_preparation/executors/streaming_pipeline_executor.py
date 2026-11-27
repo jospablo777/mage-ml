@@ -6,6 +6,7 @@ import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
+from types import MappingProxyType
 from typing import Callable, Dict, List, Optional, Union
 
 import pytz
@@ -315,8 +316,12 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     )
                 elif downstream_block.type == BlockType.TRANSFORMER:
                     held = block_state(downstream_block)
+                    # A service's blocks get the stream's broadcast values; here they get
+                    # the variable `broadcast` when a run sets one, else none, read-only.
+                    block_vars = dict(kwargs, broadcast=MappingProxyType(
+                        dict(kwargs.get('broadcast') or {})))
                     execute_block_kwargs = dict(
-                        global_vars=kwargs if held is None else dict(kwargs, **held),
+                        global_vars=block_vars if held is None else dict(block_vars, **held),
                         input_args=[data],
                         logger=self.logger,
                     )

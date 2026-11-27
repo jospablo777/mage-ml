@@ -57,9 +57,10 @@ pub fn check_name(name: &str) -> Result<(), String> {
     }
 }
 
-/// The files that are the stream's state, not its savepoints or their bookkeeping.
+/// The files that are the stream's state, not its savepoints or their bookkeeping, nor its
+/// broadcast values, which are set from outside and not rolled back with it.
 fn is_state(name: &str) -> bool {
-    !name.starts_with(&format!("{FOLDER}/")) && name != RESTORED
+    !name.starts_with(&format!("{FOLDER}/")) && !name.starts_with("broadcast/") && name != RESTORED
 }
 
 fn now() -> String {
@@ -226,6 +227,22 @@ mod tests {
                 .unwrap()
                 .contains(&"savepoints/before-v2/positions.json".into())
         );
+    }
+
+    #[test]
+    fn a_restore_keeps_the_broadcast_values_set_since() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateFiles::Local(dir.path().to_path_buf());
+        let broadcast = crate::broadcast::Broadcast::open(&state).unwrap();
+        let value = |text: &str| serde_json::value::RawValue::from_string(text.into()).unwrap();
+        broadcast.put("threshold", value("1"), None, None).unwrap();
+        let taken = take(&state, "v1", vec![]).unwrap();
+        assert_eq!(taken.files, 0, "broadcast values are not stream state");
+        broadcast.put("threshold", value("2"), None, None).unwrap();
+        restore(&state, "v1").unwrap();
+        broadcast.refresh().unwrap();
+        assert_eq!(broadcast.current().label(), "threshold@2");
+        assert_eq!(broadcast.history("threshold").unwrap().len(), 2);
     }
 
     #[test]

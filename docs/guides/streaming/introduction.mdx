@@ -422,6 +422,47 @@ An unknown key is a 404. Without `key`, the answer lists the keys and timers of 
 partition. Each instance holds the partitions it reads: with several instances, a key is
 on the instance that reads its partition.
 
+## Broadcast values
+
+Broadcast values are named JSON values that every block and every instance of a stream
+reads: a fraud threshold, a set of rules, a feature flag, the model version to score with.
+They change while the stream runs, through the service API, without a restart or a new
+export:
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" \
+  "$SERVICE/v1/streams/payments/broadcast/fraud_threshold" \
+  -d '{"value": 0.92, "by": "ana", "reason": "fewer false alerts"}'
+```
+
+A Python block reads them from `kwargs['broadcast']`, a read-only mapping:
+
+```python
+@transformer
+def flag(messages, *args, **kwargs):
+    threshold = kwargs['broadcast'].get('fraud_threshold', 0.9)
+    return [m for m in messages if m['score'] > threshold]
+```
+
+A Rust block takes `Broadcast` after its messages (`broadcast.get_or("fraud_threshold",
+0.9)?`, `broadcast.version("fraud_threshold")`), and an R block calls
+`broadcast_get("fraud_threshold", default = 0.9)`.
+
+| Guarantee | How |
+| --- | --- |
+| A batch never mixes versions | Each batch runs with the values it started with, in every block and language; a value set during a batch applies from the next |
+| Every instance switches | With `MAGE_SERVICE_STATE_URL` (a shared store), each instance reads the values every second |
+| A restart keeps them | They are kept with the stream's state, `broadcast/` in its folder or store prefix |
+| Every change is kept | `GET .../broadcast/{name}/history` lists every version: value, time, `by` and `reason` |
+| An output names its values | With tracing on, each batch's span has `mage.broadcast`, such as `fraud_threshold@3` |
+
+`GET /v1/streams/{pipeline}/broadcast` lists the current values and versions with the read
+token; `PUT` and `DELETE` need the service token. Names are lowercase letters, digits, `_`
+and `-`. A value is at most 1 MB, and so are all of a stream's values together, as they go
+with each batch to the blocks. A savepoint does not keep them: rolling a stream back to a
+savepoint keeps the current values. In the editor, **Execute pipeline** gives Python blocks
+the run's variable `broadcast` as their values, or none.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

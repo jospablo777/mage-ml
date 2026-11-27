@@ -80,6 +80,14 @@ impl BatchTraces {
         }
     }
 
+    /// The versions of the broadcast values the batch's blocks ran with, on the batch's span,
+    /// so an output can be traced to the values it was made with.
+    pub fn broadcast(&mut self, id: BatchId, versions: &str) {
+        if let Some(traced) = self.batches.get_mut(&id) {
+            traced.batch.set("mage.broadcast", versions.to_string());
+        }
+    }
+
     pub fn transform_finished(&mut self, id: BatchId, error: Option<&str>) {
         if let Some(mut span) = self
             .batches

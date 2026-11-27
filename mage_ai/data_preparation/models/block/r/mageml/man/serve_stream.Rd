@@ -25,5 +25,6 @@ one frame per message; the program answers with a header frame, then the
 messages of each block the engine asked for. A frame is a little-endian
 32-bit length and its bytes. A block with keyed state gets the values of
 the batch's keys in the header and sends back what changed
-(\code{\link[=state_get]{state_get()}}).
+(\code{\link[=state_get]{state_get()}}). The header also brings the stream's broadcast values when
+they changed (\code{\link[=broadcast_get]{broadcast_get()}}).
 }

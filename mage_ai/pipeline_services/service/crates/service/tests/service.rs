@@ -1821,6 +1821,144 @@ fn a_python_block_keeps_keyed_state_over_a_restart() {
     assert_eq!(seen(&service), [("a".into(), 4), ("b".into(), 2)]);
 }
 
+const THRESHOLD_BLOCK: &str = "@transformer\ndef tag(messages, *args, **kwargs):\n    threshold = kwargs['broadcast'].get('threshold', 0)\n    return [dict(m, high=m['amount'] > threshold, threshold=threshold) for m in messages]\n";
+
+#[test]
+fn a_broadcast_value_changed_through_the_api_applies_from_the_next_batch_on() {
+    let manifest = webhook_manifest(json!({}), 1 << 20);
+    let mut service =
+        Service::with_manifest(&manifest, &[("transformers/tag.py", THRESHOLD_BLOCK)]);
+    let env = [("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")];
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    let send = |service: &Service, key: &str, body: &str| {
+        let (status, reply) = service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                Some("ingest-secret"),
+                body,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap();
+        assert_eq!(status, 200, "{reply}");
+    };
+    let tagged = |service: &Service| -> Vec<(u64, bool, Value)> {
+        std::fs::read_to_string(service.dir.path().join("service.log"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("\"high\""))
+            .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+            .map(|r| {
+                let value = r.get("value").cloned().unwrap_or(r);
+                (
+                    value["amount"].as_u64().unwrap(),
+                    value["high"].as_bool().unwrap(),
+                    value["threshold"].clone(),
+                )
+            })
+            .collect()
+    };
+    let put = |service: &Service, token: &str, body: &str| {
+        service
+            .request_text(
+                "PUT",
+                "/v1/streams/hooks/broadcast/threshold",
+                Some(token),
+                body,
+            )
+            .unwrap()
+    };
+
+    send(&service, "1", r#"[{"amount": 50}]"#);
+    let (status, set) = put(
+        &service,
+        TOKEN,
+        r#"{"value": 100, "by": "ana", "reason": "fewer alerts"}"#,
+    );
+    assert_eq!(status, 200, "{set}");
+    assert_eq!(set["entry"]["version"], 1);
+    send(&service, "2", r#"[{"amount": 50}, {"amount": 150}]"#);
+    let (_, set) = put(&service, TOKEN, r#"{"value": 40}"#);
+    assert_eq!(set["entry"]["version"], 2);
+    send(&service, "3", r#"[{"amount": 50}]"#);
+    assert_eq!(
+        tagged(&service),
+        [
+            (50, true, json!(0)),
+            (50, false, json!(100)),
+            (150, true, json!(100)),
+            (50, true, json!(40)),
+        ]
+    );
+
+    let (_, values) = service.get("/v1/streams/hooks/broadcast");
+    assert_eq!(values["values"]["threshold"]["value"], 40);
+    assert_eq!(values["values"]["threshold"]["version"], 2);
+    let (_, history) = service.get("/v1/streams/hooks/broadcast/threshold/history");
+    let versions: Vec<(Value, Value)> = history["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["value"].clone(), c["by"].clone()))
+        .collect();
+    assert_eq!(
+        versions,
+        [(json!(100), json!("ana")), (json!(40), Value::Null)]
+    );
+
+    // Only the service token changes values; requests that are wrong say why.
+    assert_eq!(put(&service, READ_TOKEN, r#"{"value": 1}"#).0, 403);
+    let (status, error) = put(&service, TOKEN, r#"{"amount": 1}"#);
+    assert_eq!(status, 400, "{error}");
+    assert!(
+        error["error"].as_str().unwrap().contains("value"),
+        "{error}"
+    );
+    let (status, _) = service
+        .request_text(
+            "PUT",
+            "/v1/streams/hooks/broadcast/Bad.Name",
+            Some(TOKEN),
+            r#"{"value": 1}"#,
+        )
+        .unwrap();
+    assert_eq!(status, 400);
+    assert_eq!(
+        service
+            .request_text(
+                "PUT",
+                "/v1/streams/nope/broadcast/threshold",
+                Some(TOKEN),
+                r#"{"value": 1}"#
+            )
+            .unwrap()
+            .0,
+        404
+    );
+
+    // A restart keeps the last version.
+    service.signal("-TERM");
+    std::fs::write(service.dir.path().join("service.log"), "").unwrap();
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    send(&service, "4", r#"[{"amount": 50}]"#);
+    assert_eq!(tagged(&service), [(50, true, json!(40))]);
+
+    let (status, removed) = service
+        .request(
+            "DELETE",
+            "/v1/streams/hooks/broadcast/threshold?by=ana",
+            Some(TOKEN),
+            None,
+        )
+        .unwrap();
+    assert_eq!(status, 200, "{removed}");
+    assert_eq!(removed["entry"]["version"], 3);
+    let (_, values) = service.get("/v1/streams/hooks/broadcast");
+    assert_eq!(values["values"], json!({}));
+}
+
 /// A program that speaks the stream protocol (mage::serve_stream) as the SDK does, with a
 /// block that counts messages per key in its keyed state.
 const STATE_STREAM_PROGRAM: &str = r#"#!/usr/bin/env python3

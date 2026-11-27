@@ -14,6 +14,7 @@ mod audit_pg;
 mod audit_ship;
 mod aws;
 mod azure;
+mod broadcast;
 mod contract;
 mod environment;
 mod executor;

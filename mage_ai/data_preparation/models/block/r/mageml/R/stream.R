@@ -11,7 +11,8 @@
 #' messages of each block the engine asked for. A frame is a little-endian
 #' 32-bit length and its bytes. A block with keyed state gets the values of
 #' the batch's keys in the header and sends back what changed
-#' ([state_get()]).
+#' ([state_get()]). The header also brings the stream's broadcast values when
+#' they changed ([broadcast_get()]).
 #'
 #' @param dir The directory that holds `stream.json`.
 #' @return Does not return: R quits when the engine closes the connection.
@@ -23,6 +24,7 @@ serve_stream <- function(dir) {
   )
   state$globals <- job$variables
   state$io_config <- job$io_config
+  state$broadcast <- list(values = list(), versions = list())
   steps <- lapply(job$chain, load_stream_block, job = job)
   con <- socketConnection(
     host = "127.0.0.1",
@@ -43,6 +45,9 @@ serve_stream <- function(dir) {
       break
     }
     request <- jsonlite::fromJSON(rawToChar(header), simplifyVector = FALSE)
+    if (!is.null(request$broadcast)) {
+      state$broadcast <- request$broadcast
+    }
     messages <- vector("list", request$count)
     for (i in seq_len(request$count)) {
       messages[[i]] <- read_frame(con)
@@ -343,6 +348,44 @@ isolate_messages <- function(steps, messages, offset) {
     function(i) c(left$outputs[[i]], right$outputs[[i]])
   )
   list(outputs = outputs, failures = c(left$failures, right$failures))
+}
+
+#' Broadcast values of a stream
+#'
+#' Values every block of a stream reads, set through the service API while the
+#' stream runs (`PUT /v1/streams/{pipeline}/broadcast/{name}`): a threshold, a
+#' rule, the model version to score with. Every block of a batch reads the
+#' values the batch started with; a value set during a batch applies from the
+#' next. `broadcast_get()` reads one, `broadcast_version()` its version (1 for
+#' the first, one more for each change) and `broadcast_names()` lists them.
+#'
+#' @param name The value's name, such as `"fraud_threshold"`.
+#' @param default The value when the stream has none of that name.
+#' @return `broadcast_get()` the value or `default`; `broadcast_version()` a
+#'   number, or `NULL` without a value; `broadcast_names()` a character vector.
+#' @export
+#' @examples
+#' \dontrun{
+#' transformer(function(messages) {
+#'   threshold <- broadcast_get("fraud_threshold", default = 0.9)
+#'   messages[messages$score > threshold, ]
+#' })
+#' }
+broadcast_get <- function(name, default = NULL) {
+  value <- state$broadcast$values[[name]]
+  if (is.null(value)) default else value
+}
+
+#' @rdname broadcast_get
+#' @export
+broadcast_version <- function(name) {
+  state$broadcast$versions[[name]]
+}
+
+#' @rdname broadcast_get
+#' @export
+broadcast_names <- function() {
+  sort(as.character(names(state$broadcast$values)))
 }
 
 #' Keyed state of a stream block

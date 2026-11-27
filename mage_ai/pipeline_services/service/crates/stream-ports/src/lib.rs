@@ -218,6 +218,9 @@ pub struct TransformOutput {
     pub row_errors: Vec<RowError>,
     /// What each block did with the batch, for the stream's status.
     pub blocks: Vec<BlockStats>,
+    /// The versions of the broadcast values the blocks ran with, as `name@version,...`;
+    /// None when they had none.
+    pub broadcast: Option<String>,
 }
 
 /// One block's work on one batch.

@@ -66,6 +66,20 @@
 //! }
 //! ```
 //!
+//! [`Broadcast`] holds the stream's broadcast values, set through the service API while the
+//! stream runs (thresholds, rules, the model version to score with); a block reads the
+//! values its batch started with:
+//!
+//! ```ignore
+//! fn flag(messages: Vec<Value>, broadcast: Broadcast) -> Result<Vec<Value>> {
+//!     let threshold: f64 = broadcast.get_or("threshold", 0.9)?;
+//!     Ok(messages
+//!         .into_iter()
+//!         .filter(|m| m["score"].as_f64().unwrap_or(0.0) > threshold)
+//!         .collect())
+//! }
+//! ```
+//!
 //! The program connects to the Unix socket `stream.json` names and says it is ready. For each
 //! batch the engine sends a header frame and one frame per message; the program answers
 //! with a header frame, then the messages of each block the engine asked for, in order. A
@@ -309,11 +323,59 @@ impl Timers {
     }
 }
 
-/// What a step's block holds between calls: its state and its timers.
+/// The stream's broadcast values, set through the service API while the stream runs
+/// (`PUT /v1/streams/{pipeline}/broadcast/{name}`): every block of a batch reads the same
+/// values, those the batch started with. A value set during a batch applies from the next.
+#[derive(Debug, Clone, Default)]
+pub struct Broadcast(Rc<BroadcastValues>);
+
+#[derive(Debug, Default, Deserialize)]
+struct BroadcastValues {
+    #[serde(default)]
+    values: Map<String, Value>,
+    #[serde(default)]
+    versions: BTreeMap<String, u64>,
+}
+
+impl Broadcast {
+    /// The value converted to `T`; None when the stream has no value of that name.
+    pub fn get<T: DeserializeOwned>(&self, name: &str) -> anyhow::Result<Option<T>> {
+        match self.0.values.get(name) {
+            None => Ok(None),
+            Some(value) => serde_json::from_value(value.clone())
+                .map(Some)
+                .with_context(|| format!("Broadcast {name} is {value}, of another type")),
+        }
+    }
+
+    /// The value converted to `T`, or `default` when the stream has none of that name.
+    pub fn get_or<T: DeserializeOwned>(&self, name: &str, default: T) -> anyhow::Result<T> {
+        Ok(self.get(name)?.unwrap_or(default))
+    }
+
+    /// The value as JSON.
+    pub fn value(&self, name: &str) -> Option<&Value> {
+        self.0.values.get(name)
+    }
+
+    /// The value's version: 1 for the first, one more for each change.
+    pub fn version(&self, name: &str) -> Option<u64> {
+        self.0.versions.get(name).copied()
+    }
+
+    /// The names of the values.
+    pub fn names(&self) -> Vec<&str> {
+        self.0.values.keys().map(String::as_str).collect()
+    }
+}
+
+/// What a step's block holds between calls: its state and its timers, and the stream's
+/// broadcast values (one for every step).
 #[derive(Debug, Clone, Default)]
 pub struct Held {
     state: State,
     timers: Timers,
+    broadcast: Rc<RefCell<Broadcast>>,
 }
 
 /// What a stream block takes after its messages.
@@ -342,6 +404,12 @@ impl FromContext for State {
 impl FromContext for Timers {
     fn from_context(_context: &BlockContext, held: &Held) -> Self {
         held.timers.clone()
+    }
+}
+
+impl FromContext for Broadcast {
+    fn from_context(_context: &BlockContext, held: &Held) -> Self {
+        held.broadcast.borrow().clone()
     }
 }
 
@@ -421,11 +489,12 @@ impl<T: IntoMessages, E: Into<anyhow::Error>> IntoMessages for Result<T, E> {
     }
 }
 
-/// A stream block function: its messages, then up to two of `Vars` and `BlockContext`.
+/// A stream block function: its messages, then up to three of `Vars`, `BlockContext`,
+/// `State`, `Timers` and `Broadcast`.
 #[diagnostic::on_unimplemented(
     message = "this function cannot be a Mage stream block function",
     label = "check its parameters and return type",
-    note = "it takes Vec<Value>, DataFrame, LazyFrame, Vec<String> or Vec<Vec<u8>>, then up to three of Vars, BlockContext, State and Timers",
+    note = "it takes Vec<Value>, DataFrame, LazyFrame, Vec<String> or Vec<Vec<u8>>, then up to three of Vars, BlockContext, State, Timers and Broadcast",
     note = "it returns Vec<Value>, Value, DataFrame, LazyFrame, Vec<String>, Vec<Vec<u8>>, (), or an Option or Result of these"
 )]
 pub trait StreamFn<Args> {
@@ -569,6 +638,9 @@ struct Request {
     fired: BTreeMap<String, BTreeMap<String, i64>>,
     #[serde(default)]
     watermark: Option<i64>,
+    /// The stream's broadcast values, when they changed since the last batch.
+    #[serde(default)]
+    broadcast: Option<BroadcastValues>,
 }
 
 /// Per block, the keys whose state changed: the new value, or null for a removed key.
@@ -638,6 +710,7 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
     let scratch_dir = directory.join("scratch");
     std::fs::create_dir_all(&scratch_dir)?;
     let mut steps = Vec::with_capacity(job.chain.len());
+    let broadcast = Rc::new(RefCell::new(Broadcast::default()));
     for step in &job.chain {
         // A block's own program holds one block, named `block`.
         let make = entries
@@ -674,6 +747,7 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
                     block: step.block_uuid.clone(),
                     ..Timers::default()
                 },
+                broadcast: broadcast.clone(),
             },
         });
     }
@@ -696,6 +770,9 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
             return Ok(());
         };
         let request: Request = serde_json::from_slice(&header).context("A batch's header")?;
+        if let Some(values) = request.broadcast {
+            *broadcast.borrow_mut() = Broadcast(Rc::new(values));
+        }
         let mut messages = Vec::with_capacity(request.count);
         for _ in 0..request.count {
             messages.push(read_frame(&mut reader)?.ok_or_else(|| anyhow!("A batch ended early"))?);
@@ -1016,6 +1093,7 @@ mod tests {
                     block: uuid.into(),
                     ..Timers::default()
                 },
+                broadcast: Rc::default(),
             },
         }
     }
@@ -1064,6 +1142,53 @@ mod tests {
         assert_eq!(outputs[0], raw(&[r#"{"n":2.0}"#, r#"{"n":6.0}"#]));
         assert_eq!(outputs[1], raw(&[r#"{"n":6.0}"#]));
         assert_eq!(reply.outputs[1].count, 1);
+    }
+
+    #[test]
+    fn every_block_of_a_batch_reads_the_broadcast_values_the_header_brought() {
+        let flag = |messages: Vec<Value>, broadcast: Broadcast| -> Result<Vec<Value>> {
+            let threshold: f64 = broadcast.get_or("threshold", 0.0)?;
+            Ok(messages
+                .into_iter()
+                .map(|m| json!({"n": m["n"], "high": m["n"].as_f64() > Some(threshold)}))
+                .collect())
+        };
+        let version = |messages: Vec<Value>, broadcast: Broadcast| -> Vec<Value> {
+            let v = broadcast.version("threshold");
+            messages
+                .into_iter()
+                .map(|mut m| {
+                    m["version"] = json!(v);
+                    m
+                })
+                .collect()
+        };
+        let mut steps = vec![
+            step(stream_block(flag), "flag", false),
+            step(stream_block(version), "version", true),
+        ];
+        let shared = Rc::new(RefCell::new(Broadcast::default()));
+        for s in &mut steps {
+            s.held.broadcast = shared.clone();
+        }
+        let batch = || raw(&[r#"{"n":5}"#]);
+        let (_, outputs) = run_batch(&mut steps, 1, batch(), false);
+        assert_eq!(outputs[0], raw(&[r#"{"high":true,"n":5,"version":null}"#]));
+        // A header with values, as serve reads it.
+        let header: Request = serde_json::from_str(
+            r#"{"id": 2, "count": 1,
+                "broadcast": {"values": {"threshold": 10}, "versions": {"threshold": 3}}}"#,
+        )
+        .unwrap();
+        *shared.borrow_mut() = Broadcast(Rc::new(header.broadcast.unwrap()));
+        let (_, outputs) = run_batch(&mut steps, 2, batch(), false);
+        assert_eq!(outputs[0], raw(&[r#"{"high":false,"n":5,"version":3}"#]));
+        let wrong = Broadcast(Rc::new(BroadcastValues {
+            values: Map::from_iter([("threshold".into(), json!("high"))]),
+            versions: BTreeMap::new(),
+        }));
+        let error = wrong.get::<f64>("threshold").unwrap_err().to_string();
+        assert!(error.contains("of another type"), "{error}");
     }
 
     #[test]

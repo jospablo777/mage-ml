@@ -42,6 +42,8 @@ pub struct PythonStreamSession {
     file: std::path::PathBuf,
     /// Blocks with keyed state (configuration `state_key`).
     state: crate::keyed_state::BlockStates,
+    /// The stream's broadcast values: each batch goes with the snapshot it runs with.
+    broadcast: Arc<crate::broadcast::Broadcast>,
 }
 
 static FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -62,6 +64,8 @@ pub struct SessionOptions {
     pub stable_positions: bool,
     /// The stream's event time, which timers of keyed state follow.
     pub time: Option<mage_service_core::manifest::EventTime>,
+    /// The stream's broadcast values (broadcast.rs).
+    pub broadcast: Arc<crate::broadcast::Broadcast>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +105,7 @@ impl PythonStreamSession {
             state_dir,
             stable_positions,
             time,
+            broadcast,
         } = options;
         let state = crate::keyed_state::BlockStates::new(order, &state_dir, stable_positions, time)
             .exactly_once(exactly_once(pipeline));
@@ -136,6 +141,7 @@ impl PythonStreamSession {
             shape,
             frames: None,
             state,
+            broadcast,
             file: std::env::temp_dir().join(format!(
                 "mage-stream-{}-{}.ndjson",
                 std::process::id(),
@@ -300,6 +306,12 @@ struct StreamRequest<'a> {
     watermark: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_shape: Option<&'static str>,
+    /// The broadcast values the batch runs with, by name, and their versions; left out
+    /// when the stream has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    broadcast: Option<&'a RawValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    broadcast_versions: Option<&'a BTreeMap<String, u64>>,
 }
 
 #[derive(Deserialize)]
@@ -453,6 +465,8 @@ impl TransformSession for PythonStreamSession {
             let (chain, outputs, kwargs, isolate) =
                 (&self.chain, &self.outputs, &self.kwargs, self.isolate);
             let state_sent = outgoing.as_ref();
+            let snapshot = self.broadcast.current();
+            let broadcast = (!snapshot.versions.is_empty()).then_some(&snapshot);
             let line = |id: &str| {
                 serde_json::to_string(&StreamRequest {
                     id,
@@ -475,6 +489,8 @@ impl TransformSession for PythonStreamSession {
                         MessageShape::EventHubsData => Some("event_hub"),
                         MessageShape::RawText => Some("text"),
                     },
+                    broadcast: broadcast.map(|s| s.values.as_ref()),
+                    broadcast_versions: broadcast.map(|s| &s.versions),
                 })
             };
             let (reply, replaced) = self
@@ -543,6 +559,7 @@ impl TransformSession for PythonStreamSession {
                 outputs,
                 row_errors,
                 blocks,
+                broadcast: broadcast.map(|s| s.label()),
             })
         })
     }

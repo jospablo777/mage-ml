@@ -59,7 +59,7 @@ class StreamRunCase(DBTestCase):
         self.pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
         return block
 
-    def run_pipeline(self, sink_names, later=(), first=None):
+    def run_pipeline(self, sink_names, later=(), first=None, variables=None):
         source = FakeSource(later, first)
         sinks = {name: FakeSink() for name in sink_names}
         pipeline = Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path)
@@ -70,7 +70,9 @@ class StreamRunCase(DBTestCase):
             'mage_ai.streaming.sinks.sink_factory.SinkFactory.get_sink',
             side_effect=lambda config, **kwargs: sinks[config['name']],
         ):
-            StreamingPipelineExecutor(pipeline).execute(retry_config=dict(retries=0))
+            StreamingPipelineExecutor(pipeline).execute(
+                retry_config=dict(retries=0), global_vars=variables or {},
+            )
         return source, sinks
 
 
@@ -220,6 +222,44 @@ class StreamingPipelineExecutorTest(StreamRunCase):
         _, sinks = self.run_pipeline(['sink'])
 
         self.assertEqual(sinks['sink'].batches, [[dict(id=1, r=True), dict(id=2, r=True)]])
+
+
+class BroadcastRunTest(StreamRunCase):
+    """
+    In the editor, Python blocks get the variable `broadcast` as their broadcast values
+    (a service's come from its API), read-only, and none without it.
+    """
+
+    def tagged(self, variables=None):
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        tag = self.add('tag', 'transformer', '''
+            @transformer
+            def tag(messages, *args, **kwargs):
+                broadcast = kwargs['broadcast']
+                try:
+                    broadcast['threshold'] = 0
+                except TypeError:
+                    pass
+                threshold = broadcast.get('threshold', 10)
+                return [dict(m, high=m['amount'] > threshold) for m in messages]
+        ''', upstream=[source])
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[tag], language=BlockLanguage.YAML)
+        _, sinks = self.run_pipeline(
+            ['sink'], first=[dict(amount=50)], later=[[dict(amount=150)]], variables=variables,
+        )
+        return [m['high'] for batch in sinks['sink'].batches for m in batch]
+
+    def test_without_values_a_block_uses_its_default(self):
+        self.assertEqual(self.tagged(), [True, True])
+
+    def test_a_run_sets_values_with_the_variable(self):
+        self.assertEqual(self.tagged(dict(broadcast=dict(threshold=100))), [False, True])
 
 
 class KeyedStateRunTest(StreamRunCase):

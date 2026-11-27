@@ -22,7 +22,7 @@ use axum::Router;
 use axum::extract::{DefaultBodyLimit, Extension, MatchedPath, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use mage_service_core::protocol::{
     ControlCommand, ControlReceipt, ControlRequest, RunDetail, RunRequest, RunStatus,
 };
@@ -73,6 +73,15 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/streams/{pipeline}", get(stream_detail))
         .route("/v1/streams/{pipeline}/tap", get(stream_tap))
         .route("/v1/streams/{pipeline}/state/{block}", get(stream_state))
+        .route("/v1/streams/{pipeline}/broadcast", get(broadcast_values))
+        .route(
+            "/v1/streams/{pipeline}/broadcast/{name}",
+            put(broadcast_put).delete(broadcast_remove),
+        )
+        .route(
+            "/v1/streams/{pipeline}/broadcast/{name}/history",
+            get(broadcast_history),
+        )
         .route(
             "/v1/streams/{pipeline}/messages",
             post(ingest).layer(DefaultBodyLimit::max(MAX_INGEST_BODY)),
@@ -1070,6 +1079,160 @@ async fn stream_detail(
     let mut value = json!(status);
     value["pipeline"] = json!(pipeline);
     Ok(Json(value))
+}
+
+/// A running stream's broadcast values (broadcast.rs); 404 for a stream not running here.
+fn stream_broadcast(
+    state: &AppState,
+    pipeline: &str,
+) -> ApiResult<Arc<crate::broadcast::Broadcast>> {
+    let running = state
+        .service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains_key(pipeline);
+    if !running {
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            format!("The service has no stream {pipeline}."),
+        ));
+    }
+    state
+        .service
+        .broadcast(pipeline)
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+fn broadcast_error(error: crate::broadcast::BroadcastError) -> ApiError {
+    use crate::broadcast::BroadcastError;
+    match error {
+        BroadcastError::Invalid(m) => ApiError(StatusCode::BAD_REQUEST, m),
+        BroadcastError::Missing(m) => ApiError(StatusCode::NOT_FOUND, m),
+        BroadcastError::Store(m) => ApiError(StatusCode::INTERNAL_SERVER_ERROR, m),
+    }
+}
+
+/// The store is a file or an object store: read and written off the async threads.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> ApiResult<T> + Send + 'static,
+) -> ApiResult<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+}
+
+/// `GET /v1/streams/{pipeline}/broadcast`: each broadcast value with its version, when it
+/// changed and who changed it, and the versions batches run with now.
+async fn broadcast_values(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(pipeline): Path<String>,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let broadcast = stream_broadcast(&state, &pipeline)?;
+    let values = blocking(move || {
+        broadcast
+            .list()
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))
+    })
+    .await?;
+    Ok(Json(json!({"pipeline": pipeline, "values": values})))
+}
+
+#[derive(Deserialize)]
+struct BroadcastBody {
+    /// The value; kept as its text, so numbers keep every digit.
+    value: Option<Box<serde_json::value::RawValue>>,
+    by: Option<String>,
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BroadcastRemoval {
+    by: Option<String>,
+    reason: Option<String>,
+}
+
+/// `PUT /v1/streams/{pipeline}/broadcast/{name}` with `{"value": ..., "by": ..., "reason":
+/// ...}`: sets the value; batches that start from now on run with it.
+async fn broadcast_put(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((pipeline, name)): Path<(String, String)>,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Write)?;
+    let broadcast = stream_broadcast(&state, &pipeline)?;
+    let body: BroadcastBody = serde_json::from_slice(&body).map_err(|e| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("Send {{\"value\": <JSON>, \"by\": ..., \"reason\": ...}}: {e}"),
+        )
+    })?;
+    let Some(value) = body.value else {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "Send the value as {\"value\": <JSON>}; to remove a value, DELETE it.".into(),
+        ));
+    };
+    let (by, reason) = (body.by, body.reason);
+    let (set_name, logged_by) = (name.clone(), by.clone());
+    let entry = blocking(move || {
+        broadcast
+            .put(&set_name, value, by, reason)
+            .map_err(broadcast_error)
+    })
+    .await?;
+    crate::log::info(&format!(
+        "Stream {pipeline}: broadcast {name} set to version {}{}.",
+        entry.version,
+        logged_by.map(|b| format!(" by {b}")).unwrap_or_default()
+    ));
+    Ok(Json(
+        json!({"pipeline": pipeline, "name": name, "entry": entry}),
+    ))
+}
+
+/// `DELETE /v1/streams/{pipeline}/broadcast/{name}?by=&reason=`: removes the value; the
+/// history keeps it.
+async fn broadcast_remove(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((pipeline, name)): Path<(String, String)>,
+    Query(query): Query<BroadcastRemoval>,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Write)?;
+    let broadcast = stream_broadcast(&state, &pipeline)?;
+    let removed_name = name.clone();
+    let entry = blocking(move || {
+        broadcast
+            .remove(&removed_name, query.by, query.reason)
+            .map_err(broadcast_error)
+    })
+    .await?;
+    crate::log::info(&format!(
+        "Stream {pipeline}: broadcast {name} removed (version {}).",
+        entry.version
+    ));
+    Ok(Json(
+        json!({"pipeline": pipeline, "name": name, "removed": true, "entry": entry}),
+    ))
+}
+
+/// `GET /v1/streams/{pipeline}/broadcast/{name}/history`: every version, oldest first.
+async fn broadcast_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((pipeline, name)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let broadcast = stream_broadcast(&state, &pipeline)?;
+    let read_name = name.clone();
+    let history = blocking(move || broadcast.history(&read_name).map_err(broadcast_error)).await?;
+    Ok(Json(
+        json!({"pipeline": pipeline, "name": name, "history": history}),
+    ))
 }
 
 #[derive(Deserialize)]
