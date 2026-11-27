@@ -142,14 +142,19 @@ fn source(
         ConnectorKind::Postgres => {
             let stream = pipeline.stream.as_ref().expect("a stream");
             let batch = &stream.batch;
-            Ok(Box::new(mage_connector_postgres::cdc::PgCdcSource::new(
-                &_config,
-                mage_connector_postgres::cdc::BatchLimits {
-                    max_records: batch.max_records,
-                    max_bytes: batch.max_bytes,
-                    max_wait: Duration::from_millis(batch.max_wait_ms),
-                },
-            )?))
+            Ok(Box::new(
+                mage_connector_postgres::cdc::PgCdcSource::new(
+                    &_config,
+                    mage_connector_postgres::cdc::BatchLimits {
+                        max_records: batch.max_records,
+                        max_bytes: batch.max_bytes,
+                        max_wait: Duration::from_millis(batch.max_wait_ms),
+                    },
+                )?
+                .with_copy_record(Arc::new(CopyRecordFiles(
+                    service.state_files(&pipeline.uuid),
+                ))),
+            ))
         }
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => {
@@ -307,6 +312,34 @@ fn static_membership(mut config: Value, pipeline: &str) -> Value {
         }
     }
     config
+}
+
+/// Where a change capture stream keeps that its initial copy is done (ADR-0045): a file in
+/// the pipeline's state, so a restart copies again only when the copy did not finish.
+#[cfg(feature = "postgres")]
+struct CopyRecordFiles(crate::state_files::StateFiles);
+
+#[cfg(feature = "postgres")]
+impl CopyRecordFiles {
+    fn name(slot: &str) -> String {
+        format!("initial-copy-{}.done", crate::executor::sanitize(slot))
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl mage_connector_postgres::cdc::CopyRecord for CopyRecordFiles {
+    fn done(&self, slot: &str) -> Result<bool, ConnectorError> {
+        self.0
+            .read(&Self::name(slot))
+            .map(|found| found.is_some())
+            .map_err(ConnectorError::retryable)
+    }
+
+    fn mark_done(&self, slot: &str) -> Result<(), ConnectorError> {
+        self.0
+            .write(&Self::name(slot), b"done\n")
+            .map_err(ConnectorError::retryable)
+    }
 }
 
 /// `scope` names the stream for the sinks' object names and deduplication keys (see

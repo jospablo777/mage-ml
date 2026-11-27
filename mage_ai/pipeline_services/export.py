@@ -880,7 +880,7 @@ POSTGRES_SINK_SETTINGS = {
 POSTGRES_SOURCE_SETTINGS = {
     'host', 'port', 'database', 'user', 'password', 'replication_slot', 'publication_name',
     'tables', 'create_slot', 'batch_size', 'batch_timeout', 'start_lsn', 'connect_timeout',
-    'sslmode', 'sslrootcert',
+    'sslmode', 'sslrootcert', 'snapshot',
 }
 # Object storage sinks: the generic one, and Mage's S3 and GCS sinks, which name a bucket.
 OBJECT_STORAGE_SETTINGS = {
@@ -1587,6 +1587,8 @@ def _postgres_source_connector(block, config: Dict, where: str, problems: List[s
     unknown = sorted(set(config) - POSTGRES_SOURCE_SETTINGS)
     if unknown:
         problems.append(f'{where}: unknown PostgreSQL source settings {", ".join(unknown)}.')
+    if config.get('snapshot') not in (None, 'initial', 'never'):
+        problems.append(f'{where}: PostgreSQL snapshot is initial or never.')
     for key in ('host', 'database', 'user'):
         if not config.get(key):
             problems.append(f'{where}: PostgreSQL source settings need {key}.')

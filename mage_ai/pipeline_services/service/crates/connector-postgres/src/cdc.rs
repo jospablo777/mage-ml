@@ -23,7 +23,8 @@
 //! `sslrootcert`.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -68,6 +69,8 @@ struct Settings {
     tables: Vec<String>,
     create_slot: bool,
     start_lsn: u64,
+    /// `snapshot: initial`: copy the tables' rows before the changes (ADR-0045).
+    snapshot: bool,
     sslmode: Option<String>,
     sslrootcert: Option<String>,
     connect_timeout: Duration,
@@ -126,6 +129,15 @@ impl Settings {
             tables,
             create_slot: flag(config, "create_slot", true),
             start_lsn,
+            snapshot: match text(config, "snapshot").as_deref() {
+                None | Some("never") => false,
+                Some("initial") => true,
+                Some(other) => {
+                    return Err(ConnectorError::fatal(format!(
+                        "PostgreSQL snapshot is initial or never, not {other}."
+                    )));
+                }
+            },
             sslmode: text(config, "sslmode"),
             sslrootcert: text(config, "sslrootcert"),
             connect_timeout: Duration::from_secs(
@@ -180,6 +192,29 @@ enum Cell<'a> {
     Text(Cow<'a, [u8]>),
 }
 
+/// Where a stream keeps that its initial copy is done: the service's state files.
+pub trait CopyRecord: Send + Sync {
+    fn done(&self, slot: &str) -> Result<bool, ConnectorError>;
+    fn mark_done(&self, slot: &str) -> Result<(), ConnectorError>;
+}
+
+/// The initial copy under way: a task on a connection of its own reads the tables in one
+/// snapshot and sends each row's message here. Receiving is safe to cancel (the stream
+/// drops a pending read on its ticks), and the bound keeps the copy from reading ahead.
+struct Copy {
+    rows: tokio::sync::mpsc::Receiver<Result<Vec<u8>, ConnectorError>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Copy {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// Rows fetched from the copy's cursor at a time, and rows waiting in the channel.
+const COPY_FETCH: usize = 5000;
+
 struct Pending {
     builder: EnvelopeBuilder,
     first: u64,
@@ -213,6 +248,10 @@ pub struct PgCdcSource {
     paused: bool,
     broken: bool,
     warned_truncate: bool,
+    copy: Option<Copy>,
+    /// The last copied row's position, until the sinks took it.
+    copy_last: Option<u64>,
+    record: Option<Arc<dyn CopyRecord>>,
 }
 
 impl PgCdcSource {
@@ -238,7 +277,17 @@ impl PgCdcSource {
             paused: false,
             broken: false,
             warned_truncate: false,
+            copy: None,
+            copy_last: None,
+            record: None,
         })
+    }
+
+    /// Where the initial copy's completion is kept; without one, `snapshot: initial` copies
+    /// at every start.
+    pub fn with_copy_record(mut self, record: Arc<dyn CopyRecord>) -> PgCdcSource {
+        self.record = Some(record);
+        self
     }
 
     fn label(&self) -> String {
@@ -315,16 +364,18 @@ impl PgCdcSource {
         if self.settings.create_slot {
             self.prepare(&client).await?;
         }
-        let mut connection = Replication::connect(&self.settings.target()).await?;
-        connection
-            .start(
-                &self.settings.slot,
-                &self.settings.publication,
-                self.settings.start_lsn.max(self.confirmed),
-            )
-            .await?;
-        self.connection = Some(connection);
+        let copy = self.settings.snapshot
+            && !match &self.record {
+                Some(record) => record.done(&self.settings.slot)?,
+                None => false,
+            };
+        if copy {
+            self.copy = Some(self.begin_copy(&client).await?);
+        }
         self.client = Some(client);
+        if !copy {
+            self.start_replication().await?;
+        }
         self.relations.clear();
         self.in_transaction = false;
         self.committed = self.delivered;
@@ -338,8 +389,97 @@ impl PgCdcSource {
         })
     }
 
+    async fn start_replication(&mut self) -> Result<(), ConnectorError> {
+        let mut connection = Replication::connect(&self.settings.target()).await?;
+        connection
+            .start(
+                &self.settings.slot,
+                &self.settings.publication,
+                self.settings.start_lsn.max(self.confirmed),
+            )
+            .await?;
+        self.connection = Some(connection);
+        Ok(())
+    }
+
+    /// Starts the initial copy: the tables (the publication's when none are named) are read
+    /// in one read-only snapshot, after the slot was made, so changes made while they are
+    /// copied come after them and a mirror ends as the source is.
+    async fn begin_copy(&self, client: &Client) -> Result<Copy, ConnectorError> {
+        let s = &self.settings;
+        let tables: Vec<String> = if s.tables.is_empty() {
+            client
+                .query(
+                    "SELECT schemaname || '.' || tablename FROM pg_publication_tables \
+                     WHERE pubname = $1 ORDER BY 1",
+                    &[&s.publication],
+                )
+                .await
+                .map_err(|e| classify("reading the publication's tables", e))?
+                .iter()
+                .map(|r| r.get(0))
+                .collect()
+        } else {
+            s.tables.clone()
+        };
+        let lsn: Option<String> = client
+            .query_opt(
+                "SELECT confirmed_flush_lsn::text FROM pg_replication_slots WHERE slot_name = $1",
+                &[&s.slot],
+            )
+            .await
+            .map_err(|e| classify("reading the replication slot", e))?
+            .and_then(|r| r.get(0));
+        let lsn = lsn.and_then(|l| parse_lsn(&l)).ok_or_else(|| {
+            ConnectorError::fatal(format!(
+                "PostgreSQL snapshot: replication slot {} does not exist; the copy starts at \
+                 the slot's position",
+                s.slot
+            ))
+        })?;
+        let reader = self.client().await?;
+        let (send, rows) = tokio::sync::mpsc::channel(COPY_FETCH * 2);
+        let task = tokio::spawn(async move {
+            if let Err(error) = copy_tables(&reader, tables.into(), lsn, &send).await {
+                let _ = send.send(Err(error)).await;
+            }
+        });
+        Ok(Copy { rows, task })
+    }
+
+    /// The next rows of the initial copy, as a batch when one is full or waited long
+    /// enough; when the copy is done, the changes start.
+    async fn copy_step(&mut self) -> Result<SourceEvent, ConnectorError> {
+        loop {
+            if self.full() {
+                return Ok(self.take()?.expect("full"));
+            }
+            let wait = self.wait();
+            let copy = self.copy.as_mut().expect("copying");
+            match tokio::time::timeout(wait, copy.rows.recv()).await {
+                Ok(Some(Ok(value))) => self.push(value),
+                Ok(Some(Err(error))) => {
+                    self.copy = None;
+                    return Err(error);
+                }
+                Ok(None) => {
+                    self.copy = None;
+                    if self.committed < self.delivered {
+                        self.copy_last = Some(self.delivered);
+                    } else if let Some(record) = &self.record {
+                        record.mark_done(&self.settings.slot)?;
+                    }
+                    return Ok(self.take()?.unwrap_or(SourceEvent::Idle));
+                }
+                Err(_) => return Ok(self.take()?.unwrap_or(SourceEvent::Idle)),
+            }
+        }
+    }
+
     fn lose(&mut self) -> SourceEvent {
         self.connection = None;
+        self.copy = None;
+        self.copy_last = None;
         self.client = None;
         self.pending = None;
         self.ends.clear();
@@ -709,6 +849,89 @@ impl PgCdcSource {
     }
 }
 
+/// Each table's rows as change messages (`_mage_operation: snapshot`, at the slot's
+/// position `lsn`), in one read-only snapshot, values written as changes write them.
+async fn copy_tables(
+    client: &Client,
+    mut tables: VecDeque<String>,
+    lsn: u64,
+    send: &tokio::sync::mpsc::Sender<Result<Vec<u8>, ConnectorError>>,
+) -> Result<(), ConnectorError> {
+    client
+        .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL TIME ZONE 'UTC'")
+        .await
+        .map_err(|e| classify("starting the initial copy", e))?;
+    while let Some(table) = tables.pop_front() {
+        let statement = client
+            .prepare(&format!("SELECT * FROM {}", qualified(&table)))
+            .await
+            .map_err(|e| classify(&format!("reading {table} to copy it"), e))?;
+        let columns: Vec<(Vec<u8>, u32)> = statement
+            .columns()
+            .iter()
+            .map(|c| {
+                let mut key = serde_json::to_vec(c.name()).unwrap_or_default();
+                key.push(b':');
+                (key, c.type_().oid())
+            })
+            .collect();
+        let (namespace, name) = table.split_once('.').unwrap_or(("public", &table));
+        let mut suffix = b",\"_mage_operation\":\"snapshot\",\"_mage_schema\":".to_vec();
+        suffix.extend(serde_json::to_vec(namespace).unwrap_or_default());
+        suffix.extend_from_slice(b",\"_mage_table\":");
+        suffix.extend(serde_json::to_vec(name).unwrap_or_default());
+        suffix.extend_from_slice(format!(",\"_mage_lsn\":{lsn}}}").as_bytes());
+        client
+            .batch_execute(&format!(
+                "DECLARE mage_copy NO SCROLL CURSOR FOR SELECT * FROM {}",
+                qualified(&table)
+            ))
+            .await
+            .map_err(|e| classify(&format!("copying {table}"), e))?;
+        loop {
+            let messages = client
+                .simple_query(&format!("FETCH {COPY_FETCH} FROM mage_copy"))
+                .await
+                .map_err(|e| classify(&format!("copying {table}"), e))?;
+            let mut fetched = 0;
+            for message in &messages {
+                let SimpleQueryMessage::Row(row) = message else {
+                    continue;
+                };
+                fetched += 1;
+                let mut out = Vec::with_capacity(256);
+                out.push(b'{');
+                for (index, (key, type_oid)) in columns.iter().enumerate() {
+                    if index > 0 {
+                        out.push(b',');
+                    }
+                    out.extend_from_slice(key);
+                    match row.get(index) {
+                        None => out.extend_from_slice(b"null"),
+                        Some(text) => write_value(&mut out, *type_oid, text.as_bytes()),
+                    }
+                }
+                out.extend_from_slice(&suffix);
+                if send.send(Ok(out)).await.is_err() {
+                    // The stream stopped reading.
+                    return Ok(());
+                }
+            }
+            if fetched < COPY_FETCH {
+                break;
+            }
+        }
+        client
+            .batch_execute("CLOSE mage_copy")
+            .await
+            .map_err(|e| classify("copying", e))?;
+    }
+    client
+        .batch_execute("COMMIT")
+        .await
+        .map_err(|e| classify("ending the initial copy", e))
+}
+
 fn same(a: &Cell<'_>, b: &Cell<'_>) -> bool {
     match (a, b) {
         (Cell::Null, Cell::Null) => true,
@@ -985,8 +1208,23 @@ impl<'a> Reader<'a> {
 impl Source for PgCdcSource {
     fn next_event(&mut self) -> BoxFuture<'_, Result<SourceEvent, ConnectorError>> {
         Box::pin(async move {
-            if self.connection.is_none() {
+            if self.client.is_none() {
                 return self.connect().await;
+            }
+            if self.copy.is_some() {
+                return match self.copy_step().await {
+                    Ok(event) => Ok(event),
+                    Err(error) if error.retryable => Ok(self.lose()),
+                    Err(error) => Err(error),
+                };
+            }
+            if self.connection.is_none()
+                && let Err(error) = self.start_replication().await
+            {
+                if error.retryable {
+                    return Ok(self.lose());
+                }
+                return Err(error);
             }
             loop {
                 if self.broken {
@@ -1034,7 +1272,7 @@ impl Source for PgCdcSource {
     fn commit<'a>(&'a mut self, commits: &'a [Commit]) -> BoxFuture<'a, CommitOutcome> {
         Box::pin(async move {
             for commit in commits {
-                if commit.epoch != AssignmentEpoch(self.epoch) || self.connection.is_none() {
+                if commit.epoch != AssignmentEpoch(self.epoch) || self.client.is_none() {
                     return CommitOutcome::Stale;
                 }
                 let Position::Offset(last) = commit.position else {
@@ -1049,6 +1287,18 @@ impl Source for PgCdcSource {
                     self.confirmed = self.confirmed.max(end);
                 }
                 self.committed = self.committed.max(last);
+            }
+            // Every copied row is in the sinks: the copy is done for good.
+            if let Some(last) = self.copy_last
+                && self.copy.is_none()
+                && self.committed >= last
+            {
+                if let Some(record) = &self.record
+                    && let Err(error) = record.mark_done(&self.settings.slot)
+                {
+                    return CommitOutcome::Failed(error);
+                }
+                self.copy_last = None;
             }
             match self.report(false).await {
                 Ok(()) => CommitOutcome::Committed,

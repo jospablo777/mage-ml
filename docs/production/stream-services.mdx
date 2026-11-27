@@ -661,6 +661,13 @@ sslmode: verify-full
   server does not keep the log of other tables' changes for it.
 - One slot is read by one connection, so the stream runs one instance. `start_lsn` sets
   where a new slot starts. `TRUNCATE` is not replicated; the service says so once.
+- `snapshot: initial` copies the tables' rows first, then streams their changes, so a
+  [mirror](#postgresql) starts with everything the tables hold. The slot is made before the
+  copy and the copy reads one snapshot, so changes made while the rows are copied come after
+  them, and a mirror (upserts by key) ends as the source is. Copied rows have
+  `_mage_operation: snapshot` and the slot's position as `_mage_lsn`. The copy is done once:
+  the pipeline's state keeps that it finished, and a copy cut short starts again. It runs on
+  the engine (the Run tab and exported services).
 
 ### PostgreSQL
 

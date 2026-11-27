@@ -52,6 +52,8 @@ class PostgresConfig(BaseConfig):
     start_lsn: str = None
     connect_timeout: int = 10
     sslmode: str = None
+    # initial: copy the tables' rows before the changes (ADR-0045); runs on the engine.
+    snapshot: str = None
 
 
 @dataclass
@@ -111,6 +113,12 @@ class PostgresSource(BaseSource):
     def init_client(self):
         import psycopg2
         import psycopg2.extras
+
+        if self.config.snapshot == 'initial':
+            raise ValueError(
+                'PostgreSQL snapshot: initial runs on the engine: run the stream from the Run '
+                'tab, or export it as a service.'
+            )
 
         connect = dict(
             host=self.config.host,
