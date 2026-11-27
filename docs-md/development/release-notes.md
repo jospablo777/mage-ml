@@ -18,6 +18,8 @@
   the upstream blocks' outputs as inputs and the block's output (its columns, for frames)
   as output, so Marquez, DataHub or OpenMetadata show the service's lineage. The events
   validate against the OpenLineage 2-0-2 schemas.
+- MageML's own pipeline runs and block runs send the same events, with run ids derived
+  from the project and the run, and the columns of each block's stored output.
 
 ### Traces
 

@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     or_,
 )
+from sqlalchemy import event as sa_event
 from sqlalchemy.orm import joinedload, relationship, validates
 from sqlalchemy.sql import func, text
 from sqlalchemy.sql.functions import coalesce
@@ -1428,6 +1429,12 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
             {PipelineRun.status: status}, synchronize_session=False
         )
         db_connection.session.commit()
+        # One statement, no attribute events: their lineage is sent here.
+        from mage_ai.orchestration import lineage
+
+        if lineage.config() is not None:
+            for run in PipelineRun.query.filter(PipelineRun.id.in_(pipeline_run_ids)):
+                lineage.pipeline_run_status(run, status)
 
     @classmethod
     def create(
@@ -2209,3 +2216,14 @@ class Backfill(BaseModel):
                 execution_dates_counted.add(pr.execution_date)
 
         return status_counts
+
+
+@sa_event.listens_for(PipelineRun.status, 'set')
+def _pipeline_run_lineage(target, value, oldvalue, initiator):
+    """A pipeline run's status changed: its OpenLineage event (orchestration/lineage.py)."""
+    if target.id is None or value == oldvalue:
+        return
+    from mage_ai.orchestration import lineage
+
+    if lineage.config() is not None:
+        lineage.pipeline_run_status(target, value)

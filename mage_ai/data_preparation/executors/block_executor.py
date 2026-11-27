@@ -649,8 +649,9 @@ class BlockExecutor:
                         if missing:
                             outputs_cache = {**(outputs_cache or {}), **missing}
 
+                        attempt = self._lineage_start(block_run_id, pipeline_run)
                         try:
-                            return self._execute(
+                            result = self._execute(
                                 analyze_outputs=analyze_outputs,
                                 block_run_id=block_run_id,
                                 block_run_outputs_cache=outputs_cache,
@@ -676,9 +677,13 @@ class BlockExecutor:
                                 fused=fused,
                                 **kwargs,
                             )
-                        except Exception:
+                            self._lineage_end(attempt, 'COMPLETE')
+                            return result
+                        except Exception as error:
+                            self._lineage_end(attempt, 'FAIL', error)
                             raise
                         except BaseException as err:
+                            self._lineage_end(attempt, 'ABORT')
                             if isinstance(err, (
                                 KeyboardInterrupt,
                                 SystemExit,
@@ -817,6 +822,53 @@ class BlockExecutor:
             # if not self.block_run and block_run_id:
             #     self.block_run = BlockRun.get_by_id(block_run_id)
             self.logger_manager.output_logs_to_destination()
+
+    def _lineage_start(self, block_run_id, pipeline_run) -> Optional[Dict]:
+        """
+        The attempt's OpenLineage START (orchestration/lineage.py), in a pipeline run with a
+        backend set; what its end needs, or None.
+        """
+        from mage_ai.orchestration import lineage
+
+        if pipeline_run is None or self.pipeline is None or lineage.config() is None:
+            return None
+        project = lineage._project_name()
+        attempts = (self.retry_metadata or {}).get('attempts') or 1
+        attempt = dict(
+            project=project,
+            job=f'{self.pipeline.uuid}.{self.block_uuid}',
+            run=lineage.run_id(project, 'block_run', block_run_id, attempts),
+            parent=(lineage.run_id(project, 'pipeline_run', pipeline_run.id),
+                    self.pipeline.uuid),
+            inputs=[lineage.block_dataset(project, self.pipeline.uuid, upstream)
+                    for upstream in (self.block.upstream_block_uuids or [])],
+        )
+        lineage.emit(lineage.event(
+            project, attempt['job'], attempt['run'], parent=attempt['parent'],
+            inputs=attempt['inputs'],
+            outputs=[lineage.block_dataset(project, self.pipeline.uuid, self.block_uuid)],
+        ))
+        return attempt
+
+    def _lineage_end(self, attempt: Optional[Dict], outcome: str, error=None) -> None:
+        if attempt is None:
+            return
+        from mage_ai.column_atlas.sources import DATAFRAME_FILE
+        from mage_ai.data_preparation.models.variable import VARIABLE_DIR
+        from mage_ai.orchestration import lineage
+
+        output = lineage.block_dataset(attempt['project'], self.pipeline.uuid, self.block_uuid)
+        if outcome == 'COMPLETE':
+            output = lineage.with_schema(output, os.path.join(
+                self.pipeline.variable_manager.pipeline_path(self.pipeline.uuid),
+                VARIABLE_DIR, self.execution_partition or '', self.block_uuid, 'output_0',
+                DATAFRAME_FILE,
+            ))
+        lineage.emit(lineage.event(
+            attempt['project'], attempt['job'], attempt['run'], outcome=outcome,
+            parent=attempt['parent'], error=error, inputs=attempt['inputs'],
+            outputs=[output],
+        ))
 
     def _checkpoint(self, global_vars: Dict):
         """

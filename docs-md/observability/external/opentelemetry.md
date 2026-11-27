@@ -46,6 +46,25 @@ takes `OTEL_EXPORTER_OTLP_ENDPOINT` as its gRPC endpoint, the gateway sends its 
 Exported pipeline services trace their API requests, runs and block attempts the same way;
 see [Traces](../../production/pipeline-services.md#traces).
 
+## Lineage (OpenLineage)
+
+With `OPENLINEAGE_URL` set (a Marquez, DataHub or OpenMetadata endpoint), MageML sends
+OpenLineage events of its pipeline runs and block runs, as exported services do
+([Lineage](../../production/pipeline-services.md#lineage)):
+
+- each pipeline run is a job named by its pipeline (START, then COMPLETE, FAIL or ABORT when
+  cancelled), with a run id derived from the project and the run, so every process names it
+  the same way;
+- each attempt of a block run is a job `<pipeline>.<block>` with the pipeline run as its
+  parent, the upstream blocks' outputs as inputs and its own output as output, with the
+  columns of its stored Parquet output;
+- a failed attempt carries its error.
+
+`OPENLINEAGE_ENDPOINT` (default `api/v1/lineage`), `OPENLINEAGE_API_KEY`,
+`OPENLINEAGE_NAMESPACE` (default: the project's folder name) and `OPENLINEAGE_DISABLED`
+work as for services. Events go out in order from a background thread; a block run's
+process waits at most 5 seconds at its end for its events to be sent.
+
 ## Telemetry data collection and analysis
 
 With the environment variable set, restart the server. OpenTelemetry starts collecting traces based on the instrumentation above.
