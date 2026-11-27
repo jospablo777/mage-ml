@@ -43,7 +43,7 @@ function BuiltinWorker({ worker }: { worker: WorkerType }) {
 
   return (
     <>
-      <NextLink href="/workers" passHref><Link small>Workers</Link></NextLink>
+      <NextLink href="/workers" legacyBehavior passHref><Link small>Workers</Link></NextLink>
       <Spacing mt={1} />
       <Text bold xlarge>{worker.label}</Text>
       <Text default>Every block that does not choose a worker runs here.</Text>
@@ -79,7 +79,7 @@ function BuiltinWorker({ worker }: { worker: WorkerType }) {
               cannot start with leaves no page to undo it. For packages only some blocks need,
               or versions that clash with MageML&apos;s (Feast with pandas 2, an older
               MLflow),{' '}
-              <NextLink href="/workers?new=1" passHref>
+              <NextLink href="/workers?new=1" legacyBehavior passHref>
                 <Link inline small>add a worker</Link>
               </NextLink>.
             </Text>

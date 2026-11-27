@@ -104,9 +104,9 @@ function UsedBy({ environment }: { environment: LanguageEnvironmentType }) {
               {pipelines.map(usage => (
                 <tr key={usage.pipeline}>
                   <td>
-                    <NextLink
-                      as={`/pipelines/${usage.pipeline}/edit`}
+                    <NextLink as={`/pipelines/${usage.pipeline}/edit`}
                       href="/pipelines/[pipeline]/edit"
+                      legacyBehavior
                       passHref
                     >
                       <Link>{usage.name}</Link>
@@ -278,7 +278,7 @@ function LanguageEnvironment({ language }: { language: string }) {
 
   return (
     <>
-      <NextLink href="/workers" passHref><Link small>Workers</Link></NextLink>
+      <NextLink href="/workers" legacyBehavior passHref><Link small>Workers</Link></NextLink>
       <Spacing mt={1} />
       <Text bold xlarge>{environment.label}</Text>
       <div style={{ maxWidth: UNIT * 90 }}>

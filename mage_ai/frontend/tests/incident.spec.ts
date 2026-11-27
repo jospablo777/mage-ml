@@ -82,7 +82,7 @@ test('the incidents page lists the pipeline still failing and opens its run', as
   await expect(row.getByText('Still failing')).toBeVisible();
   await expect(row.getByText(SCORE)).toBeVisible();
   await expect(row.getByText('KeyError: \'amount\'')).toBeVisible();
-  await row.getByRole('link', { exact: true, name: `Run ${runID}` }).first().click();
+  await row.getByRole('link', { exact: true, name: `Run ${runID}` }).click();
   await expect(page).toHaveURL(new RegExp(`/pipelines/${pipelineUUID}/runs/${runID}$`));
   await expect(page.getByTestId('incident')).toBeVisible({ timeout: 60_000 });
 });

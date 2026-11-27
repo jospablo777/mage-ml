@@ -222,7 +222,7 @@ function Workers() {
               when a block needs a library MageML does not ship, or another version of one it
               does: Feast, an MLflow model, scikit-learn and ONNX Runtime for scoring.
               MageML&apos;s own Python is changed with uv in a terminal:{' '}
-              <NextLink href="/workers/mage" passHref><Link inline>see how</Link></NextLink>.
+              <NextLink href="/workers/mage" legacyBehavior passHref><Link inline>see how</Link></NextLink>.
             </Text>
             <Spacing mt={2} />
             <Button onClick={() => setAdding(true)} primary>Add the first worker</Button>

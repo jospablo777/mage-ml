@@ -241,9 +241,9 @@ function PipelinePartitions({ pipeline }: { pipeline: { uuid: string } }) {
                     return (
                       <Spacing key={partition.partition} mb="2px" mr="2px">
                         {partition.run_id ? (
-                          <NextLink
-                            as={`/pipelines/${pipelineUUID}/runs/${partition.run_id}`}
+                          <NextLink as={`/pipelines/${pipelineUUID}/runs/${partition.run_id}`}
                             href="/pipelines/[pipeline]/runs/[run]"
+                            legacyBehavior
                             passHref
                           >
                             <a aria-label={title}>{cell}</a>

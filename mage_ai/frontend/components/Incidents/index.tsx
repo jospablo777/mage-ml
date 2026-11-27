@@ -82,9 +82,9 @@ function Incidents() {
               {incidents.map(incident => (
                 <tr key={incident.pipeline_uuid}>
                   <td>
-                    <NextLink
-                      as={`/pipelines/${incident.pipeline_uuid}/runs`}
+                    <NextLink as={`/pipelines/${incident.pipeline_uuid}/runs`}
                       href="/pipelines/[pipeline]/runs"
+                      legacyBehavior
                       passHref
                     >
                       <Link small>{incident.pipeline_uuid}</Link>
@@ -97,9 +97,9 @@ function Incidents() {
                   </td>
                   <td><Text small>{incident.failed_runs}</Text></td>
                   <td>
-                    <NextLink
-                      as={`/pipelines/${incident.pipeline_uuid}/runs/${incident.latest_run_id}`}
+                    <NextLink as={`/pipelines/${incident.pipeline_uuid}/runs/${incident.latest_run_id}`}
                       href="/pipelines/[pipeline]/runs/[run]"
+                      legacyBehavior
                       passHref
                     >
                       <Link small>

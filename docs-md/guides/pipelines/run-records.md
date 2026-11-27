@@ -47,6 +47,8 @@ A failed or cancelled run's page opens on what failed, above its block runs:
 | Its upstream blocks' states in the run | The run's block runs |
 | The end of its log, as time, level and message | The block run's log, over its rotated files |
 | The blocks that did not complete, with their state | A failed run cancels the blocks it had not run |
+| The monitors that failed or could not run, with their failed checks | The monitor records of the run's block runs |
+| For a partition's run, the same partition of each upstream pipeline: its latest run's state and the last run that completed | The pipeline's `partitions.upstream` |
 | **Retry from &lt;block&gt; and the blocks after it**, **Retry the blocks that did not complete** | The run's retry actions, the same as the buttons above the block runs |
 
 **Incidents**, in the left navigation, lists the pipelines with a failed run in the last

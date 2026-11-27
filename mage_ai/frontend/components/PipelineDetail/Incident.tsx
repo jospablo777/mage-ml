@@ -1,8 +1,10 @@
+import NextLink from 'next/link';
 import styled from 'styled-components';
 
 import Button from '@oracle/elements/Button';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Headline from '@oracle/elements/Headline';
+import Link from '@oracle/elements/Link';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
@@ -24,8 +26,27 @@ export type IncidentBlockType = {
   usual: { runs: number; seconds?: number };
 };
 
+// A monitor of the run that failed, with its failed checks (data_preparation/monitors.py).
+export type IncidentMonitorType = {
+  block_uuid: string;
+  checks: { check: string; column?: string; detail?: string }[];
+  error?: string;
+  monitor: string;
+  result: 'error' | 'fail';
+};
+
+// For a partition's run: the same partition of each upstream pipeline it declares.
+export type IncidentUpstreamPartitionType = {
+  completed_run_id?: number;
+  partition: string;
+  pipeline_uuid: string;
+  run_id?: number;
+  status?: string;
+};
+
 export type IncidentType = {
   blocks: IncidentBlockType[];
+  monitors?: IncidentMonitorType[];
   not_completed: { block_uuid: string; status: string }[];
   recovery: {
     action: 'retry_from' | 'retry_incomplete';
@@ -33,6 +54,7 @@ export type IncidentType = {
     blocks?: string[];
     label: string;
   }[];
+  upstream_partitions?: IncidentUpstreamPartitionType[];
 };
 
 const LogStyle = styled.pre`
@@ -117,6 +139,78 @@ function Timing({ block }: { block: IncidentBlockType }) {
   );
 }
 
+function RunLink({ id, pipelineUUID }: { id: number; pipelineUUID: string }) {
+  return (
+    <NextLink as={`/pipelines/${pipelineUUID}/runs/${id}`}
+      href="/pipelines/[pipeline]/runs/[run]"
+      legacyBehavior
+      passHref
+    >
+      <Link small>run {id}</Link>
+    </NextLink>
+  );
+}
+
+function UpstreamPartitions({ rows }: { rows: IncidentUpstreamPartitionType[] }) {
+  return (
+    <Spacing mb={2}>
+      <Text small>Partition {rows[0].partition} upstream:</Text>
+      {rows.map(row => (
+        <FlexContainer alignItems="center" key={row.pipeline_uuid}>
+          <Text monospace small>{row.pipeline_uuid}&nbsp;</Text>
+          {row.run_id ? (
+            <>
+              <Text
+                danger={row.status !== 'completed'}
+                small
+                success={row.status === 'completed'}
+              >
+                {row.status.replace('_', ' ')} in&nbsp;
+              </Text>
+              <RunLink id={row.run_id} pipelineUUID={row.pipeline_uuid} />
+              {row.status !== 'completed' && (
+                row.completed_run_id ? (
+                  <>
+                    <Text muted small>, last completed in&nbsp;</Text>
+                    <RunLink id={row.completed_run_id} pipelineUUID={row.pipeline_uuid} />
+                  </>
+                ) : <Text muted small>, never completed</Text>
+              )}
+            </>
+          ) : <Text danger small>has not run</Text>}
+        </FlexContainer>
+      ))}
+    </Spacing>
+  );
+}
+
+function Monitors({ monitors }: { monitors: IncidentMonitorType[] }) {
+  return (
+    <Spacing mb={2}>
+      {monitors.map(monitor => (
+        <Spacing key={`${monitor.block_uuid}-${monitor.monitor}`} mb={1}>
+          <Text small>
+            Monitor {monitor.monitor} on {monitor.block_uuid} {monitor.result === 'error'
+              ? `could not run: ${monitor.error}`
+              : 'failed'}
+          </Text>
+          {monitor.checks.map(check => (
+            <Text
+              key={`${check.check}-${check.column || ''}`}
+              monospace
+              muted
+              small
+            >
+              {check.check}{check.column ? `(${check.column})` : ''}
+              {check.detail ? `: ${check.detail}` : ''}
+            </Text>
+          ))}
+        </Spacing>
+      ))}
+    </Spacing>
+  );
+}
+
 type IncidentProps = {
   onRetry: (fromBlockUUID?: string) => void;
   pipelineRunId: number;
@@ -166,6 +260,10 @@ function Incident({ onRetry, pipelineRunId, retrying }: IncidentProps) {
           )}
         </Spacing>
       ))}
+      {incident.monitors?.length > 0 && <Monitors monitors={incident.monitors} />}
+      {incident.upstream_partitions?.length > 0 && (
+        <UpstreamPartitions rows={incident.upstream_partitions} />
+      )}
       {incident.not_completed.length > 0 && (
         <Spacing mb={2}>
           <Text small>

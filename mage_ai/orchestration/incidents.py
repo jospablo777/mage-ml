@@ -152,6 +152,60 @@ def _log_end(pipeline, run, block_run, lines: int) -> Optional[Dict]:
     )
 
 
+def _upstream_partitions(run, pipeline) -> List[Dict]:
+    """For a partition's run: the same partition of each upstream pipeline the partitions
+    declare, its latest run and the latest that completed."""
+    partition = getattr(run, 'partition', None)
+    if not partition:
+        return []
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+    from mage_ai.orchestration.partitions import PartitionError
+
+    try:
+        declaration = pipeline.partition_declaration
+    except PartitionError:
+        return []
+    if declaration is None or not declaration.upstream:
+        return []
+    rows = []
+    for name in declaration.upstream:
+        runs = PipelineRun.query.filter(
+            PipelineRun.pipeline_uuid == name,
+            PipelineRun.partition == partition,
+        ).order_by(PipelineRun.id.desc())
+        latest = runs.first()
+        done = runs.filter(PipelineRun.status == PipelineRun.PipelineRunStatus.COMPLETED).first()
+        rows.append(dict(
+            pipeline_uuid=name,
+            partition=partition,
+            status=_status(latest) if latest else None,
+            run_id=latest.id if latest else None,
+            completed_run_id=done.id if done else None,
+        ))
+    return rows
+
+
+def _failed_monitors(block_runs) -> List[Dict]:
+    """The monitors of the run that failed (monitors.py), each with its failed checks."""
+    failed = []
+    for block_run in sorted(block_runs, key=lambda br: br.id):
+        for monitor in (block_run.metrics or {}).get('monitors') or []:
+            if monitor.get('result') not in ('fail', 'error'):
+                continue
+            failed.append(dict(
+                block_uuid=block_run.block_uuid,
+                monitor=monitor.get('monitor'),
+                result=monitor.get('result'),
+                error=monitor.get('error'),
+                checks=[
+                    dict(check=c.get('check'), column=c.get('column'), detail=c.get('detail'))
+                    for c in monitor.get('checks') or []
+                    if c.get('result') in ('fail', 'error')
+                ][:5],
+            ))
+    return failed
+
+
 def summary(run, pipeline, log_lines: int = LOG_LINES) -> Optional[Dict]:
     """The incident panel of a failed or cancelled run; None for another run."""
     if str(getattr(run.status, 'value', run.status)) not in ('failed', 'cancelled'):
@@ -200,7 +254,13 @@ def summary(run, pipeline, log_lines: int = LOG_LINES) -> Optional[Dict]:
         )
         for block in blocks
     ]
-    return dict(blocks=blocks, not_completed=not_completed, recovery=recovery)
+    return dict(
+        blocks=blocks,
+        not_completed=not_completed,
+        recovery=recovery,
+        monitors=_failed_monitors(block_runs),
+        upstream_partitions=_upstream_partitions(run, pipeline),
+    )
 
 
 def recent(days: int = 7, limit: int = 200) -> List[Dict]:

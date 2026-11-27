@@ -124,6 +124,60 @@ class IncidentSummaryTest(DBTestCase):
         )
 
 
+    def test_failed_monitors_with_their_failed_checks(self):
+        Status = BlockRun.BlockRunStatus
+        monitors = [
+            dict(monitor='orders_quality', result='fail', checks=[
+                dict(check='not_null', column='amount', result='fail', detail='3 nulls'),
+                dict(check='row_count', result='pass'),
+            ]),
+            dict(monitor='freshness', result='warn', checks=[]),
+            dict(monitor='broken', result='error', error='no column id', checks=[]),
+        ]
+        run = self.run_with(PipelineRun.PipelineRunStatus.FAILED, [
+            ('block1', Status.FAILED, 1, dict(monitors=monitors)),
+        ])
+        self.assertEqual(incidents.summary(run, self.pipeline)['monitors'], [
+            dict(block_uuid='block1', monitor='orders_quality', result='fail', error=None,
+                 checks=[dict(check='not_null', column='amount', detail='3 nulls')]),
+            dict(block_uuid='block1', monitor='broken', result='error', error='no column id',
+                 checks=[]),
+        ])
+
+    def test_a_partitions_run_shows_the_same_partition_upstream(self):
+        RunStatus = PipelineRun.PipelineRunStatus
+        self.pipeline.partitions = dict(
+            key='day', daily=dict(start='2026-11-01'), upstream=['orders_raw', 'stock_raw'],
+        )
+
+        upstream = create_pipeline_with_blocks('orders_raw', self.repo_path)
+        self.addCleanup(upstream.delete)
+
+        def upstream_run(name, partition, status):
+            return PipelineRun.create(
+                pipeline_uuid=name, partition=partition, status=status,
+                execution_date=START, variables={},
+            )
+
+        done = upstream_run('orders_raw', '2026-11-20', RunStatus.COMPLETED)
+        retried = upstream_run('orders_raw', '2026-11-20', RunStatus.FAILED)
+        upstream_run('orders_raw', '2026-11-21', RunStatus.COMPLETED)
+        run = self.run_with(RunStatus.FAILED, [
+            ('block1', BlockRun.BlockRunStatus.FAILED, 1, None),
+        ])
+        run.update(partition='2026-11-20')
+
+        self.assertEqual(incidents.summary(run, self.pipeline)['upstream_partitions'], [
+            dict(pipeline_uuid='orders_raw', partition='2026-11-20', status='failed',
+                 run_id=retried.id, completed_run_id=done.id),
+            dict(pipeline_uuid='stock_raw', partition='2026-11-20', status=None, run_id=None,
+                 completed_run_id=None),
+        ])
+        # An unpartitioned run has none.
+        run.update(partition=None)
+        self.assertEqual(incidents.summary(run, self.pipeline)['upstream_partitions'], [])
+
+
 class ReadableTest(DBTestCase):
     def test_json_log_lines_read_as_time_level_and_message(self):
         line = '2026-11-27T09:23:55 {"level": "INFO", "message": "scoring rows", "x": 1}'

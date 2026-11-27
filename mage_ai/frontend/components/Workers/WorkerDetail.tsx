@@ -303,9 +303,9 @@ function UsedByTab({ worker }: { worker: WorkerType }) {
           {worker.used_by.map(usage => (
             <tr key={usage.pipeline}>
               <td>
-                <NextLink
-                  as={`/pipelines/${usage.pipeline}/edit`}
+                <NextLink as={`/pipelines/${usage.pipeline}/edit`}
                   href="/pipelines/[pipeline]/edit"
+                  legacyBehavior
                   passHref
                 >
                   <Link>{usage.name}</Link>
@@ -592,7 +592,7 @@ function WorkerDetail({ name }: { name: string }) {
 
   return (
     <>
-      <NextLink href="/workers" passHref><Link small>Workers</Link></NextLink>
+      <NextLink href="/workers" legacyBehavior passHref><Link small>Workers</Link></NextLink>
       <Spacing mt={1} />
       <HeaderStyle>
         <div>
