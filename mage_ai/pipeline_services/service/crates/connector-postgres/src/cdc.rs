@@ -204,6 +204,10 @@ pub trait CopyRecord: Send + Sync {
 struct Copy {
     rows: tokio::sync::mpsc::Receiver<Result<Vec<u8>, ConnectorError>>,
     task: tokio::task::JoinHandle<()>,
+    /// The tables' rows by the server's estimate (pg_class.reltuples), and rows copied:
+    /// what is left is the source's lag while it copies.
+    estimate: i64,
+    copied: i64,
 }
 
 impl Drop for Copy {
@@ -437,6 +441,23 @@ impl PgCdcSource {
                 s.slot
             ))
         })?;
+        let names: Vec<String> = tables.iter().map(|t| qualified(t)).collect();
+        // An estimate only: a table never analyzed counts 0, and none fails the copy.
+        let estimate: i64 = client
+            .query_one(
+                "SELECT coalesce(sum(greatest(c.reltuples, 0)), 0)::bigint \
+                 FROM unnest($1::text[]) AS t(name) JOIN pg_class c ON c.oid = to_regclass(t.name)",
+                &[&names],
+            )
+            .await
+            .map(|r| r.get(0))
+            .unwrap_or(0);
+        eprintln!(
+            "PostgreSQL stream source on {}: copying {} table(s), about {estimate} rows, then \
+             following their changes",
+            self.label(),
+            tables.len()
+        );
         let reader = self.client().await?;
         let (send, rows) = tokio::sync::mpsc::channel(COPY_FETCH * 2);
         let task = tokio::spawn(async move {
@@ -444,7 +465,12 @@ impl PgCdcSource {
                 let _ = send.send(Err(error)).await;
             }
         });
-        Ok(Copy { rows, task })
+        Ok(Copy {
+            rows,
+            task,
+            estimate,
+            copied: 0,
+        })
     }
 
     /// The next rows of the initial copy, as a batch when one is full or waited long
@@ -457,13 +483,21 @@ impl PgCdcSource {
             let wait = self.wait();
             let copy = self.copy.as_mut().expect("copying");
             match tokio::time::timeout(wait, copy.rows.recv()).await {
-                Ok(Some(Ok(value))) => self.push(value),
+                Ok(Some(Ok(value))) => {
+                    copy.copied += 1;
+                    self.push(value)
+                }
                 Ok(Some(Err(error))) => {
                     self.copy = None;
                     return Err(error);
                 }
                 Ok(None) => {
+                    let copied = copy.copied;
                     self.copy = None;
+                    eprintln!(
+                        "PostgreSQL stream source on {}: copied {copied} rows; following changes",
+                        self.label()
+                    );
                     if self.committed < self.delivered {
                         self.copy_last = Some(self.delivered);
                     } else if let Some(record) = &self.record {
@@ -1314,6 +1348,14 @@ impl Source for PgCdcSource {
         self.paused = true;
     }
 
+    /// While the initial copy runs: the rows left by the tables' estimate.
+    fn lag(&self) -> BTreeMap<u32, i64> {
+        self.copy
+            .as_ref()
+            .map(|c| BTreeMap::from([(PARTITION.0, (c.estimate - c.copied).max(0))]))
+            .unwrap_or_default()
+    }
+
     fn resume(&mut self, _partition: PartitionId) {
         self.paused = false;
     }
@@ -1621,5 +1663,65 @@ mod tests {
         assert!(matches!(cells[1], Cell::Unchanged));
         assert!(matches!(&cells[2], Cell::Text(t) if t.as_ref() == b"hi"));
         assert!(Reader::new(&[0, 1, b't', 0, 0, 0, 9]).tuple().is_err());
+    }
+
+    #[tokio::test]
+    async fn the_initial_copy_lags_by_the_rows_left_and_by_nothing_after() {
+        let Some(mut config) = crate::history::tests::server() else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let id = std::process::id();
+        let table = format!("cdc_copy_lag_{id}");
+        config["tables"] = serde_json::json!([format!("public.{table}")]);
+        config["replication_slot"] = format!("cdc_copy_lag_{id}").into();
+        config["publication_name"] = format!("cdc_copy_lag_{id}").into();
+        config["snapshot"] = "initial".into();
+        let admin = plain_client(&Settings::new(&config).unwrap(), "test")
+            .await
+            .unwrap();
+        admin
+            .batch_execute(&format!(
+                "DROP TABLE IF EXISTS {table}; \
+                 CREATE TABLE {table} (id integer PRIMARY KEY, v text); \
+                 INSERT INTO {table} SELECT n, 'row ' || n FROM generate_series(1, 1200) n; \
+                 ANALYZE {table}"
+            ))
+            .await
+            .unwrap();
+        let limits = BatchLimits {
+            max_records: 500,
+            max_bytes: 1 << 20,
+            max_wait: Duration::from_millis(200),
+        };
+        let mut source = PgCdcSource::new(&config, limits).unwrap();
+
+        source.next_event().await.unwrap();
+        assert_eq!(source.lag(), BTreeMap::from([(0, 1200)]));
+        let mut copied = 0;
+        let mut lags = Vec::new();
+        for _ in 0..100 {
+            if source.copy.is_none() {
+                break;
+            }
+            if let SourceEvent::Batch { meta, .. } = source.next_event().await.unwrap() {
+                copied += meta.records;
+                lags.push(source.lag().get(&0).copied().unwrap_or(0));
+            }
+        }
+        assert_eq!(copied, 1200);
+        // It falls as rows are copied, and the changes that follow have no estimate.
+        assert!(lags.windows(2).all(|w| w[0] >= w[1]), "{lags:?}");
+        assert!(lags[0] < 1200, "{lags:?}");
+        assert!(source.lag().is_empty());
+
+        source.close().await;
+        admin
+            .batch_execute(&format!(
+                "SELECT pg_drop_replication_slot('cdc_copy_lag_{id}'); \
+                 DROP PUBLICATION cdc_copy_lag_{id}; DROP TABLE {table}"
+            ))
+            .await
+            .unwrap();
     }
 }

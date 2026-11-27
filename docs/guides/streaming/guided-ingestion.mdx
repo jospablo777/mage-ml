@@ -51,6 +51,10 @@ mirror:
 
 - `snapshot: initial` copies the tables' rows, then streams their changes from the
   replication slot made before the copy, so nothing is missed.
+- While it copies, the stream's lag is the rows left to copy, by the tables' row estimates
+  (`pg_class.reltuples`; a table never analyzed counts 0), and the log says when the copy
+  starts, about how many rows it has, and when it ends. The stream's page and lag alerts
+  show it like any other lag.
 - The slot moves on only after the destination committed a batch: after a stop, the sync
   continues from the last change it wrote, and a change it repeats writes the same row.
 - A column added in the source is added to the copy with its next change. `TRUNCATE` is not
