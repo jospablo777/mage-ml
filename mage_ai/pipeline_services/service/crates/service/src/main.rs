@@ -44,6 +44,7 @@ mod stream_chain;
 mod stream_python;
 mod stream_rust;
 mod stream_time;
+mod stream_trace;
 mod stream_window;
 mod streams;
 mod traces;

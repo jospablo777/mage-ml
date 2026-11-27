@@ -463,6 +463,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     // One writer per sink, plus the dead-letter sink.
     let mut writers = Vec::new();
     let sink_after: Vec<Option<String>> = parts.sinks.iter().map(|(_, a)| a.clone()).collect();
+    // Each batch's span and its transform and writes, when tracing is on (stream_trace.rs).
+    let mut batch_traces = crate::stream_trace::BatchTraces::new(&parts.name, sink_after.clone());
     let sink_fed: std::collections::BTreeSet<String> =
         sink_after.iter().flatten().cloned().collect();
     for (index, (sink, _)) in parts.sinks.iter().enumerate() {
@@ -570,8 +572,20 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                 });
             }
             Some(message) = rx.recv() => match message {
-                Internal::Event(event) => events.push(event),
+                Internal::Event(event) => {
+                    match &event {
+                        Event::SinkReceipt { id, sink } => {
+                            batch_traces.write_finished(*id, *sink, None)
+                        }
+                        Event::SinkFailed { id, sink, error, .. } => {
+                            batch_traces.write_finished(*id, *sink, Some(error))
+                        }
+                        _ => {}
+                    }
+                    events.push(event);
+                }
                 Internal::Transformed(id, Ok(output)) => {
+                    batch_traces.transform_finished(id, None);
                     if tapping {
                         for (block, batch) in &output.outputs {
                             tap(&status, block, batch);
@@ -614,6 +628,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     events.push(Event::TransformDone(id));
                 }
                 Internal::Transformed(id, Err(error)) => {
+                    batch_traces.transform_finished(id, Some(&error.to_string()));
                     let kind = match error {
                         TransformError::User(_) | TransformError::Protocol(_) => FailureKind::User,
                         TransformError::Crash(_) => FailureKind::Crash,
@@ -638,6 +653,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         Operation::Transform(id) => {
                             if let Some((batch, _)) = inputs.get(&id) {
                                 let batch = on_time.get(&id).map_or(batch, |(kept, _, _)| kept);
+                                batch_traces.transform_started(id);
                                 let _ = lane_tx.send(LaneJob::Transform(id, batch.clone()));
                             }
                         }
@@ -648,6 +664,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         }
                         Operation::Write(id, sink) => {
                             if let Some((_, retry)) = writers.get(sink.0 as usize) {
+                                batch_traces.write_started(id, sink);
                                 let _ = retry.send(WriterControl::Retry(id));
                             }
                         }
@@ -784,6 +801,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         }
                     }
                     inputs.insert(meta.id, (batch, meta.clone()));
+                    batch_traces.read(&meta);
                     events.push(Event::BatchRead(meta));
                 }
                 Ok(SourceEvent::Assigned { partition, epoch }) => {
@@ -829,6 +847,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
             while let Some(effect) = effects.pop_front() {
                 match effect {
                     Effect::Transform(id) => {
+                        batch_traces.transform_started(id);
                         if let Some((batch, _)) = inputs.get(&id) {
                             match on_time.get(&id) {
                                 // Every message was late: nothing for the blocks.
@@ -848,6 +867,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         }
                     }
                     Effect::Write { id, sink } => {
+                        batch_traces.write_started(id, sink);
                         let index = sink.0 as usize;
                         if let (Some((input, meta)), Some((jobs, _))) =
                             (inputs.get(&id), writers.get(index))
@@ -972,6 +992,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         match outcome {
                             CommitOutcome::Committed => {
                                 for commit in commits {
+                                    batch_traces.committed(&commit);
                                     let id_partition = commit.partition.0;
                                     let position = commit.position.to_string();
                                     // Forget batches through the committed position.
@@ -1029,6 +1050,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     Effect::Resume(_) if user_paused => {}
                     Effect::Resume(partition) => parts.source.resume(partition),
                     Effect::Cancel(ids) => {
+                        batch_traces.cancelled(&ids);
                         for id in ids {
                             inputs.remove(&id);
                             outputs.remove(&id);

@@ -29,6 +29,8 @@
   `BlockContext::traceparent`). OTLP over HTTP as JSON, sent by a thread from a bounded queue:
   about 2 µs a span, and a slow collector drops spans (counted on `/metrics`) instead of
   delaying runs. The gateway traces `/api/` requests and passes its span to the server.
+- Streams trace each batch from its read to its commit, with its transform and sink writes
+  as child spans.
 
 ### Stream services
 

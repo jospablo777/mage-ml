@@ -771,7 +771,14 @@ The service sends OTLP over HTTP as JSON, which collectors take on port 4318; wi
 wait in a queue of 8,192 that a thread sends in batches every second, and when the collector
 is slow or down, spans are dropped, never runs delayed. `/metrics` counts them in
 `mage_service_trace_spans_total{outcome="sent|failed|dropped"}`. Without an endpoint nothing
-starts. Stream batches are not traced; their [metrics](stream-services.md) cover them.
+starts.
+
+Streams trace each batch: a span `stream <pipeline> batch` from its read until its position is
+committed (or it is cancelled), with `messaging.batch.message_count`, its partition and first
+and last positions, and a child span for each transform attempt and each sink write (`write`,
+with the sink's index and the block it writes). A busy stream makes several spans a batch; set
+`OTEL_TRACES_SAMPLER=traceidratio` with `OTEL_TRACES_SAMPLER_ARG=0.01` to keep one batch in a
+hundred.
 
 ## Lineage
 

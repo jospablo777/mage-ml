@@ -2585,3 +2585,56 @@ fn a_retried_attempt_resumes_from_the_blocks_last_checkpoint() {
         .collect();
     assert!(left.is_empty(), "{left:?}");
 }
+
+#[test]
+fn a_streams_batches_are_traced_with_their_transform_and_writes() {
+    let (endpoint, spans) = collector();
+    let mut service = Service::with_manifest(
+        &webhook_manifest(json!({}), 1 << 20),
+        &[("transformers/tag.py", TAG_BLOCK)],
+    );
+    service.start(&[
+        ("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret"),
+        ("OTEL_EXPORTER_OTLP_ENDPOINT", &endpoint),
+    ]);
+    wait_for_stream(&service, "hooks");
+
+    let (status, body) = service
+        .request_with(
+            "POST",
+            "/v1/streams/hooks/messages",
+            Some("ingest-secret"),
+            r#"[{"id": 1}, {"id": 2}, {"id": 3}]"#,
+            &[],
+        )
+        .unwrap();
+    assert_eq!(status, 200, "{body}");
+
+    let mut seen: Vec<Value> = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline && !seen.iter().any(|s| s["name"] == "stream hooks batch") {
+        if let Ok(span) = spans.recv_timeout(Duration::from_millis(200)) {
+            seen.push(span);
+        }
+    }
+    let names: Vec<&str> = seen.iter().filter_map(|s| s["name"].as_str()).collect();
+    let batch = seen
+        .iter()
+        .find(|s| s["name"] == "stream hooks batch")
+        .unwrap_or_else(|| panic!("{names:?}"));
+    for child in ["transform", "write"] {
+        let span = seen
+            .iter()
+            .find(|s| s["name"] == child)
+            .unwrap_or_else(|| panic!("no {child} span in {names:?}"));
+        assert_eq!(span["parentSpanId"], batch["spanId"], "{child}");
+        assert_eq!(span["traceId"], batch["traceId"], "{child}");
+    }
+    let count = batch["attributes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["key"] == "messaging.batch.message_count")
+        .map(|a| a["value"]["intValue"].clone());
+    assert_eq!(count, Some(json!("3")), "{batch}");
+}
