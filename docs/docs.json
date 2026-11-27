@@ -454,6 +454,7 @@
                       "guides/streaming/destinations/elasticsearch",
                       "guides/streaming/destinations/google-cloud-pubsub",
                       "guides/streaming/destinations/google-cloud-storage",
+                      "guides/streaming/destinations/iceberg",
                       "guides/streaming/destinations/influxdb",
                       "guides/streaming/destinations/kafka",
                       "guides/streaming/destinations/kinesis",

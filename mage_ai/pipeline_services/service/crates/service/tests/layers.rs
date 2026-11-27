@@ -59,6 +59,7 @@ const LAYERS: &[Layer] = &[
             "mage-connector-clickhouse",
             "mage-connector-http",
             "mage-connector-ibmmq",
+            "mage-connector-iceberg",
             "mage-connector-influxdb",
             "mage-connector-kafka",
             "mage-connector-local",

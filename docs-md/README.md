@@ -284,6 +284,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
     - [Elasticsearch](guides/streaming/destinations/elasticsearch.md)
     - [Google Cloud PubSub](guides/streaming/destinations/google-cloud-pubsub.md)
     - [Google Cloud Storage](guides/streaming/destinations/google-cloud-storage.md)
+    - [Apache Iceberg](guides/streaming/destinations/iceberg.md)
     - [InfluxDB](guides/streaming/destinations/influxdb.md)
     - [Kafka](guides/streaming/destinations/kafka.md)
     - [Kinesis](guides/streaming/destinations/kinesis.md)

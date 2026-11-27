@@ -36,6 +36,7 @@ mage-connector-pubsub = { path = "../connector-pubsub", optional = true }
 mage-connector-activemq = { path = "../connector-activemq", optional = true }
 mage-connector-search = { path = "../connector-search", optional = true }
 mage-connector-influxdb = { path = "../connector-influxdb", optional = true }
+mage-connector-iceberg = { path = "../connector-iceberg", optional = true }
 # Data contracts on block outputs, checked by the checker of MageML runs; exports turn it
 # on when a block has a contract. It builds Polars.
 mage-checks = { path = "../checks", optional = true }
@@ -96,6 +97,9 @@ pubsub = ["dep:mage-connector-pubsub"]
 activemq = ["dep:mage-connector-activemq"]
 search = ["dep:mage-connector-search"]
 influxdb = ["dep:mage-connector-influxdb"]
+# Iceberg sinks through REST catalogs (ADR-0042): +6 MB, exports turn it on when a stream
+# has one.
+iceberg = ["dep:mage-connector-iceberg"]
 checks = ["dep:mage-checks"]
 sql = ["dep:polars"]
 # The standard connectors: the engine the mageml-engine wheel ships (ADR-0017).

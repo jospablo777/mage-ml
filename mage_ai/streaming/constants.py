@@ -32,6 +32,7 @@ class SinkType(StrEnum):
     GOOGLE_CLOUD_PUBSUB = 'google_cloud_pubsub'
     GOOGLE_CLOUD_STORAGE = 'google_cloud_storage'
     IBM_MQ = 'ibm_mq'
+    ICEBERG = 'iceberg'
     INFLUXDB = 'influxdb'
     KAFKA = 'kafka'
     KINESIS = 'kinesis'

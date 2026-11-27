@@ -33,6 +33,8 @@ export MAGE_TEST_S3_PORT ?= 19000
 export MAGE_TEST_S3_ENDPOINT ?= http://127.0.0.1:$(MAGE_TEST_S3_PORT)
 export MAGE_TEST_S3_ACCESS_KEY ?= mage-test
 export MAGE_TEST_S3_SECRET_KEY ?= mage-test-secret
+export MAGE_TEST_ICEBERG_PORT ?= 18181
+export MAGE_TEST_ICEBERG_URI ?= http://127.0.0.1:$(MAGE_TEST_ICEBERG_PORT)
 export MAGE_TEST_MYSQL_HOST ?= 127.0.0.1
 export MAGE_TEST_MYSQL_PORT ?= 13306
 export MAGE_TEST_MYSQL_DATABASE ?= test
@@ -87,7 +89,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-pinot test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-pinot test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-iceberg test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -173,6 +175,9 @@ test-influxdb: up
 
 test-activemq: up
 	cd .. && $(PYTHON) -m pytest integration_tests/activemq $(PYTEST_ARGS)
+
+test-iceberg: up
+	cd .. && $(PYTHON) -m pytest integration_tests/iceberg $(PYTEST_ARGS)
 
 test-streaming: up
 	cd .. && $(PYTHON) -m pytest integration_tests/streaming $(PYTEST_ARGS)

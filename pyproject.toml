@@ -234,6 +234,8 @@ streaming = [
   "confluent-avro~=1.8.0",
   "elasticsearch>=8.19.3,<9",
   "influxdb_client>=1.50",
+  # Iceberg sinks in editor runs; services write with the engine (ADR-0042).
+  "pyiceberg[pyarrow,pyiceberg-core]>=0.12",
   "kafka-python>=2.3.2,<3",
   "nats-py>=2.16",
   "nkeys~=0.2.0",

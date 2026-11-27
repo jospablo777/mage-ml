@@ -40,6 +40,10 @@ class SinkFactory:
             )
 
             return GoogleCloudStorageSink(config, **kwargs)
+        elif connector_type == SinkType.ICEBERG:
+            from mage_ai.streaming.sinks.iceberg import IcebergSink
+
+            return IcebergSink(config, **kwargs)
         elif connector_type == SinkType.INFLUXDB:
             from mage_ai.streaming.sinks.influxdb import InfluxDbSink
 

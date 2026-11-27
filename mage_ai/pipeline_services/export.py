@@ -855,6 +855,7 @@ STREAM_SINKS = {
     'elasticsearch': 'search', 'opensearch': 'search', 'influxdb': 'influxdb',
     # Amplitude's Batch Event Upload API: rows as events or user properties.
     'amplitude': 'amplitude',
+    'iceberg': 'iceberg',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
@@ -862,6 +863,7 @@ ENGINE_FEATURES = {
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
     'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
     'pubsub': 'pubsub', 'activemq': 'activemq', 'search': 'search', 'influxdb': 'influxdb',
+    'iceberg': 'iceberg',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -1422,6 +1424,54 @@ def _search_connector(block, connector_type: str, config: Dict, where: str,
 INFLUXDB_SETTINGS = {'url', 'token', 'org', 'bucket', 'measurement', 'batch_size', 'timeout_ms'}
 
 
+ICEBERG_SETTINGS = {'catalog', 'table', 'create_table', 'columns', 'partition_by'}
+# Catalog properties that hold credentials (a catalog may also vend the storage's).
+ICEBERG_SECRETS = re.compile(r'token|credential|secret|password|key', re.IGNORECASE)
+
+
+def _iceberg_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
+    """MageML's Iceberg sink, through a REST catalog (ADR-0042)."""
+    unknown = sorted(set(config) - ICEBERG_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown Iceberg settings {", ".join(unknown)}.')
+    catalog = config.get('catalog')
+    if not isinstance(catalog, dict) or not catalog.get('uri'):
+        problems.append(f"{where}: Iceberg settings need catalog.uri, the REST catalog's URL.")
+        catalog = catalog if isinstance(catalog, dict) else {}
+    kind = str(catalog.get('type') or 'rest')
+    if kind != 'rest':
+        problems.append(
+            f'{where}: Iceberg catalog type {kind}: services use REST catalogs (rest); a '
+            'memory catalog lives in one process.'
+        )
+    for key, value in catalog.items():
+        if ICEBERG_SECRETS.search(key) and _literal(value):
+            problems.append(
+                f"{where}: catalog.{key} is written in the file; use "
+                f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+            )
+    table = str(config.get('table') or '')
+    if len([p for p in table.split('.') if p]) < 2:
+        problems.append(
+            f'{where}: Iceberg settings need table with its namespace, such as analytics.events.'
+        )
+    from mage_ai.streaming.sinks.iceberg import partition_field, rejoined
+
+    partition_by = config.get('partition_by')
+    if partition_by is not None:
+        items = [partition_by] if isinstance(partition_by, str) else partition_by
+        if not isinstance(items, list):
+            problems.append(f'{where}: Iceberg partition_by is a list, such as [day(ts)].')
+        else:
+            for text in rejoined(items):
+                try:
+                    partition_field(text)
+                except ValueError as error:
+                    problems.append(f'{where}: {error}')
+    settings = {k: v for k, v in config.items() if k in ICEBERG_SETTINGS}
+    return dict(name=block.uuid, kind='iceberg', config=settings)
+
+
 def _influxdb_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
     """MageML's InfluxDB sink, as line protocol; batch_size and timeout_ms are not used."""
     unknown = sorted(set(config) - INFLUXDB_SETTINGS)
@@ -1670,10 +1720,24 @@ def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optiona
             'crashes and rebalances. The sinks must write to one database as one user.'
         )
         return 'exactly_once'
+    if kinds == {'iceberg'}:
+        if len(outputs) > 1:
+            problems.append(
+                f'{prefix}: delivery: exactly_once into Iceberg commits one table with the '
+                'source\'s positions, so the stream has one Iceberg sink and no dead letters.'
+            )
+            return None
+        capture_.notes.append(
+            f'{prefix} writes exactly once: each Iceberg commit appends the batches\' data '
+            'files and sets the source\'s next offsets as table properties, and each '
+            'partition starts where the table says, through crashes and rebalances.'
+        )
+        return 'exactly_once'
     listed = ', '.join(f'{c["name"]} ({c.get("kind")})' for c in outputs)
     problems.append(
         f'{prefix}: delivery: exactly_once needs every sink, dead letters included, to be '
-        'Kafka (on the source\'s cluster) or every one to be PostgreSQL (on one database): '
+        'Kafka (on the source\'s cluster), every one to be PostgreSQL (on one database), or '
+        'one Iceberg sink: '
         f'the outputs commit in one transaction with the source\'s positions; this stream '
         f'writes to {listed}.'
     )
@@ -1758,6 +1822,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _search_connector(block, connector_type, config, where, problems)
     if kind == 'influxdb':
         return _influxdb_connector(block, config, where, problems)
+    if kind == 'iceberg':
+        return _iceberg_connector(block, config, where, problems)
     if kind == 'activemq':
         return _activemq_connector(block, role, config, where, problems)
     if kind == 'pubsub':

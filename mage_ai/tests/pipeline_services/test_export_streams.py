@@ -269,6 +269,29 @@ schema: public
 table: scores
 '''
 
+    ICEBERG = '''
+connector_type: iceberg
+catalog:
+  uri: https://catalog.example.com
+table: lake.scores
+'''
+
+    def test_kafka_to_one_iceberg_table_exports_exactly_once(self):
+        self.stream(source=SOURCE + '    delivery: exactly_once\n', sink=self.ICEBERG)
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        [pipeline] = captured.manifest['pipelines']
+        self.assertEqual(pipeline['stream']['delivery'], 'exactly_once')
+        self.assertTrue(any('table properties' in note for note in captured.notes),
+                        captured.notes)
+
+    def test_two_iceberg_outputs_cannot_commit_exactly_once(self):
+        self.stream(source=SOURCE + '    delivery: exactly_once\n', sink=self.ICEBERG)
+        clean = self.pipeline.get_block(f'{self.pipeline.uuid}_clean')
+        self.add('more', 'data_exporter', self.ICEBERG, upstream=[clean], language='yaml')
+        self.assertIn('one Iceberg sink and no dead letters', self.problems())
+
     def test_a_window_exports_exactly_once(self):
         source = self.add('source', 'data_loader', SOURCE + '    delivery: exactly_once\n',
                           language='yaml')
@@ -1104,6 +1127,51 @@ class InfluxDbSinkExportTest(StreamExportTestCase):
             org: analytics
         '''))  # pragma: allowlist secret
         self.assertIn('token is written in the file', self.problems())
+
+
+class IcebergSinkExportTest(StreamExportTestCase):
+    def test_iceberg_sinks_export_to_the_iceberg_sink_with_its_feature(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: iceberg
+            catalog:
+              type: rest
+              uri: https://catalog.example.com/api/catalog
+              warehouse: lake
+              credential: "{{ env_var('ICEBERG_CREDENTIAL') }}"
+            table: analytics.orders
+            create_table: true
+            columns:
+              ts: timestamptz
+            partition_by: [day(ts)]
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]
+        self.assertEqual(sink['kind'], 'iceberg')
+        self.assertEqual(sink['config']['table'], 'analytics.orders')
+        self.assertEqual(sink['config']['partition_by'], ['day(ts)'])
+        self.assertIn('iceberg', captured.engine_features)
+
+    def test_written_credentials_and_catalogs_services_cannot_use_are_refused(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: iceberg
+            catalog:
+              type: memory
+              token: plain-token-value
+              s3.secret-access-key: plain-secret
+            table: orders
+            partitions: 4
+            partition_by: [bucket(16, id), week(ts)]
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('unknown Iceberg settings partitions', problems)
+        self.assertIn('catalog.uri', problems)
+        self.assertIn('a memory catalog lives in one process', problems)
+        self.assertIn('catalog.token is written in the file', problems)
+        self.assertIn('catalog.s3.secret-access-key is written in the file', problems)
+        self.assertIn('table with its namespace', problems)
+        # bucket(16, id), split by YAML at its comma, reads whole; week is no transform.
+        self.assertNotIn("'bucket(16'", problems)
+        self.assertIn("partition_by 'week(ts)'", problems)
 
 
 class ClickHouseSinkExportTest(StreamExportTestCase):

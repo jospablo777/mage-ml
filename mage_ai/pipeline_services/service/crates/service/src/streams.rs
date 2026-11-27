@@ -354,6 +354,10 @@ fn sink(
         ConnectorKind::Influxdb => Ok(Arc::new(mage_connector_influxdb::InfluxDbSink::new(
             &_config,
         )?)),
+        #[cfg(feature = "iceberg")]
+        ConnectorKind::Iceberg => Ok(Arc::new(mage_connector_iceberg::IcebergSink::new(
+            &_config, scope,
+        )?)),
         #[cfg(feature = "activemq")]
         ConnectorKind::Activemq => Ok(Arc::new(mage_connector_activemq::ActiveMqSink::new(
             &_config,
@@ -405,6 +409,7 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         ConnectorKind::Influxdb => {
             "it was built without InfluxDB; build it with the influxdb feature"
         }
+        ConnectorKind::Iceberg => "it was built without Iceberg; build it with the iceberg feature",
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast | ConnectorKind::Amplitude => {
             "it is a sink only"
@@ -479,6 +484,11 @@ async fn check_connector(
         ConnectorKind::Rabbitmq => mage_connector_rabbitmq::check(config, source).await,
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => mage_connector_nats::check(config, source).await,
+        #[cfg(feature = "iceberg")]
+        ConnectorKind::Iceberg => match mage_connector_iceberg::check(config).await {
+            Ok(found) => ConnectionReport::passed(format!("Reached the catalog: {found}.")),
+            Err(error) => ConnectionReport::failed(error.message),
+        },
         #[allow(unreachable_patterns)]
         ConnectorKind::Kafka | ConnectorKind::Rabbitmq | ConnectorKind::Nats => {
             ConnectionReport::failed(format!(
@@ -605,6 +615,13 @@ fn exactly_once_parts(
     match stream.exactly_once_target()? {
         ExactlyOnceTarget::Kafka => kafka_to_kafka_parts(service, pipeline, log),
         ExactlyOnceTarget::Postgres => kafka_to_postgres_parts(service, pipeline, log),
+        #[cfg(feature = "iceberg")]
+        ExactlyOnceTarget::Iceberg => kafka_to_iceberg_parts(service, pipeline, log),
+        #[cfg(not(feature = "iceberg"))]
+        ExactlyOnceTarget::Iceberg => Err(format!(
+            "delivery: exactly_once into Iceberg: this service {}.",
+            unavailable(ConnectorKind::Iceberg)
+        )),
     }
 }
 
@@ -755,6 +772,58 @@ fn kafka_to_postgres_parts(
         source: Box::new(source),
         sinks,
         dead_letter,
+        transform,
+        config: runner_config(stream),
+        shutdown_deadline: Duration::from_secs(20),
+        pause: None,
+        tap,
+        time: stream.time.clone().map(crate::stream_time::Lateness::new),
+        transaction: Some(transaction as Arc<dyn mage_stream_ports::Transaction>),
+    })
+}
+
+/// One Iceberg sink whose commits keep the source's positions as table properties; the
+/// source starts each partition it is assigned where the table says (ADR-0042).
+#[cfg(all(feature = "kafka", feature = "iceberg"))]
+fn kafka_to_iceberg_parts(
+    service: &Arc<Service>,
+    pipeline: &Pipeline,
+    log: RunLog,
+) -> Result<StreamParts, String> {
+    let stream = pipeline.stream.as_ref().expect("a stream");
+    let transaction = mage_connector_iceberg::transaction::IcebergTransaction::new(
+        &settings(service, &stream.sinks[0]),
+        &pipeline.uuid,
+    )
+    .map_err(|e| e.message)?;
+    if std::env::var(crate::savepoints::START_FROM).is_ok_and(|n| !n.trim().is_empty()) {
+        return Err(format!(
+            "{} with exactly-once delivery into Iceberg: the partitions start where the \
+             table's properties say, so a savepoint's offsets would not apply; start without it.",
+            crate::savepoints::START_FROM
+        ));
+    }
+    let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
+    let transform = transform_session(service, pipeline, log, tap)?;
+    let batch = &stream.batch;
+    let source = mage_connector_kafka::KafkaSource::with_start_positions(
+        &static_membership(settings(service, &stream.source), &pipeline.uuid),
+        mage_connector_kafka::BatchLimits {
+            max_records: batch.max_records,
+            max_bytes: batch.max_bytes,
+            max_wait: Duration::from_millis(batch.max_wait_ms),
+        },
+        in_flight_bytes(stream),
+        Some(transaction.clone() as Arc<dyn mage_stream_ports::StartPositions>),
+    )
+    .map_err(|e| e.message)?;
+    transaction.name_positions_with(source.position_names());
+    let sink = Arc::new(transaction.sink()) as Arc<dyn Sink>;
+    Ok(StreamParts {
+        name: pipeline.uuid.clone(),
+        source: Box::new(source),
+        sinks: vec![(sink, stream.sinks[0].after.clone())],
+        dead_letter: None,
         transform,
         config: runner_config(stream),
         shutdown_deadline: Duration::from_secs(20),

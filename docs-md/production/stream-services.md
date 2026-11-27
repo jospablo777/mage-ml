@@ -13,7 +13,7 @@ the batch. The engine is written in Rust; blocks run in Python, Rust or R.
 | --- | --- |
 | Source | Kafka, Azure Event Hubs, webhooks, RabbitMQ, NATS JetStream, IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication) |
 | Transformers | Python, [Rust](../guides/blocks/rust-blocks.md#stream-transformers) or [R](../guides/blocks/r-blocks.md#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, InfluxDB, object storage (S3, GCS, Azure, disk), HTTP, Feast, Amplitude; `dummy` prints each message |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, InfluxDB, Apache Iceberg, object storage (S3, GCS, Azure, disk), HTTP, Feast, Amplitude; `dummy` prints each message |
 
 The export stops, with the reason, on what a service can't run the same way as MageML yet:
 Python sources and sinks, other connectors (Kinesis, Pulsar, InfluxDB, Elasticsearch,
@@ -44,6 +44,7 @@ Kafka stream, or Kafka to PostgreSQL, can be
 | [`clickhouse`](#clickhouse) | | | Insert answered | Insert tokens | |
 | [`elasticsearch`, `opensearch`](#elasticsearch-and-opensearch) | | | Bulk answer, every document written | Same `_id` replaces the document | Messages are the documents (0.2) |
 | [`influxdb`](#influxdb) | | | Write answered | Same measurement, tags and time replace the point | Each batch is one request; messages without a time get distinct nanoseconds |
+| [`iceberg`](#apache-iceberg) | | | Commit with the batch's data files landed | Exactly once from Kafka (positions in the table) | Commits group the batches ready |
 | [`object_storage`](#object-storage), `amazon_s3`, `google_cloud_storage` | | | Object written | Same object name | Buffers acknowledged after writing |
 | [`http`](#http-and-feast-sinks) | | | `2xx` | `Idempotency-Key`, for receivers that dedupe | |
 | [`feast`](#http-and-feast-sinks) | | | `2xx` | Online pushes are upserts | |
@@ -388,6 +389,27 @@ then gets each message's rows once, through crashes, restarts and rebalances.
   killed (SIGKILL) three times mid-stream: each message one row
   (`integration_tests/kafka/test_exactly_once_postgres.py`); the same test at least once
   wrote 2,600 of them twice.
+
+#### Exactly once, Kafka to Iceberg
+
+The same `delivery: exactly_once` on a Kafka source with one `iceberg` sink and no dead
+letters: each commit appends the data files of its batches and sets the source's next
+offsets as table properties in the same Iceberg commit, so the table gets each message once
+through crashes, restarts and rebalances.
+
+- The offsets are the table properties `mageml.stream.<pipeline>.position.<topic>/<partition>`.
+  When the stream starts, or is assigned a partition, the partition starts there; one with
+  no property starts as at least once does. Table properties outlive snapshot expiry and
+  compaction.
+- Taking a partition writes a claim token of the instance (`.claim.<topic>/<partition>`);
+  each commit first reloads the table and commits nothing when another instance claimed one
+  of its partitions. Iceberg re-applies a commit that raced another one, so an instance that
+  lost its partitions and commits in the moment between that check and its commit, while
+  another claims them, adds that one commit's rows twice.
+- Commits run about once a second while batches arrive. Larger batches (`batch_size`,
+  `timeout_ms`) make fewer, larger commits and files.
+- Tested with 20,000 messages and the engine killed (SIGKILL) three times mid-stream: each
+  message one row (`integration_tests/iceberg/test_iceberg_stream.py`).
 
 ### Webhooks
 
@@ -739,6 +761,52 @@ measurement: orders
   their position, so messages with the same measurement and tags do not overwrite each other.
 - The token comes from the environment: a token written in the file stops the export. Busy
   (`429`) and server errors are retried; a refused write stops the stream with the reason.
+
+### Apache Iceberg
+
+The `iceberg` sink appends to an Iceberg table through a REST catalog: Apache Polaris,
+Lakekeeper, Nessie, Unity Catalog, the AWS Glue and S3 Tables endpoints, Cloudflare R2. Data
+files are Parquet (Zstandard) on S3 and S3-compatible stores, Google Cloud Storage, Azure, or
+local disk, with the credentials the catalog vends for the table or, without them, those of
+the environment.
+
+```yaml
+connector_type: iceberg
+catalog:
+  type: rest
+  uri: https://catalog.example.com/api/catalog
+  warehouse: lake
+  credential: "{{ env_var('ICEBERG_CREDENTIAL') }}"   # or token
+table: analytics.orders
+create_table: true                # create it from the first messages when missing
+columns:                          # optional: types for create_table
+  ts: timestamptz
+partition_by: ["day(ts)", "bucket(16, customer_id)"]
+```
+
+- Each batch is written as data files when it arrives, one per partition it has rows in; a
+  commit appends every batch ready since the last one, and a batch is confirmed when the
+  commit with its files lands. A failed commit fails its batches, which are written again;
+  files of a failed commit are never part of the table.
+- Messages are JSON objects. Fields the table does not have are left out, columns a message
+  does not have are null, and a list or object in a text column is its JSON text. A value
+  that does not fit its column (text in a `long` column) stops the stream with the reason.
+  Timestamps are ISO 8601 text.
+- `create_table` makes the table from the first batch: integers as `long`, other numbers
+  as `double`, booleans, the rest as `string`, in the order fields first appear; `columns`
+  sets any of them (`long`, `int`, `double`, `float`, `string`, `boolean`, `date`,
+  `timestamp`, `timestamptz`, `decimal(10, 2)`). `partition_by` takes columns and
+  `year`, `month`, `day`, `hour`, `bucket(n, column)`, `truncate(n, column)`; unquoted in
+  a YAML list, `bucket(16, id)` is read whole all the same.
+- Each snapshot's summary names the stream (`mageml.stream`) and its batches
+  (`mageml.batches`, partition and offsets).
+- Every commit is a snapshot. Expire snapshots and compact small files with your catalog's
+  maintenance, Spark (`CALL system.expire_snapshots`, `rewrite_data_files`) or pyiceberg.
+- Credentials (`token`, `credential`, `s3.secret-access-key`, ...) come from the
+  environment: written in the file, they stop the export. Services use REST catalogs; in the
+  editor, the sink writes with pyiceberg and takes any catalog it loads.
+- The engine has Iceberg only when a stream needs it (the `iceberg` feature, about 6 MB).
+- `mage-service check-connections` loads the catalog and the table.
 
 ### Object storage
 

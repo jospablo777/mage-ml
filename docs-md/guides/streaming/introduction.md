@@ -40,6 +40,7 @@ pipeline:
 - [Elasticsearch](destinations/elasticsearch.md)
 - [Google Cloud PubSub](destinations/google-cloud-pubsub.md)
 - [Google Cloud Storage](destinations/google-cloud-storage.md)
+- [Apache Iceberg](destinations/iceberg.md)
 - [InfluxDB](destinations/influxdb.md)
 - [Kafka](destinations/kafka.md)
 - [Kinesis](destinations/kinesis.md)

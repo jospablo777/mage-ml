@@ -249,6 +249,8 @@ pub enum ExactlyOnceTarget {
     Kafka,
     /// A PostgreSQL transaction on the sinks' database (EXACTLY_ONCE_POSTGRES.md).
     Postgres,
+    /// Commits to one Iceberg table that keep the source's positions (ADR-0042).
+    Iceberg,
 }
 
 impl Stream {
@@ -275,13 +277,24 @@ impl Stream {
                 return Ok(target);
             }
         }
+        if outputs.iter().all(|c| c.kind == ConnectorKind::Iceberg) {
+            if outputs.len() == 1 {
+                return Ok(ExactlyOnceTarget::Iceberg);
+            }
+            return Err(
+                "delivery: exactly_once into Iceberg commits one table with the source's \
+                 positions, so the stream has one Iceberg sink and no dead letters."
+                    .to_string(),
+            );
+        }
         let names: Vec<String> = outputs
             .iter()
             .map(|c| format!("{} ({})", c.name, c.kind.as_str()))
             .collect();
         Err(format!(
             "delivery: exactly_once needs every sink, dead letters included, to be Kafka (on \
-             the source's cluster) or every one to be PostgreSQL (on one database): the \
+             the source's cluster), every one to be PostgreSQL (on one database), or one \
+             Iceberg sink: the \
              outputs commit in one transaction with the source's positions; this stream \
              writes to {}.",
             names.join(", ")
@@ -380,6 +393,8 @@ pub enum ConnectorKind {
     Search,
     /// Sink: InfluxDB 2 as line protocol.
     Influxdb,
+    /// Sink: an Apache Iceberg table through a REST catalog, data files appended in commits.
+    Iceberg,
 }
 
 impl ConnectorKind {
@@ -402,6 +417,7 @@ impl ConnectorKind {
             ConnectorKind::Activemq => "activemq",
             ConnectorKind::Search => "search",
             ConnectorKind::Influxdb => "influxdb",
+            ConnectorKind::Iceberg => "iceberg",
         }
     }
 
@@ -440,6 +456,7 @@ impl ConnectorKind {
                 | ConnectorKind::Activemq
                 | ConnectorKind::Search
                 | ConnectorKind::Influxdb
+                | ConnectorKind::Iceberg
         )
     }
 }
@@ -1576,7 +1593,8 @@ mod tests {
     }
 
     #[test]
-    fn exactly_once_needs_kafka_outputs_or_postgres_outputs_and_is_left_out_when_at_least_once() {
+    fn exactly_once_needs_kafka_postgres_or_one_iceberg_output_and_is_left_out_when_at_least_once()
+    {
         let mut stream = kafka_to_http();
         stream["delivery"] = json!("exactly_once");
         let problems = stream_manifest(json!([block("score", &[])]), stream.clone())
@@ -1602,6 +1620,19 @@ mod tests {
         assert!(
             problem.contains("scores (postgres), dl (kafka)"),
             "{problem}"
+        );
+        // One Iceberg table keeps the rows and the positions; two outputs cannot commit
+        // together.
+        let mut iceberg = stream.clone();
+        iceberg["sinks"][0]["kind"] = json!("iceberg");
+        let parsed: Stream = serde_json::from_value(iceberg.clone()).unwrap();
+        assert_eq!(parsed.exactly_once_target(), Ok(ExactlyOnceTarget::Iceberg));
+        iceberg["errors"] = json!({"dead_letter": {"name": "dl", "kind": "iceberg"}});
+        let two: Stream = serde_json::from_value(iceberg).unwrap();
+        assert!(
+            two.exactly_once_target()
+                .unwrap_err()
+                .contains("one Iceberg sink and no dead letters")
         );
         let mut from_http = stream.clone();
         from_http["source"]["kind"] = json!("http");

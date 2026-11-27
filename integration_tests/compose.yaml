@@ -88,6 +88,27 @@ services:
     ports:
       - "${MAGE_TEST_S3_PORT:-19000}:9000"
 
+  # Apache Iceberg's REST catalog test server (the one iceberg-rust and pyiceberg test
+  # against), its catalog in memory and its tables in MinIO's bucket iceberg, which the
+  # tests make. The heap is capped, as Trino's, to leave memory to the other services.
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:1.10.1
+    mem_limit: 768m
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: mage-test
+      AWS_SECRET_ACCESS_KEY: mage-test-secret
+      CATALOG_WAREHOUSE: s3://iceberg/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "${MAGE_TEST_ICEBERG_PORT:-18181}:8181"
+
   # MySQL 8.4 LTS. Data lives in memory. The server's time zone is not UTC, so values
   # that go through the session time zone show it. The performance schema is off, which
   # saves memory.
