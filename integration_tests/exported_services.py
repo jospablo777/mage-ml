@@ -227,6 +227,15 @@ class RunningService:
         with urllib.request.urlopen(request, timeout=5) as response:
             return json.loads(response.read())
 
+    def post(self, path, body, timeout=180):
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}{path}', data=json.dumps(body).encode(),
+            method='POST',
+            headers={'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json'},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read())
+
     def wait_running(self, timeout=120):
         deadline = time.time() + timeout
         while time.time() < deadline:

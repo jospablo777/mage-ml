@@ -273,6 +273,22 @@ docker run -d -v orders-data:/var/lib/mage-service \
 orders_counts: savepoint before-v2 with 2 state files and the offsets of 2 partitions.
 ```
 
+Or take one while the service runs, without stopping it:
+
+```bash
+curl -X POST -H "Authorization: Bearer $MAGE_SERVICE_TOKEN" \
+  "$SERVICE/v1/streams/orders_counts/savepoints" -d '{"name": "before-v2"}'
+```
+
+```json
+{"pipeline": "orders_counts", "name": "before-v2", "files": 2, "partitions": 2, "paused_ms": 1180}
+```
+
+The stream pauses, finishes its batches in flight and commits their positions (with its state
+saved first), the savepoint is taken as of that point, and the stream resumes, usually within
+a second or two. A stream that does not settle within two minutes is resumed with no
+savepoint (503); one already paused stays paused.
+
 - The savepoint is kept with the state: `savepoints/<name>/` in the data volume's state
   folder, or under `MAGE_SERVICE_STATE_URL`, so every instance can start from it.
 - Started from it, the stream's state files become the savepoint's (newer ones are removed)

@@ -7,6 +7,11 @@
 //! `savepoints/<name>/` in the pipeline's state folder or object store prefix: `state/` holds
 //! the files and `positions.json` the offsets.
 //!
+//! `POST /v1/streams/{pipeline}/savepoints` takes one of a running stream ([`take_running`]):
+//! it pauses the stream, waits until it is settled (nothing in flight, every position done
+//! committed and its state saved first), takes the savepoint as of that point, and resumes
+//! it, unless it was paused before.
+//!
 //! With MAGE_SERVICE_START_FROM_SAVEPOINT=<name>, a stream starts from it: its state files
 //! become the savepoint's (newer ones removed), and each partition starts at the savepoint's
 //! offset when it is first assigned. `restored.json` records the savepoint restored, so a
@@ -166,6 +171,133 @@ impl StartPositions for FromSavepoint {
             })
             .collect())
     }
+}
+
+/// Why a savepoint of a running stream was not taken.
+#[derive(Debug)]
+pub enum Refusal {
+    /// The request is wrong: the name, or a stream that cannot have savepoints.
+    Invalid(String),
+    /// The service runs no such stream.
+    Missing(String),
+    /// The stream did not settle in time; it was resumed.
+    Unsettled(String),
+    /// Reading the offsets or writing the savepoint failed.
+    Failed(String),
+}
+
+/// How long a running stream has to settle for a savepoint: its batches in flight to finish
+/// and their positions to be committed.
+const SETTLE_WITHIN: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Resumes a stream paused for a savepoint, on every way out, unless it was paused before.
+struct Resume(Option<tokio::sync::watch::Sender<bool>>);
+
+impl Drop for Resume {
+    fn drop(&mut self) {
+        if let Some(switch) = self.0.take() {
+            let _ = switch.send(false);
+        }
+    }
+}
+
+/// Takes savepoint `name` of a stream while the service runs: pauses it, waits until it is
+/// settled, copies its state and the committed offsets, and resumes it. Returns what was
+/// taken and how long the stream was paused for it.
+pub async fn take_running(
+    service: &Arc<crate::service::Service>,
+    pipeline: &str,
+    name: &str,
+) -> Result<(Taken, std::time::Duration), Refusal> {
+    use mage_service_core::manifest::ConnectorKind;
+
+    check_name(name).map_err(Refusal::Invalid)?;
+    let stream = service
+        .manifest
+        .pipelines
+        .iter()
+        .find(|p| p.uuid == pipeline)
+        .and_then(|p| p.stream.as_ref())
+        .ok_or_else(|| Refusal::Missing(format!("The service has no stream {pipeline}.")))?;
+    if stream.source.kind != ConnectorKind::Kafka {
+        return Err(Refusal::Invalid(format!(
+            "Savepoints keep Kafka offsets; stream {pipeline} reads {}.",
+            stream.source.kind.as_str()
+        )));
+    }
+    let switch = service
+        .stream_pause
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(pipeline)
+        .cloned()
+        .ok_or_else(|| Refusal::Missing(format!("Stream {pipeline} is not running here.")))?;
+    let status = service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(pipeline)
+        .cloned()
+        .ok_or_else(|| Refusal::Missing(format!("Stream {pipeline} is not running here.")))?;
+    let paused_before = *switch.borrow();
+    let _resume = Resume((!paused_before).then(|| switch.clone()));
+    if !paused_before {
+        let _ = switch.send(true);
+    }
+    let started = std::time::Instant::now();
+    loop {
+        // A stream that was already paused reports settled at once; one paused now does so
+        // once its batches in flight are done and committed.
+        let settled = status.lock().map(|s| s.settled).unwrap_or(false);
+        if settled && (paused_before || started.elapsed() > std::time::Duration::from_millis(50)) {
+            break;
+        }
+        if started.elapsed() > SETTLE_WITHIN {
+            return Err(Refusal::Unsettled(format!(
+                "Stream {pipeline} did not settle within {} seconds (its batches in flight \
+                 finishing and their positions committed); it was resumed and no savepoint \
+                 was taken.",
+                SETTLE_WITHIN.as_secs()
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let lookup = |key: &str| {
+        service
+            .extra_env
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .or_else(|| std::env::var(key).ok())
+    };
+    let config = mage_service_core::io_config::render(
+        &serde_json::Value::Object(stream.source.config.clone()),
+        &lookup,
+    );
+    let state = service.state_files(pipeline);
+    let name = name.to_string();
+    let taken = tokio::task::spawn_blocking(move || -> Result<Taken, Refusal> {
+        #[cfg(feature = "kafka")]
+        let positions = mage_connector_kafka::committed_positions(&config)
+            .map_err(|e| Refusal::Failed(e.message))?;
+        #[cfg(not(feature = "kafka"))]
+        let positions: Vec<(String, i64)> = {
+            let _ = config;
+            return Err(Refusal::Invalid(
+                "savepoints need the engine built with Kafka (the kafka feature).".into(),
+            ));
+        };
+        take(&state, &name, positions).map_err(|e| {
+            if e.contains("exists already") {
+                Refusal::Invalid(e)
+            } else {
+                Refusal::Failed(e)
+            }
+        })
+    })
+    .await
+    .map_err(|e| Refusal::Failed(e.to_string()))??;
+    Ok((taken, started.elapsed()))
 }
 
 #[cfg(test)]

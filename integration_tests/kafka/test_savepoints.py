@@ -1,8 +1,9 @@
 """
 Savepoints (SAVEPOINTS.md): a stream that counts per key with keyed state reads 1,000
-messages and stops; `mage-service savepoint` keeps its state and offsets; it reads 1,000
-more; started from the savepoint it reads those 1,000 again from the counts it had then, so
-no key is counted past its true total. Each run is bounded (stop_at: end), so it finishes.
+messages; a savepoint keeps its state and offsets; it reads 1,000 more; started from the
+savepoint it reads those 1,000 again from the counts it had then, so no key is counted past
+its true total. The savepoint is taken of a stopped service (`mage-service savepoint`, runs
+bounded with stop_at: end) and of a running one (POST /v1/streams/{pipeline}/savepoints).
 """
 import json
 import subprocess
@@ -25,7 +26,7 @@ from integration_tests.kafka.test_stream_conformance import wait_for
 KEYS = 10
 
 
-def make_pipeline(project, topics, group):
+def make_pipeline(project, topics, group, bounded=True):
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.constants import PipelineType
     from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -48,7 +49,7 @@ def make_pipeline(project, topics, group):
         auto_offset_reset: earliest
         batch_size: 100
         timeout_ms: 200
-        stop_at: end
+        {'stop_at: end' if bounded else ''}
     ''', 'yaml')
     counted = add('count', 'transformer', COUNT, 'python', [source],
                   configuration=dict(state_key='key'))
@@ -113,6 +114,69 @@ def test_a_stream_started_from_its_savepoint_counts_from_the_state_it_had(
             seen[message['id']].append(message['seen'])
         # 1,000 once, 1,000 twice (after the savepoint, then again from it), each time with
         # the same count: the second pass started from the counts the savepoint kept.
+        assert sorted(len(v) for v in seen.values()) == [1] * 1000 + [2] * 1000
+        assert all(len(set(v)) == 1 for v in seen.values()), 'a message counted differently'
+        assert max(max(v) for v in seen.values()) == 2000 // KEYS
+    except AssertionError:
+        if service and service.log.is_file():
+            print(service.log.read_text()[-6000:])
+        raise
+    finally:
+        if service and service.process and service.process.poll() is None:
+            service.stop()
+        pipeline.delete()
+
+
+def counts_of(messages):
+    seen = defaultdict(list)
+    for message in messages:
+        seen[message['id']].append(message['seen'])
+    return seen
+
+
+def test_a_savepoint_of_a_running_stream_restores_the_counts_it_had(
+    kafka_bootstrap, mage_project, tmp_path,
+):
+    topics = [f'it_spl_in_{uuid.uuid4().hex[:8]}', f'it_spl_out_{uuid.uuid4().hex[:8]}']
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(t, num_partitions=2, replication_factor=1) for t in topics])
+    admin.close()
+    pipeline = make_pipeline(mage_project, topics, f'g_{uuid.uuid4().hex[:8]}', bounded=False)
+    binary = stream_service_binary()
+    service = None
+
+    def outputs(at_least):
+        wait_for(lambda: len(read_committed(kafka_bootstrap, topics[1])) >= at_least,
+                 timeout=180)
+
+    try:
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        service = RunningService(binary, directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        service.start()
+        service.wait_running()
+        produce(kafka_bootstrap, topics[0], range(1000))
+        outputs(1000)
+
+        # Taken while it runs: paused until settled, then resumed.
+        taken = service.post(f'/v1/streams/{pipeline.uuid}/savepoints', dict(name='live-1'))
+        assert (taken['files'], taken['partitions']) == (2, 2), taken
+        assert service.streams()[0]['state'] == 'running'
+
+        produce(kafka_bootstrap, topics[0], range(1000, 2000))
+        outputs(2000)
+        service.stop()
+
+        service = RunningService(binary, directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap,
+                                 MAGE_SERVICE_START_FROM_SAVEPOINT='live-1')
+        service.start()
+        service.wait_running()
+        outputs(3000)
+        service.stop()
+
+        seen = counts_of(read_committed(kafka_bootstrap, topics[1]))
+        # The 1,000 after the savepoint were counted again from the counts it kept.
         assert sorted(len(v) for v in seen.values()) == [1] * 1000 + [2] * 1000
         assert all(len(set(v)) == 1 for v in seen.values()), 'a message counted differently'
         assert max(max(v) for v in seen.values()) == 2000 // KEYS

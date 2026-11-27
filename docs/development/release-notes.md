@@ -33,6 +33,9 @@
 
 ### Savepoints
 
+- `POST /v1/streams/{pipeline}/savepoints` takes a savepoint while the service runs: the
+  stream pauses until its batches in flight are done and committed, the savepoint is taken,
+  and it resumes.
 - `mage-service savepoint <name>` keeps a stopped service's stream state and the Kafka
   offsets it reflects; `MAGE_SERVICE_START_FROM_SAVEPOINT=<name>` starts a new version from
   it, once, so a stateful stream is deployed or rolled back without counting anything twice.

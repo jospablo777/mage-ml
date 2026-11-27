@@ -73,6 +73,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/streams/{pipeline}", get(stream_detail))
         .route("/v1/streams/{pipeline}/tap", get(stream_tap))
         .route("/v1/streams/{pipeline}/state/{block}", get(stream_state))
+        .route("/v1/streams/{pipeline}/savepoints", post(savepoint))
         .route("/v1/streams/{pipeline}/broadcast", get(broadcast_values))
         .route(
             "/v1/streams/{pipeline}/broadcast/{name}",
@@ -1079,6 +1080,53 @@ async fn stream_detail(
     let mut value = json!(status);
     value["pipeline"] = json!(pipeline);
     Ok(Json(value))
+}
+
+#[derive(Deserialize)]
+struct SavepointBody {
+    name: String,
+}
+
+/// `POST /v1/streams/{pipeline}/savepoints` with `{"name": ...}`: a savepoint of the running
+/// stream (savepoints.rs): paused until settled, taken, resumed.
+async fn savepoint(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(pipeline): Path<String>,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<Value>> {
+    use crate::savepoints::Refusal;
+
+    authorize(&state, &headers, Access::Write)?;
+    let body: SavepointBody = serde_json::from_slice(&body).map_err(|e| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("Send {{\"name\": \"before-v2\"}}: {e}"),
+        )
+    })?;
+    match crate::savepoints::take_running(&state.service, &pipeline, &body.name).await {
+        Ok((taken, paused)) => {
+            crate::log::info(&format!(
+                "Stream {pipeline}: savepoint {} taken while it ran ({} state files, the \
+                 offsets of {} partitions; paused {} ms).",
+                body.name,
+                taken.files,
+                taken.partitions,
+                paused.as_millis()
+            ));
+            Ok(Json(json!({
+                "pipeline": pipeline,
+                "name": body.name,
+                "files": taken.files,
+                "partitions": taken.partitions,
+                "paused_ms": paused.as_millis() as u64,
+            })))
+        }
+        Err(Refusal::Invalid(m)) => Err(ApiError(StatusCode::BAD_REQUEST, m)),
+        Err(Refusal::Missing(m)) => Err(ApiError(StatusCode::NOT_FOUND, m)),
+        Err(Refusal::Unsettled(m)) => Err(ApiError(StatusCode::SERVICE_UNAVAILABLE, m)),
+        Err(Refusal::Failed(m)) => Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, m)),
+    }
 }
 
 /// A running stream's broadcast values (broadcast.rs); 404 for a stream not running here.

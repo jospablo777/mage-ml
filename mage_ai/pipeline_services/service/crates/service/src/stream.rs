@@ -41,6 +41,9 @@ pub struct StreamStatus {
     /// Per partition this instance reads: its watermark, when the stream has event time.
     pub watermarks: BTreeMap<u32, String>,
     pub alerts: u64,
+    /// Paused with nothing in flight and every position done committed: its state files and
+    /// committed positions agree, so a savepoint can be taken while it runs.
+    pub settled: bool,
     pub last_error: Option<String>,
     /// Per partition: the last acknowledged position, as text.
     pub acknowledged: BTreeMap<u32, String>,
@@ -560,6 +563,12 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     );
 
     loop {
+        let settled = user_paused && machine.tracker().is_settled();
+        if let Ok(mut s) = status.lock()
+            && s.settled != settled
+        {
+            s.settled = settled;
+        }
         let mut events: Vec<Event> = Vec::new();
         tokio::select! {
             biased;
@@ -1438,6 +1447,65 @@ mod tests {
         assert_eq!(sink.received().len(), 20);
         assert_eq!(handle.committed(), vec![20]);
         assert_eq!(status.lock().unwrap().state, StreamState::Finished);
+    }
+
+    #[tokio::test]
+    async fn a_paused_stream_is_settled_once_its_positions_are_committed() {
+        // A savepoint of a running stream waits for this (savepoints::take_running).
+        let source = MemorySource::new(vec![messages(20)], 4, false);
+        let handle = source.handle();
+        let sink = MemorySink::new();
+        let (switch, receiver) = tokio::sync::watch::channel(false);
+        let status = SharedStatus::default();
+        let stop = CancellationToken::new();
+        let running = tokio::spawn(run(
+            StreamParts {
+                name: "orders".into(),
+                source: Box::new(source),
+                sinks: vec![(Arc::new(sink.clone()), None)],
+                dead_letter: None,
+                transform: None,
+                config: config(1, false, PoisonPolicy::Stop),
+                shutdown_deadline: Duration::from_secs(5),
+                pause: Some(receiver),
+                tap: false,
+                time: None,
+                transaction: None,
+            },
+            status.clone(),
+            stop.clone(),
+        ));
+        async fn until(what: &str, check: impl Fn() -> bool) {
+            for _ in 0..500 {
+                if check() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            panic!("{what}");
+        }
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !status.lock().unwrap().settled,
+            "a running stream is not settled"
+        );
+        switch.send_replace(true);
+        until("the paused stream settles", || {
+            status.lock().unwrap().settled
+        })
+        .await;
+        // Settled: every message written and its position committed.
+        assert_eq!(sink.received().len(), 20);
+        assert_eq!(handle.committed(), vec![20]);
+
+        switch.send_replace(false);
+        until("a resumed stream is not settled", || {
+            !status.lock().unwrap().settled
+        })
+        .await;
+        stop.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(10), running).await;
     }
 
     struct Failing(usize);
