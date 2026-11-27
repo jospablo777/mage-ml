@@ -98,7 +98,9 @@ read_input <- function(entry, job_dir) {
   # ALTREP vectors over Arrow's buffers. A list column of such vectors held
   # garbage by the time the block's output was written (a crash in
   # as_arrow_table, or "object 'super_enclos_env' not found"), now and then.
-  old <- options(arrow.use_altrep = FALSE)
+  # Converted on one thread: R's memory was still corrupted now and then
+  # ("recursive gc invocation", "findVarLoc", I-549).
+  old <- options(arrow.use_altrep = FALSE, arrow.use_threads = FALSE)
   on.exit(options(old), add = TRUE)
   df <- as.data.frame(
     arrow::read_ipc_file(path, mmap = FALSE),
@@ -245,6 +247,9 @@ write_output <- function(value, job_dir) {
   if (is.null(value)) {
     kind <- "none"
   } else if (is.data.frame(value)) {
+    # Converted on one thread, as inputs are (read_input).
+    old <- options(arrow.use_threads = FALSE)
+    on.exit(options(old), add = TRUE)
     converted <- arrow_table(value)
     arrow::write_ipc_file(converted$table, file.path(out, "data.arrow"))
     json_columns <- converted$json_columns
