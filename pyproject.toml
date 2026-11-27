@@ -257,7 +257,7 @@ rust = []
 trino = [
   "trino~=0.326",
 ]
-integrations = ["mage-integrations==0.2.0"]
+integrations = ["mage-integrations==0.2.1"]
 # Dependency profile used by the container image.
 # The Rust engine, mage-service: stream and pipeline services, and the scheduler's jobs in
 # warm workers (on by default when it is installed; MAGE_JOB_ENGINE=off turns it off).
