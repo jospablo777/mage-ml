@@ -1546,6 +1546,26 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
             );
         }
     }
+    if let Some(lineage) = crate::lineage::lineage() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _ = writeln!(
+            out,
+            "# HELP mage_service_lineage_events_total OpenLineage events by outcome: sent, \
+             failed (the backend did not take them) or dropped (the queue was full)."
+        );
+        let _ = writeln!(out, "# TYPE mage_service_lineage_events_total counter");
+        for (outcome, count) in [
+            ("sent", &lineage.counts.sent),
+            ("failed", &lineage.counts.failed),
+            ("dropped", &lineage.counts.dropped),
+        ] {
+            let _ = writeln!(
+                out,
+                "mage_service_lineage_events_total{{outcome=\"{outcome}\"}} {}",
+                count.load(Relaxed)
+            );
+        }
+    }
     let _ = writeln!(out, "# TYPE mage_service_up gauge");
     let _ = writeln!(out, "mage_service_up 1");
     let _ = writeln!(

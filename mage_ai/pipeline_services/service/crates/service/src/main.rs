@@ -29,6 +29,7 @@ mod gcp;
 mod ibm;
 mod jobs;
 mod keyed_state;
+mod lineage;
 mod monitor;
 mod python;
 mod resident;
@@ -715,6 +716,7 @@ async fn start_service(
     }
     log::set_redactions(secrets.redacted_values());
     traces::init(&manifest.service.name, traces::Protocol::Http);
+    lineage::init(&manifest.service.name);
     let (missing_required, missing_optional) = secrets.missing(&manifest);
     if !missing_required.is_empty() {
         let message = format!(
@@ -1066,6 +1068,7 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     // A restart recovers what this instance left without waiting for its lease to expire.
     let _ = service.ledger.release();
     traces::flush(Duration::from_secs(5));
+    lineage::flush(Duration::from_secs(5));
     log::info("Stopped.");
     // A connector call stuck in a blocking thread would keep the runtime, and so the process,
     // alive after its shutdown: everything that must finish has finished or timed out.
@@ -1259,6 +1262,7 @@ async fn run_once(common: Common, args: RunArgs) -> Result<ExitCode, String> {
     let _ = tokio::time::timeout(Duration::from_secs(15), dispatcher).await;
     let _ = service.ledger.release();
     traces::flush(Duration::from_secs(5));
+    lineage::flush(Duration::from_secs(5));
     let detail = service
         .ledger
         .run(&run_id)

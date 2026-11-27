@@ -19,6 +19,7 @@ use serde_json::{Map, Value, json};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::lineage::{Attempt, Outcome};
 use crate::log::RunLog;
 use crate::python::{PythonPool, WorkerError};
 use crate::service::Service;
@@ -91,6 +92,7 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
     span.set("mage.pipeline", pipeline.uuid.clone());
     span.set("mage.run_id", run_id.clone());
     span.set("mage.run.source", detail.run.source.clone());
+    crate::lineage::pipeline_run(&pipeline.uuid, &run_id, None);
 
     let run_future = run_blocks(
         &service,
@@ -128,6 +130,15 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
         span.fail(message);
     }
     span.end();
+    crate::lineage::pipeline_run(
+        &pipeline.uuid,
+        &run_id,
+        Some(match status {
+            RunStatus::Completed => Outcome::Complete,
+            RunStatus::Cancelled => Outcome::Abort,
+            _ => Outcome::Fail,
+        }),
+    );
     // Blocks left pending when the run stopped did not run.
     if let Ok(Some(current)) = service.ledger.run(&run_id) {
         for block in current
@@ -518,6 +529,13 @@ impl BlockTask {
                 &[&self.block],
                 attempt,
             );
+            let lineage = Attempt::start(
+                &self.pipeline_uuid,
+                &self.run_id,
+                &self.block.uuid,
+                self.block.language.as_str(),
+                &self.block.upstream,
+            );
             let ran = self.run_once(span.traceparent()).await;
             match &ran {
                 Ok(Ran::Skipped(reason)) => span.set("mage.block.skipped", reason.clone()),
@@ -525,6 +543,22 @@ impl BlockTask {
                 Err(failure) => span.fail(&failure.message),
             }
             span.end();
+            if let Some(lineage) = lineage {
+                match &ran {
+                    Ok(Ran::Outputs(records)) => {
+                        lineage.finish(Outcome::Complete, None, records, &self.output_dir)
+                    }
+                    Ok(Ran::Skipped(_)) => {
+                        lineage.finish(Outcome::Complete, None, &[], &self.output_dir)
+                    }
+                    Err(_) if self.cancel.is_cancelled() => {
+                        lineage.finish(Outcome::Abort, None, &[], &self.output_dir)
+                    }
+                    Err(failure) => {
+                        lineage.finish(Outcome::Fail, Some(&failure.message), &[], &self.output_dir)
+                    }
+                }
+            }
             match ran {
                 Ok(Ran::Skipped(reason)) => {
                     let _ = self.service.ledger.finish_block(
@@ -1136,6 +1170,10 @@ fn rust_failure(
 
 /// A chain of Rust blocks (rust_chains) run as one process. Every block keeps its block
 /// run: the chain's attempts start them all, and each finishes with its own time.
+/// A chain attempt: the last block's outputs and each block's part, or the failure and the
+/// block it names.
+type ChainOutcome = Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)>;
+
 struct ChainTask {
     service: Arc<Service>,
     kind: ChainKind,
@@ -1214,7 +1252,21 @@ impl ChainTask {
                 &members,
                 attempt,
             );
+            let lineage: Vec<Option<Attempt>> = self
+                .blocks
+                .iter()
+                .map(|b| {
+                    Attempt::start(
+                        &self.pipeline_uuid,
+                        &self.run_id,
+                        &b.uuid,
+                        b.language.as_str(),
+                        &b.upstream,
+                    )
+                })
+                .collect();
             let ran = self.run_once(timeout, span.traceparent()).await;
+            self.finish_lineage(lineage, &ran);
             match &ran {
                 Ok((records, _)) => span.set("mage.outputs", records.len() as i64),
                 Err((failure, block)) => {
@@ -1390,11 +1442,46 @@ impl ChainTask {
         }
     }
 
+    /// Each member's lineage events: its outputs when the chain completed, FAIL for the
+    /// block that failed and ABORT for the others.
+    fn finish_lineage(&self, lineage: Vec<Option<Attempt>>, ran: &ChainOutcome) {
+        let last = self.blocks.len() - 1;
+        for (position, attempt) in lineage.into_iter().enumerate() {
+            let Some(attempt) = attempt else { continue };
+            match ran {
+                Ok((records, parts)) => {
+                    let outputs = if position == last {
+                        records.as_slice()
+                    } else {
+                        parts
+                            .get(position)
+                            .map_or(&[][..], |p| p.outputs.as_slice())
+                    };
+                    attempt.finish(Outcome::Complete, None, outputs, &self.output_dir);
+                }
+                Err((failure, block)) => {
+                    let failed = block.as_deref() == Some(self.blocks[position].uuid.as_str())
+                        || (block.is_none() && position == 0);
+                    if failed && !self.cancel.is_cancelled() {
+                        attempt.finish(
+                            Outcome::Fail,
+                            Some(&failure.message),
+                            &[],
+                            &self.output_dir,
+                        );
+                    } else {
+                        attempt.finish(Outcome::Abort, None, &[], &self.output_dir);
+                    }
+                }
+            }
+        }
+    }
+
     async fn run_once(
         &self,
         timeout: Option<Duration>,
         traceparent: Option<String>,
-    ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
+    ) -> ChainOutcome {
         match self.kind {
             ChainKind::Rust => self.run_rust_chain(timeout, traceparent).await,
             ChainKind::Worker => self.run_worker_chain(timeout, traceparent).await,
@@ -1405,7 +1492,7 @@ impl ChainTask {
         &self,
         timeout: Option<Duration>,
         traceparent: Option<String>,
-    ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
+    ) -> ChainOutcome {
         let head = &self.blocks[0];
         // A chain's blocks share their worker: chains split where it changes.
         let pool = self.service.python_for(head).ok_or_else(|| {
@@ -1493,7 +1580,7 @@ impl ChainTask {
         &self,
         timeout: Option<Duration>,
         traceparent: Option<String>,
-    ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
+    ) -> ChainOutcome {
         let head = &self.blocks[0];
         let binary = head
             .binary

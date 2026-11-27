@@ -773,6 +773,35 @@ is slow or down, spans are dropped, never runs delayed. `/metrics` counts them i
 `mage_service_trace_spans_total{outcome="sent|failed|dropped"}`. Without an endpoint nothing
 starts. Stream batches are not traced; their [metrics](stream-services.md) cover them.
 
+## Lineage
+
+With an OpenLineage backend's address set, the service sends OpenLineage events, so a
+catalog (Marquez, DataHub, OpenMetadata) shows its pipelines and the data between their
+blocks:
+
+```bash
+OPENLINEAGE_URL=http://marquez:5000
+```
+
+| Job | Events | Datasets |
+| --- | --- | --- |
+| `<pipeline>`, one run per pipeline run (its run id) | START; COMPLETE, FAIL or ABORT (cancelled) | |
+| `<pipeline>.<block>`, one run per attempt, the pipeline run as its parent | START; COMPLETE, FAIL (with the error) or ABORT | Inputs: the upstream blocks' outputs. Output: the block's own, `<pipeline>.<block>`, with its columns when it is a frame |
+
+| Variable | |
+| --- | --- |
+| `OPENLINEAGE_URL` | The backend; events are posted to `OPENLINEAGE_ENDPOINT` under it |
+| `OPENLINEAGE_ENDPOINT` | Default `api/v1/lineage` (Marquez's) |
+| `OPENLINEAGE_API_KEY` | Sent as `Authorization: Bearer <key>` |
+| `OPENLINEAGE_NAMESPACE` | The namespace of the jobs and datasets; default: the service's name |
+| `OPENLINEAGE_DISABLED` | `true` sends nothing |
+
+Events go out in order from one thread, from a queue of 4,096; when the backend is slow or
+down they are dropped, never runs delayed, and `/metrics` counts them in
+`mage_service_lineage_events_total{outcome="sent|failed|dropped"}`. The events follow the
+OpenLineage 2-0-2 schemas: `integration_tests/lineage` validates a run's events against
+them.
+
 ## Settings
 
 | Variable | Default | |

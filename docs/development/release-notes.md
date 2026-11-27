@@ -11,6 +11,14 @@
   `checkpoint_load()` and `checkpoint_save()`, Rust blocks `context.checkpoint`, with the
   same files; Python workers without MageML installed get it too.
 
+### Lineage
+
+- Pipeline services send OpenLineage events when `OPENLINEAGE_URL` is set: each run is a
+  job named by its pipeline, each block attempt a job `<pipeline>.<block>` under it, with
+  the upstream blocks' outputs as inputs and the block's output (its columns, for frames)
+  as output, so Marquez, DataHub or OpenMetadata show the service's lineage. The events
+  validate against the OpenLineage 2-0-2 schemas.
+
 ### Traces
 
 - Pipeline services send OpenTelemetry traces when `OTEL_EXPORTER_OTLP_ENDPOINT` is set:

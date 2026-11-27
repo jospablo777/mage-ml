@@ -311,7 +311,7 @@ jobs:
             # minio: exported services copy audit records to S3 (models/test_audit_store.py).
             services: feast mlflow api minio
             # The deploy test builds a service image and deploys it to the runner's Docker.
-            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models
+            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models integration_tests/lineage
             r: false
             warm: ""
           - id: pipelines
