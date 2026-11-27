@@ -24,6 +24,7 @@
 pub mod cdc;
 pub mod history;
 pub mod lookup;
+pub mod mirror;
 mod replication;
 pub mod transaction;
 
@@ -114,6 +115,8 @@ pub struct Settings {
     connect_timeout: Option<u64>,
     /// History mode: versions of each key (history.rs).
     history: Option<history::History>,
+    /// Mirror mode: the table kept as its source is (mirror.rs).
+    mirror: Option<mirror::Mirror>,
 }
 
 impl Settings {
@@ -148,6 +151,13 @@ impl Settings {
                  unique_constraints.",
             ));
         }
+        let mirror = mirror::Mirror::from_config(config)?;
+        if mirror.is_some() && (history.is_some() || !unique.is_empty()) {
+            return Err(ConnectorError::fatal(
+                "PostgreSQL mirror upserts by its own key; it takes no history or \
+                 unique_constraints.",
+            ));
+        }
         Ok(Settings {
             host: need("host")?,
             port,
@@ -167,6 +177,7 @@ impl Settings {
             sslrootcert: text(config, "sslrootcert"),
             connect_timeout: text(config, "connect_timeout").and_then(|t| t.parse().ok()),
             history,
+            mirror,
         })
     }
 
@@ -327,6 +338,11 @@ impl PgSink {
     /// with exactly-once delivery).
     async fn write_rows(&self, client: &Client, values: &[Vec<u8>]) -> Result<(), ConnectorError> {
         let settings = &self.settings;
+        if settings.table.contains('{') {
+            return self.write_routed(client, values).await;
+        }
+        // Mirror mode: each row's change operation, kept apart from its columns.
+        let mut ops: Vec<String> = Vec::new();
         // The messages' fields, their columns, and the types the values ask for.
         let mut keys: BTreeMap<String, String> = BTreeMap::new();
         let mut kinds: BTreeMap<String, Option<Kind>> = BTreeMap::new();
@@ -335,12 +351,23 @@ impl PgSink {
             let text = std::str::from_utf8(value).map_err(|_| {
                 ConnectorError::fatal(format!("PostgreSQL: row {row} is not UTF-8"))
             })?;
-            let fields: BTreeMap<String, Box<RawValue>> =
+            let mut fields: BTreeMap<String, Box<RawValue>> =
                 serde_json::from_str(text).map_err(|_| {
                     ConnectorError::fatal(format!(
                         "PostgreSQL: row {row} is not a JSON object; the sink writes objects"
                     ))
                 })?;
+            if settings.mirror.is_some() {
+                ops.push(
+                    fields
+                        .get(mirror::OPERATION)
+                        .and_then(|v| serde_json::from_str::<String>(v.get()).ok())
+                        .unwrap_or_default(),
+                );
+                for name in mirror::NOT_COLUMNS {
+                    fields.remove(name);
+                }
+            }
             for (key, raw) in &fields {
                 let column = settings.column(key);
                 match keys.get(&column) {
@@ -370,16 +397,16 @@ impl PgSink {
                 )));
             }
         }
+        let unique: Vec<String> = match &settings.mirror {
+            Some(mirror) => mirror.key_of(&settings.table)?.to_vec(),
+            None => settings.unique.clone(),
+        };
         let mut columns = Self::columns(client, settings).await?;
         if columns.is_empty() {
             let definitions: Vec<String> = kinds
                 .iter()
                 .map(|(column, kind)| {
-                    let not_null = if settings
-                        .unique
-                        .iter()
-                        .any(|u| &settings.column(u) == column)
-                    {
+                    let not_null = if unique.iter().any(|u| &settings.column(u) == column) {
                         " NOT NULL"
                     } else {
                         ""
@@ -390,11 +417,10 @@ impl PgSink {
                         pg_type(kind.unwrap_or(Kind::Text))
                     )
                 })
-                .chain((!settings.unique.is_empty()).then(|| {
+                .chain((!unique.is_empty()).then(|| {
                     format!(
                         "UNIQUE ({})",
-                        settings
-                            .unique
+                        unique
                             .iter()
                             .map(|u| quote(&settings.column(u)))
                             .collect::<Vec<_>>()
@@ -439,6 +465,11 @@ impl PgSink {
         if let Some(history) = &settings.history {
             return self
                 .write_history(client, history, columns, &keys, &rows, values)
+                .await;
+        }
+        if let Some(mirror) = &settings.mirror {
+            return self
+                .write_mirror(client, mirror, &columns, &keys, &rows, values, &ops)
                 .await;
         }
         let names: Vec<&String> = keys.keys().collect();
@@ -525,6 +556,43 @@ impl PgSink {
 }
 
 impl PgSink {
+    /// A batch whose table names `{_mage_table}`: each source table's changes into its own
+    /// table, in the same transaction.
+    async fn write_routed(
+        &self,
+        client: &Client,
+        values: &[Vec<u8>],
+    ) -> Result<(), ConnectorError> {
+        let mut groups: BTreeMap<String, Vec<Vec<u8>>> = BTreeMap::new();
+        for (row, value) in values.iter().enumerate() {
+            let fields: BTreeMap<String, Box<RawValue>> =
+                serde_json::from_slice(value).map_err(|_| {
+                    ConnectorError::fatal(format!(
+                        "PostgreSQL: row {row} is not a JSON object; the sink writes objects"
+                    ))
+                })?;
+            let table = mirror::routed(&self.settings.table, &fields).unwrap_or_default();
+            if table.is_empty() || table.contains('{') {
+                return Err(ConnectorError::fatal(format!(
+                    "PostgreSQL: row {row} has no _mage_table to name its table {} with",
+                    self.settings.table
+                )));
+            }
+            groups.entry(table).or_default().push(value.clone());
+        }
+        for (table, rows) in groups {
+            let mut settings = self.settings.clone();
+            settings.table = table;
+            let sink = PgSink {
+                settings,
+                client: Mutex::new(None),
+                shared: None,
+            };
+            Box::pin(sink.write_rows(client, &rows)).await?;
+        }
+        Ok(())
+    }
+
     /// The rows by COPY: into the table, or for upserts into a temporary table, then into the
     /// table with the last message of each key, as one by one.
     async fn copy_rows(
@@ -647,7 +715,7 @@ fn copy_field(out: &mut Vec<u8>, raw: Option<&RawValue>, column_type: &str) {
     copy_escape(out, text.as_bytes());
 }
 
-fn copy_escape(out: &mut Vec<u8>, bytes: &[u8]) {
+pub(crate) fn copy_escape(out: &mut Vec<u8>, bytes: &[u8]) {
     for &byte in bytes {
         match byte {
             b'\\' => out.extend_from_slice(b"\\\\"),

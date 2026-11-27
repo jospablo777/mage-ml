@@ -874,7 +874,7 @@ CLICKHOUSE_EXPORT_SETTINGS = {
 POSTGRES_SINK_SETTINGS = {
     'host', 'port', 'database', 'username', 'password', 'schema', 'table',
     'unique_constraints', 'unique_conflict_method', 'auto_clean_name', 'case_sensitive',
-    'allow_reserved_words', 'sslmode', 'sslrootcert', 'connect_timeout', 'history',
+    'allow_reserved_words', 'sslmode', 'sslrootcert', 'connect_timeout', 'history', 'mirror',
 }
 # MageML's PostgreSQL change capture source, and the root certificate services also take.
 POSTGRES_SOURCE_SETTINGS = {
@@ -1345,6 +1345,28 @@ def _postgres_sink_settings(config: Dict, where: str, problems: List[str]) -> Di
             )
         if config.get('unique_constraints'):
             problems.append(f'{where}: history keeps every version of a key; it takes no '
+                            'unique_constraints.')
+    mirror = config.get('mirror')
+    if mirror is not None:
+        key = mirror.get('key') if isinstance(mirror, dict) else None
+
+        def columns(value) -> bool:
+            value = [value] if isinstance(value, str) else value
+            return isinstance(value, list) and bool(value) and all(
+                isinstance(c, str) and c for c in value
+            )
+
+        if not (columns(key) or (isinstance(key, dict) and key and all(
+            columns(v) for v in key.values()
+        ))):
+            problems.append(
+                f'{where}: mirror is {{key: [id], deletes: delete}}, or key by table: '
+                '{orders: [order_id]}.'
+            )
+        if isinstance(mirror, dict) and mirror.get('deletes', 'delete') not in ('delete', 'soft'):
+            problems.append(f'{where}: mirror deletes is delete or soft.')
+        if history is not None or config.get('unique_constraints'):
+            problems.append(f'{where}: mirror upserts by its own key; it takes no history or '
                             'unique_constraints.')
     return {k: v for k, v in config.items() if k in POSTGRES_SINK_SETTINGS}
 

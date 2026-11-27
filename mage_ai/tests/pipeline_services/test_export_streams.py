@@ -638,6 +638,37 @@ history:
         self.assertIn('it takes no unique_constraints', problems)
 
 
+class MirrorExportTest(StreamExportTestCase):
+    SINK = '''
+connector_type: postgres
+host: db
+database: shop
+username: writer
+password: "{{ env_var('PG_PASSWORD') }}"
+table: "{_mage_table}"
+mirror:
+  key: {orders: [order_id], customers: [id]}
+  deletes: soft
+'''
+
+    def test_a_mirror_exports_its_keys_and_deletes(self):
+        self.stream(sink=self.SINK)
+        [pipeline] = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines']
+        config = pipeline['stream']['sinks'][0]['config']
+        self.assertEqual(config['table'], '{_mage_table}')
+        self.assertEqual(config['mirror']['deletes'], 'soft')
+
+    def test_a_mirror_without_a_key_or_with_unique_constraints_is_refused(self):
+        self.stream(sink=self.SINK.replace(
+            '  key: {orders: [order_id], customers: [id]}\n  deletes: soft',
+            '  deletes: archive',
+        ) + 'unique_constraints: [id]\n')
+        problems = self.problems()
+        self.assertIn('mirror is {key: [id], deletes: delete}', problems)
+        self.assertIn('mirror deletes is delete or soft', problems)
+        self.assertIn('it takes no history or unique_constraints', problems)
+
+
 class StreamSqlExportTest(StreamExportTestCase):
     """A stream's SQL transformer runs in the engine (its sql feature), without Python."""
 

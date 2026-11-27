@@ -720,6 +720,26 @@ history:
   come in commit order, so that time is exact.
 - `history` takes no `unique_constraints`. Editor runs write the same versions.
 
+With `mirror`, the table is kept as its source is, from [PostgreSQL changes](#postgresql-changes):
+
+```yaml
+table: "{_mage_table}"        # each source table's changes into a table of its name
+mirror:
+  key: [id]                   # or by table: {orders: [order_id], lines: [order_id, line]}
+  deletes: delete             # or soft: the row stays, with _mage_deleted_at
+```
+
+- Rows upsert by the key; of a key's changes in one batch, the last wins. A replayed batch
+  leaves the table as it was.
+- A delete deletes the row; with `deletes: soft` it sets `_mage_deleted_at` to the
+  change's commit time, and inserting the key again clears it.
+- `_mage_operation`, `_mage_schema` and `_mage_table` are not columns; `_mage_lsn` and
+  `_mage_commit_time` are, so each row says which change wrote it.
+- `{_mage_table}` and `{_mage_schema}` in `table` name each change's table. A table the
+  sink makes gets a unique key; an existing table needs a unique index on the key, and the
+  stream stops saying so when it has none.
+- Mirror runs on the engine: the Run tab and exported services.
+
 ### ClickHouse
 
 MageML's ClickHouse sink settings export as they are: the `io_config.yaml` profile gives the

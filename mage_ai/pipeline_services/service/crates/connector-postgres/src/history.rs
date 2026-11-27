@@ -148,7 +148,7 @@ impl PgSink {
             .iter()
             .map(|c| columns.get(*c).map_or("text", String::as_str))
             .collect();
-        stage(client, settings, &names, &types, keys, rows, values).await?;
+        stage(client, settings, &names, &types, keys, rows, values, None).await?;
 
         let table = settings.full_table();
         let target: Vec<String> = names.iter().map(|c| quote(c)).collect();
@@ -266,8 +266,11 @@ async fn prepare_table(
 }
 
 /// The batch in the temporary table `mage_stage` (the table's columns and `__mage_row`), by
-/// COPY, or for array columns from the batch as one JSON array.
-async fn stage(
+/// COPY, or for array columns from the batch as one JSON array. With `ops` (mirror mode),
+/// each row's change operation is `__mage_op`; without (history mode), `_mage_deleted` is
+/// left to the history to fill in.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn stage(
     client: &Client,
     settings: &Settings,
     names: &[&String],
@@ -275,16 +278,19 @@ async fn stage(
     keys: &BTreeMap<String, String>,
     rows: &[BTreeMap<String, Box<RawValue>>],
     values: &[Vec<u8>],
+    ops: Option<&[String]>,
 ) -> Result<(), ConnectorError> {
     use futures_util::SinkExt;
 
+    let extra = match ops {
+        Some(_) => ", ADD COLUMN \"__mage_op\" TEXT".to_string(),
+        None => format!(", ALTER COLUMN {} DROP NOT NULL", quote(DELETED)),
+    };
     client
         .batch_execute(&format!(
             "CREATE TEMP TABLE mage_stage (LIKE {}) ON COMMIT DROP; \
-             ALTER TABLE mage_stage ADD COLUMN \"__mage_row\" BIGINT, \
-             ALTER COLUMN {} DROP NOT NULL",
+             ALTER TABLE mage_stage ADD COLUMN \"__mage_row\" BIGINT{extra}",
             settings.full_table(),
-            quote(DELETED)
         ))
         .await
         .map_err(|e| classify("staging the batch", e))?;
@@ -308,10 +314,16 @@ async fn stage(
         let statement = client
             .prepare_typed(
                 &format!(
-                    "INSERT INTO mage_stage ({}, \"__mage_row\") SELECT {}, n FROM \
+                    "INSERT INTO mage_stage ({}, \"__mage_row\"{}) SELECT {}, n{} FROM \
                      jsonb_array_elements($1::jsonb) WITH ORDINALITY AS m(e, n)",
                     target.join(", "),
-                    expressions.join(", ")
+                    if ops.is_some() { ", \"__mage_op\"" } else { "" },
+                    expressions.join(", "),
+                    if ops.is_some() {
+                        ", e->>'_mage_operation'"
+                    } else {
+                        ""
+                    },
                 ),
                 &[Type::TEXT],
             )
@@ -333,11 +345,20 @@ async fn stage(
             );
             data.push(b'\t');
         }
-        data.extend_from_slice(format!("{index}\n").as_bytes());
+        data.extend_from_slice(index.to_string().as_bytes());
+        if let Some(ops) = ops {
+            data.push(b'\t');
+            match ops.get(index).filter(|op| !op.is_empty()) {
+                Some(op) => crate::copy_escape(&mut data, op.as_bytes()),
+                None => data.extend_from_slice(b"\\N"),
+            }
+        }
+        data.push(b'\n');
     }
     let copy = format!(
-        "COPY mage_stage ({}, \"__mage_row\") FROM STDIN",
-        target.join(", ")
+        "COPY mage_stage ({}, \"__mage_row\"{}) FROM STDIN",
+        target.join(", "),
+        if ops.is_some() { ", \"__mage_op\"" } else { "" },
     );
     let sink = client
         .copy_in::<_, bytes::Bytes>(copy.as_str())
@@ -354,10 +375,10 @@ async fn stage(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn server() -> Option<Value> {
+    pub(crate) fn server() -> Option<Value> {
         let url = std::env::var("MAGE_TEST_POSTGRES_URL").ok()?;
         let (rest, _, _) = mage_pg::split_tls(&url);
         let config: tokio_postgres::Config = rest.parse().unwrap();
@@ -374,7 +395,9 @@ mod tests {
         }))
     }
 
-    fn batch(messages: &[&str]) -> (mage_stream_ports::RecordBatch, mage_stream_ports::BatchMeta) {
+    pub(crate) fn batch(
+        messages: &[&str],
+    ) -> (mage_stream_ports::RecordBatch, mage_stream_ports::BatchMeta) {
         use mage_stream_ports::{
             AssignmentEpoch, Envelope, EnvelopeBuilder, PartitionId, Position,
         };

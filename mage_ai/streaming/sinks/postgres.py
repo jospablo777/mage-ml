@@ -31,12 +31,19 @@ class PostgresConfig(BaseConfig):
     connect_timeout: int = None
     # History mode (ADR-0043): every version of each key, as the engine's sink keeps them.
     history: Dict = None
+    # Mirror mode (ADR-0045) runs on the engine: the Run tab and exported services.
+    mirror: Dict = None
 
 
 class PostgresSink(BaseSink):
     config_class = PostgresConfig
 
     def init_client(self):
+        if self.config.mirror:
+            raise ValueError(
+                'PostgreSQL mirror runs on the engine: run the stream from the Run tab, or '
+                'export it as a service.'
+            )
         # Initialize postgres connection
         tls = {}
         if self.config.sslmode:
