@@ -121,5 +121,7 @@ so you see what is missing or stale and run only that.
 A backfill of a pipeline with time partitions runs the partitions that hold its dates, once
 each, as partition runs: an hourly backfill over three days of a daily pipeline makes three
 runs, for `2026-11-01`, `2026-11-02` and `2026-11-03`, with their variables, folders and
-states. A partition that already has a run waiting or running is left out. Backfills of
-pipelines with value partitions, or without partitions, make one run per date as before.
+states. Their `execution_date`, `ds`, `hr` and interval variables are the partition's bounds,
+and the backfill's preview lists these runs. A partition that already has a run waiting or
+running is left out. Backfills of pipelines with value partitions, or without partitions,
+make one run per date as before.
