@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from mage_ai.server.kernels import KernelName, kernel_managers
 from mage_ai.tests.api.endpoints.mixins import (
     BaseAPIEndpointTest,
@@ -9,11 +12,15 @@ from mage_ai.tests.api.endpoints.mixins import (
 class KernelAPIEndpointTest(BaseAPIEndpointTest):
     def setUp(self):
         super().setUp()
-        # The list tests count no kernel: one an earlier test file in this process left
-        # running (unit tests share processes, -n 4 --dist loadfile) is shut down first.
-        for manager in kernel_managers.values():
-            if manager.has_kernel:
-                manager.shutdown_kernel(now=True)
+        # The list tests count no kernel, while an earlier test in this process may have
+        # left the python3 kernel running (unit tests share processes, -n 4 --dist
+        # loadfile). They see managers without a kernel; shutting the kernel down instead
+        # ended its ZeroMQ context, and the update tests' restart then failed.
+        if 'list_endpoint' in self._testMethodName:
+            idle = {name: SimpleNamespace(has_kernel=False) for name in kernel_managers}
+            managers = patch('mage_ai.api.resources.KernelResource.kernel_managers', idle)
+            managers.start()
+            self.addCleanup(managers.stop)
 
 
 build_list_endpoint_tests(
