@@ -105,3 +105,22 @@ class PartitionStateTest(DBTestCase):
         # Asked again, they have active runs already.
         again = run_selected(pipeline, ['2026-11-03'], NOW)
         self.assertEqual((again['created'], len(again['active'])), ([], 1))
+
+    def test_the_declaration_is_checked_with_its_upstream_pipelines(self):
+        from mage_ai.orchestration import compilation
+
+        raw = self.pipeline(name=f'{self._testMethodName}_raw')
+        self.assertEqual(partition_state.check(self.pipeline(upstream=[raw.uuid])), [])
+        missing = self.pipeline(name=f'{self._testMethodName}_b', upstream=['nowhere'])
+        self.assertEqual(partition_state.check(missing),
+                         ['partitions: upstream pipeline nowhere does not exist.'])
+        other = Pipeline.create(f'{self._testMethodName}_other', repo_path=self.repo_path)
+        self.addCleanup(other.delete)
+        asyncio.run(other.update(dict(partitions=dict(key='region', values=['eu']))))
+        mismatched = self.pipeline(name=f'{self._testMethodName}_c', upstream=[other.uuid])
+        [problem] = partition_state.check(mismatched)
+        self.assertIn(f'upstream pipeline {other.uuid} has other partitions', problem)
+        compilation._compilations.clear()
+        self.assertEqual(compilation.summary_for(mismatched)['partitions']['problems'],
+                         [problem])
+

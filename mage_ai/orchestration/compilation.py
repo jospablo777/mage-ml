@@ -250,6 +250,15 @@ def summary_for(pipeline) -> Dict:
         unused = []
     if unused:
         summary['unused_columns'] = unused
+    # The partitions declaration's problems (partition_state.py).
+    if getattr(pipeline, 'partitions', None):
+        try:
+            from mage_ai.orchestration import partition_state
+
+            problems = partition_state.check(pipeline)
+        except Exception as error:
+            problems = [str(error)]
+        summary['partitions'] = dict(problems=problems)
     # What the last completed runs measured (advisor.py).
     try:
         from mage_ai.orchestration import advisor

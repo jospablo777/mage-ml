@@ -170,3 +170,35 @@ def select(pipeline, choice, now: Optional[datetime] = None) -> List[str]:
         raise PartitionError('Select missing, stale, failed, or a list of partitions.')
     return [row['partition'] for row in states(pipeline, now)['partitions']
             if row['state'] == choice]
+
+
+def check(pipeline) -> List[str]:
+    """What is wrong with the pipeline's partitions declaration, for the Compile panel: its
+    own errors, and each upstream pipeline that does not exist or has other partitions."""
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    try:
+        declaration = pipeline.partition_declaration
+    except PartitionError as error:
+        return [str(error)]
+    if declaration is None:
+        return []
+    problems = []
+    for name in declaration.upstream:
+        other = Pipeline.get(name, repo_path=pipeline.repo_path, check_if_exists=True)
+        if other is None:
+            problems.append(f'partitions: upstream pipeline {name} does not exist.')
+            continue
+        try:
+            theirs = other.partition_declaration
+        except PartitionError:
+            theirs = None
+        same = theirs is not None and (theirs.kind, theirs.values, theirs.zone, theirs.start) \
+            == (declaration.kind, declaration.values, declaration.zone, declaration.start)
+        if not same:
+            problems.append(
+                f'partitions: upstream pipeline {name} has other partitions; an upstream '
+                'pipeline has the same kind, start, time zone and values, so a partition of '
+                'one is the same slice as in the other.'
+            )
+    return problems
