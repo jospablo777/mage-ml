@@ -68,7 +68,10 @@ fn source(
     let _config = settings(service, connector);
     match connector.kind {
         #[cfg(feature = "kafka")]
-        ConnectorKind::Kafka => Ok(Box::new(kafka_source(pipeline, _config)?)),
+        ConnectorKind::Kafka => {
+            let starts = from_savepoint(service, pipeline)?;
+            Ok(Box::new(kafka_source(pipeline, _config, starts)?))
+        }
         #[cfg(feature = "rabbitmq")]
         ConnectorKind::Rabbitmq => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -251,6 +254,7 @@ pub struct HttpIngest {
 fn kafka_source(
     pipeline: &Pipeline,
     config: Value,
+    starts: Option<Arc<dyn mage_stream_ports::StartPositions>>,
 ) -> Result<mage_connector_kafka::KafkaSource, ConnectorError> {
     let stream = pipeline.stream.as_ref().expect("a stream");
     let batch = &stream.batch;
@@ -259,11 +263,28 @@ fn kafka_source(
         max_bytes: batch.max_bytes,
         max_wait: Duration::from_millis(batch.max_wait_ms),
     };
-    mage_connector_kafka::KafkaSource::new(
+    mage_connector_kafka::KafkaSource::with_start_positions(
         &static_membership(config, &pipeline.uuid),
         limits,
         in_flight_bytes(stream),
+        starts,
     )
+}
+
+/// With MAGE_SERVICE_START_FROM_SAVEPOINT, the stream's state as the savepoint kept it, and
+/// where its partitions start (savepoints.rs); None without it, or once it was restored.
+fn from_savepoint(
+    service: &Service,
+    pipeline: &Pipeline,
+) -> Result<Option<Arc<dyn mage_stream_ports::StartPositions>>, ConnectorError> {
+    let Some(name) = std::env::var(crate::savepoints::START_FROM)
+        .ok()
+        .filter(|n| !n.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    crate::savepoints::restore(&service.state_files(&pipeline.uuid), name.trim())
+        .map_err(|e| ConnectorError::fatal(format!("{}: {e}", crate::savepoints::START_FROM)))
 }
 
 #[cfg(feature = "kafka")]
@@ -615,8 +636,9 @@ fn kafka_to_kafka_parts(
     }
     let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
     let transform = transform_session(service, pipeline, log, tap)?;
+    let starts = from_savepoint(service, pipeline).map_err(|e| e.message)?;
     let source =
-        kafka_source(pipeline, settings(service, &stream.source)).map_err(|e| e.message)?;
+        kafka_source(pipeline, settings(service, &stream.source), starts).map_err(|e| e.message)?;
     // Stable per instance: a restart fences the producer it replaces.
     let instance = std::env::var("MAGE_SERVICE_INSTANCE_ID")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -689,6 +711,14 @@ fn kafka_to_postgres_parts(
                 connector.name, outputs[0].name
             ));
         }
+    }
+    if std::env::var(crate::savepoints::START_FROM).is_ok_and(|n| !n.trim().is_empty()) {
+        return Err(format!(
+            "{} with exactly-once delivery into PostgreSQL: the partitions start where \
+             mageml_stream_positions says, so a savepoint's offsets would not apply; start \
+             without it.",
+            crate::savepoints::START_FROM
+        ));
     }
     let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
     let transform = transform_session(service, pipeline, log, tap)?;

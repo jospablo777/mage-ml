@@ -252,6 +252,37 @@ live without `stop_at`.
   `mageml_stream_positions` says.
 - In MageML, the same setting reads up to the bound and ends the run.
 
+#### Savepoints: deploy a new version with the state
+
+A savepoint keeps a stream's state (keyed state, open windows) with the Kafka offsets it
+reflects, to start a new version from, or to go back to. Take one of a stopped service, then
+start the new version from it:
+
+```bash
+docker stop orders-service                      # a graceful stop commits and saves state
+docker run --rm -v orders-data:/var/lib/mage-service orders:v1 \
+  mage-service savepoint before-v2
+docker run -d -v orders-data:/var/lib/mage-service \
+  -e MAGE_SERVICE_START_FROM_SAVEPOINT=before-v2 orders:v2
+```
+
+```text
+orders_counts: savepoint before-v2 with 2 state files and the offsets of 2 partitions.
+```
+
+- The savepoint is kept with the state: `savepoints/<name>/` in the data volume's state
+  folder, or under `MAGE_SERVICE_STATE_URL`, so every instance can start from it.
+- Started from it, the stream's state files become the savepoint's (newer ones are removed)
+  and each partition starts at the savepoint's offset when it is first assigned.
+- It restores once: a restart with the setting still there goes on from where the stream got
+  to. To roll back again, take another savepoint name or start from an older one.
+- Savepoints keep Kafka offsets; streams with other sources are skipped. A stream with
+  exactly-once delivery into PostgreSQL keeps its offsets in PostgreSQL and refuses the
+  setting.
+- Tested with a stream that counts per key: started from a savepoint after reading on past it,
+  the messages after the savepoint were counted again from the counts it kept, the same as the
+  first time.
+
 #### Exactly once, Kafka to Kafka
 
 ```yaml

@@ -34,6 +34,7 @@ mod monitor;
 mod python;
 mod resident;
 mod run_logs;
+mod savepoints;
 mod scheduler;
 mod secrets;
 mod service;
@@ -127,6 +128,16 @@ enum Command {
         /// Print JSON instead of a table.
         #[arg(long)]
         json: bool,
+    },
+    /// Take a savepoint of each stopped stream with a Kafka source: its state files and
+    /// the offsets they reflect, to start a new version from with
+    /// MAGE_SERVICE_START_FROM_SAVEPOINT (SAVEPOINTS.md). Stop the service first.
+    Savepoint {
+        /// The savepoint's name, such as before-v2.
+        name: String,
+        /// Only this pipeline's stream.
+        #[arg(long)]
+        pipeline: Option<String>,
     },
     /// Migrate the run history, or copy a SQLite one into PostgreSQL, then exit.
     Ledger {
@@ -325,6 +336,9 @@ fn main() -> ExitCode {
             Command::Health { port } => Ok(health(listen_port(port))),
             Command::Env => env_report(&cli.common),
             Command::Ledger { command } => ledger_command(&cli.common, command),
+            Command::Savepoint { name, pipeline } => {
+                savepoint_command(&cli.common, &name, pipeline.as_deref())
+            }
             Command::CheckConnections { pipeline, json } => {
                 check_connections(&cli.common, pipeline.as_deref(), json).await
             }
@@ -563,6 +577,74 @@ fn ledger_location(common: &Common, service: &str) -> Result<ledger::Location, S
         schema: schema.clone(),
         service: service.to_string(),
     })
+}
+
+fn savepoint_command(
+    common: &Common,
+    name: &str,
+    pipeline: Option<&str>,
+) -> Result<ExitCode, String> {
+    use mage_service_core::manifest::ConnectorKind;
+
+    savepoints::check_name(name)?;
+    let manifest = load_manifest(common)?;
+    let secrets = load_secrets(&manifest);
+    let lookup = |key: &str| {
+        secrets
+            .additions
+            .get(key)
+            .cloned()
+            .or_else(|| std::env::var(key).ok())
+    };
+    let store = state_files::open_store()?;
+    let streams: Vec<_> = manifest
+        .pipelines
+        .iter()
+        .filter(|p| pipeline.is_none_or(|name| p.uuid == name))
+        .filter_map(|p| p.stream.as_ref().map(|s| (p, s)))
+        .collect();
+    if streams.is_empty() {
+        return Err(match pipeline {
+            Some(name) => format!("This service has no stream named {name}."),
+            None => "This service has no streams.".into(),
+        });
+    }
+    for (pipeline, stream) in streams {
+        if stream.source.kind != ConnectorKind::Kafka {
+            println!(
+                "{}: skipped; savepoints keep Kafka offsets, and its source is {}.",
+                pipeline.uuid,
+                stream.source.kind.as_str()
+            );
+            continue;
+        }
+        let config = mage_service_core::io_config::render(
+            &Value::Object(stream.source.config.clone()),
+            &lookup,
+        );
+        #[cfg(feature = "kafka")]
+        let positions =
+            mage_connector_kafka::committed_positions(&config).map_err(|e| e.message)?;
+        #[cfg(not(feature = "kafka"))]
+        let positions: Vec<(String, i64)> = {
+            let _ = config;
+            return Err("savepoints need the engine built with Kafka (the kafka feature).".into());
+        };
+        let state = state_files::StateFiles::for_pipeline(
+            store.as_ref(),
+            data_dir(common)
+                .join("state")
+                .join(executor::sanitize(&pipeline.uuid)),
+            &manifest.service.name,
+            &pipeline.uuid,
+        );
+        let taken = savepoints::take(&state, name, positions)?;
+        println!(
+            "{}: savepoint {name} with {} state files and the offsets of {} partitions.",
+            pipeline.uuid, taken.files, taken.partitions
+        );
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 async fn check_connections(

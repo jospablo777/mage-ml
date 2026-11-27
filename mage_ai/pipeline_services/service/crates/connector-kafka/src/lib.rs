@@ -692,6 +692,9 @@ enum Polled {
     Error(KafkaError),
     /// A failure that stops the stream, such as kept positions that could not be read.
     Fatal(String),
+    /// A bounded stream's partition (by number) was read to the end it had when fetched:
+    /// sent after that partition's messages, in the same channel.
+    PartitionEnd(i32),
 }
 
 /// A polled message and its value decoded for the blocks (Avro as JSON), or why it could
@@ -759,6 +762,58 @@ fn with_metadata(message: &rdkafka::message::OwnedMessage, data: &[u8]) -> Vec<u
         Value::String(message.topic().to_string()),
     )
     .into_bytes()
+}
+
+fn source_topics(config: &Value) -> Result<Vec<String>, ConnectorError> {
+    match (config.get("topics"), text(config, "topic")) {
+        (Some(Value::Array(list)), _) if !list.is_empty() => Ok(list
+            .iter()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect()),
+        (_, Some(topic)) => Ok(vec![topic]),
+        _ => Err(ConnectorError::fatal(
+            "Kafka source settings need topic or topics.",
+        )),
+    }
+}
+
+/// The source's consumer group's committed next offset of each partition of its topics,
+/// named as [`partition_name`]; a partition the group has none for is left out. For a
+/// savepoint of a stopped service, whose state agrees with these offsets.
+pub fn committed_positions(config: &Value) -> Result<Vec<(String, i64)>, ConnectorError> {
+    let topics = source_topics(config)?;
+    let group = text(config, "consumer_group")
+        .ok_or_else(|| ConnectorError::fatal("Kafka source settings need consumer_group."))?;
+    let mut client = client_config(config)?;
+    client
+        .set("group.id", group)
+        .set("enable.auto.commit", "false");
+    let consumer: BaseConsumer = client.create().map_err(connector_error)?;
+    let within = Duration::from_secs(30);
+    let mut list = TopicPartitionList::new();
+    for topic in &topics {
+        let metadata = consumer
+            .fetch_metadata(Some(topic), within)
+            .map_err(connector_error)?;
+        for found in metadata.topics().iter().filter(|t| t.name() == topic) {
+            for partition in found.partitions() {
+                list.add_partition(topic, partition.id());
+            }
+        }
+    }
+    let committed = consumer
+        .committed_offsets(list, within)
+        .map_err(connector_error)?;
+    Ok(committed
+        .elements()
+        .iter()
+        .filter_map(|e| match e.offset() {
+            Offset::Offset(next) if next >= 0 => {
+                Some((partition_name(e.topic(), e.partition()), next))
+            }
+            _ => None,
+        })
+        .collect())
 }
 
 /// A partition's name where a database keeps its position (exactly-once into PostgreSQL):
@@ -1248,6 +1303,9 @@ fn poll_loop(
                         Some(Ok(message)) => {
                             chunk.push(Fetched::new(message.detach(), &mut reading))
                         }
+                        Some(Err(KafkaError::PartitionEOF(partition))) => {
+                            items.push(Polled::PartitionEnd(partition));
+                        }
                         Some(Err(error)) => {
                             items.push(Polled::Error(error));
                             break;
@@ -1256,6 +1314,10 @@ fn poll_loop(
                     }
                 }
                 items.insert(0, Polled::Messages(chunk));
+            }
+            // Only bounded streams turn these on (enable.partition.eof).
+            Some(Err(KafkaError::PartitionEOF(partition))) => {
+                items.push(Polled::PartitionEnd(partition))
             }
             Some(Err(error)) => items.push(Polled::Error(error)),
             None => {}
@@ -1410,20 +1472,10 @@ impl KafkaSource {
         byte_budget: u64,
         starts: Option<Arc<dyn StartPositions>>,
     ) -> Result<KafkaSource, ConnectorError> {
-        let topics: Vec<String> = match (config.get("topics"), text(config, "topic")) {
-            (Some(Value::Array(list)), _) if !list.is_empty() => list
-                .iter()
-                .filter_map(|t| t.as_str().map(String::from))
-                .collect(),
-            (_, Some(topic)) => vec![topic],
-            _ => {
-                return Err(ConnectorError::fatal(
-                    "Kafka source settings need topic or topics.",
-                ));
-            }
-        };
+        let topics = source_topics(config)?;
         let group = text(config, "consumer_group")
             .ok_or_else(|| ConnectorError::fatal("Kafka source settings need consumer_group."))?;
+        let stop_reading = stop_at(config)?;
         let mut client = client_config(config)?;
         let servers = client
             .get("bootstrap.servers")
@@ -1434,7 +1486,16 @@ impl KafkaSource {
             .set("group.id", group)
             .set("enable.auto.commit", "false")
             .set("enable.auto.offset.store", "false")
-            .set("enable.partition.eof", "false")
+            // A bounded stream learns that a partition was read to its end from these, in
+            // order after the partition's messages.
+            .set(
+                "enable.partition.eof",
+                if stop_reading.is_some() {
+                    "true"
+                } else {
+                    "false"
+                },
+            )
             .set("partition.assignment.strategy", "cooperative-sticky")
             // librdkafka writes debug lines only for the contexts `librdkafka: {debug: ...}`
             // names; without a level set, rdkafka took it from a logger the engine does not
@@ -1468,7 +1529,6 @@ impl KafkaSource {
                 .unwrap_or(false),
         };
         let mut initial = std::collections::VecDeque::new();
-        let stop_reading = stop_at(config)?;
         let offset = match config.get("offset").filter(|o| !o.is_null()) {
             Some(offset) => Some(offset.clone()),
             None if stop_reading.is_some() => Some(all_partitions(
@@ -1659,40 +1719,64 @@ impl KafkaSource {
         }
     }
 
-    /// A bounded stream: whether every partition has been read to its end, the consumer's
-    /// position counting (it moves past transaction markers and compacted gaps, which carry
-    /// no message), and whether batches are still waiting to be handed over.
-    fn bounded_progress(&mut self) -> Option<bool> {
-        if !self.bounded {
-            return None;
-        }
-        if self.bounds.values().any(|b| !b.done())
-            && let Ok(positions) = self.consumer.position()
-        {
+    /// A bounded partition number reached the end librdkafka knew when it fetched it: every
+    /// message before that end came through the channel already. The consumer's position
+    /// says which topic's partition it was (it moved past transaction markers and compacted
+    /// gaps, which carry no message).
+    fn partition_end(&mut self, partition: i32) {
+        let ids: Vec<u32> = {
             let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
-            for element in positions.elements() {
-                if let (Some(id), Offset::Offset(next)) = (
+            self.bounds
+                .keys()
+                .filter(|id| {
                     table
-                        .ids
-                        .get(&(element.topic().to_string(), element.partition())),
-                    element.offset(),
-                ) && let Some(bound) = self.bounds.get_mut(id)
-                {
-                    bound.next = bound.next.max(next);
-                }
+                        .names
+                        .get(**id as usize)
+                        .is_some_and(|(_, p)| *p == partition)
+                })
+                .copied()
+                .collect()
+        };
+        for id in ids {
+            let Some(list) = self.tpl(id) else { continue };
+            let Ok(positions) = self.consumer.position() else {
+                continue;
+            };
+            let (topic, number) = {
+                let element = &list.elements()[0];
+                (element.topic().to_string(), element.partition())
+            };
+            let at = positions
+                .elements()
+                .iter()
+                .find(|e| e.topic() == topic && e.partition() == number)
+                .and_then(|e| match e.offset() {
+                    Offset::Offset(n) => Some(n),
+                    _ => None,
+                });
+            if let (Some(at), Some(bound)) = (at, self.bounds.get_mut(&id))
+                && at >= bound.end
+            {
+                bound.next = bound.next.max(bound.end);
+                self.end_partition(id);
             }
+        }
+    }
+
+    /// A bounded stream: Some(true) once every partition was read to its end and nothing is
+    /// left to hand over, Some(false) while batches still wait; None while a partition reads.
+    fn bounded_progress(&mut self) -> Option<bool> {
+        if !self.bounded || self.bounds.values().any(|b| !b.done()) {
+            return None;
         }
         let done: Vec<u32> = self
             .bounds
-            .iter()
-            .filter(|(id, b)| b.done() && !self.ended.contains(id))
-            .map(|(id, _)| *id)
+            .keys()
+            .filter(|id| !self.ended.contains(id))
+            .copied()
             .collect();
         for id in done {
             self.end_partition(id);
-        }
-        if self.bounds.values().any(|b| !b.done()) {
-            return None;
         }
         Some(self.pending.is_empty() && self.carry.values().all(|c| c.is_empty()))
     }
@@ -1718,7 +1802,10 @@ impl KafkaSource {
         let offset = message.offset();
         if let Some(bound) = self.bounds.get_mut(&id) {
             if offset >= bound.end {
-                // Past the stream's end: left for a later stream to read.
+                // Past the stream's end: left for a later stream to read. Messages come in
+                // offset order, so every one before the end came through already: on a topic
+                // still written to, this is how the partition ends.
+                bound.next = bound.next.max(bound.end);
                 self.end_partition(id);
                 return false;
             }
@@ -1894,6 +1981,7 @@ impl Source for KafkaSource {
                     Ok(Some(Polled::Fatal(message))) => {
                         return Err(ConnectorError::fatal(format!("Kafka: {message}")));
                     }
+                    Ok(Some(Polled::PartitionEnd(partition))) => self.partition_end(partition),
                     Ok(None) => return Ok(SourceEvent::End),
                     Err(_) => {
                         return Ok(self.ready(true)?.unwrap_or(SourceEvent::Idle));

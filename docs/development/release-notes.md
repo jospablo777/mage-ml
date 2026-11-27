@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Savepoints
+
+- `mage-service savepoint <name>` keeps a stopped service's stream state and the Kafka
+  offsets it reflects; `MAGE_SERVICE_START_FROM_SAVEPOINT=<name>` starts a new version from
+  it, once, so a stateful stream is deployed or rolled back without counting anything twice.
+
 ### Lookups in streams
 
 - A YAML transformer with `lookup:` adds to each message the row of a PostgreSQL table that
@@ -22,6 +28,9 @@
   runs live.
 - A Kafka source with `delivery: exactly_once` failed to run in MageML with a TypeError
   (I-545); MageML now runs it at least once and says so in the log.
+- A bounded stream could end before it handed over the last messages it had fetched (I-548):
+  a partition now ends on librdkafka's partition end event, which follows its messages.
+
 
 ### Exactly once from Kafka into PostgreSQL
 

@@ -112,6 +112,20 @@ impl BlockingStore {
 }
 
 impl BlockingStore {
+    /// Removes the object at a key; a key with none is not an error.
+    pub fn delete(&self, key: &str) -> Result<(), String> {
+        let path = self.path(key);
+        let where_ = self.describe(key);
+        self.call(move |runtime, store| {
+            runtime.block_on(async {
+                match store.delete(&path).await {
+                    Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+                    Err(e) => Err(format!("removing {where_}: {e}")),
+                }
+            })
+        })?
+    }
+
     /// The keys under a prefix, relative to it, sorted: every object at any depth.
     pub fn list(&self, prefix: &str) -> Result<Vec<String>, String> {
         let path = self.path(prefix);
@@ -162,6 +176,9 @@ mod tests {
             vec!["b/partition-0.json", "b/partition-1.json", "c/x.json"]
         );
         assert!(store.list("svc/none").unwrap().is_empty());
+        store.delete("svc/p/c/x.json").unwrap();
+        store.delete("svc/p/c/x.json").unwrap();
+        assert_eq!(store.list("svc/p").unwrap().len(), 2);
     }
 
     #[test]
