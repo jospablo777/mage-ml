@@ -50,9 +50,9 @@ def start_backfill(backfill: Backfill) -> List[PipelineRun]:
             settings=backfill.settings,
         )
 
-    declaration = _time_partitions(backfill.pipeline_uuid)
-    started = set()
-    for backfill_run_variables in variables_list:
+    for backfill_run_variables in _by_partition(backfill.pipeline_uuid, variables_list):
+        backfill_run_variables = dict(backfill_run_variables)
+        partition = backfill_run_variables.pop('partition', None)
         execution_date = None
         if 'execution_date' in backfill_run_variables:
             execution_date = dateutil.parser.parse(backfill_run_variables['execution_date'])
@@ -64,20 +64,8 @@ def start_backfill(backfill: Backfill) -> List[PipelineRun]:
             pipeline_uuid=backfill.pipeline_uuid,
             variables=merge_dict(backfill_variables or {}, backfill_run_variables),
         )
-        if declaration is not None and execution_date is not None:
-            # A partitioned pipeline's backfill runs the partitions holding its dates, once
-            # each, as partition runs: their folders and states (ADR-0039).
-            if execution_date.tzinfo is None:
-                execution_date = execution_date.replace(tzinfo=timezone.utc)
-            value = partitions.value_of(declaration, execution_date)
-            if value in started or _active_partition_run(backfill.pipeline_uuid, value):
-                continue
-            started.add(value)
-            run['execution_date'] = partitions.run_start(declaration, value)
-            run['partition'] = value
-            run['variables'] = merge_dict(
-                run['variables'], partitions.run_variables(declaration, value),
-            )
+        if partition is not None:
+            run['partition'] = partition
         pipeline_run = PipelineRun.create(**run)
         pipeline_runs.append(pipeline_run)
 
@@ -102,6 +90,51 @@ def _time_partitions(pipeline_uuid: str):
     return declaration
 
 
+def _by_partition(pipeline_uuid: str, variables_list: List[Dict]) -> List[Dict]:
+    """
+    For a pipeline with time partitions, the backfill's dates as the partitions holding them,
+    once each and without those with a run waiting or running (ADR-0039): an hourly backfill
+    over three days of a daily pipeline is three runs. Each gets its partition, its partition
+    variables, and execution_date, ds, hr and the interval variables of the partition. Other
+    pipelines' dates are returned as they are.
+    """
+    declaration = _time_partitions(pipeline_uuid)
+    if declaration is None:
+        return variables_list
+    arr = []
+    seen = set()
+    for item in variables_list:
+        if 'execution_date' not in item:
+            continue
+        moment = dateutil.parser.parse(item['execution_date'])
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        value = partitions.value_of(declaration, moment)
+        if value in seen:
+            continue
+        seen.add(value)
+        if _active_partition_run(pipeline_uuid, value):
+            continue
+        start = partitions.run_start(declaration, value)
+        end = partitions.end_of(declaration, value).astimezone(timezone.utc)
+        seconds = (end - start).total_seconds()
+        row = dict(
+            item,
+            ds=start.strftime('%Y-%m-%d'),
+            execution_date=start.isoformat(),
+            hr=start.strftime('%H'),
+            interval_end_datetime=end.isoformat(),
+            interval_seconds=seconds,
+            interval_start_datetime=start.isoformat(),
+            interval_start_datetime_previous=(start - timedelta(seconds=seconds)).isoformat(),
+            partition=value,
+        )
+        # The key last: a partition keyed `ds` gets its value.
+        row.update(partitions.run_variables(declaration, value))
+        arr.append(row)
+    return arr
+
+
 def _active_partition_run(pipeline_uuid: str, value: str) -> bool:
     return PipelineRun.query.filter(
         PipelineRun.pipeline_uuid == pipeline_uuid,
@@ -114,9 +147,7 @@ def _active_partition_run(pipeline_uuid: str, value: str) -> bool:
 
 
 def preview_run_dates(backfill: Backfill) -> List[Dict]:
-    variables_list = __build_variables_list(backfill)
-
-    return variables_list
+    return _by_partition(backfill.pipeline_uuid, __build_variables_list(backfill))
 
 
 def cancel_backfill(backfill: Backfill) -> None:

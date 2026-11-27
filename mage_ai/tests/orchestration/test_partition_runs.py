@@ -115,7 +115,10 @@ class PartitionRunsTest(DBTestCase):
 
 class PartitionBackfillTest(DBTestCase):
     def test_a_backfill_runs_the_partitions_holding_its_dates(self):
-        from mage_ai.orchestration.backfills.service import start_backfill
+        from mage_ai.orchestration.backfills.service import (
+            preview_run_dates,
+            start_backfill,
+        )
         from mage_ai.orchestration.db.models.schedules import Backfill
         from mage_ai.tests.factory import create_backfill
 
@@ -133,6 +136,7 @@ class PartitionBackfillTest(DBTestCase):
             interval_type=Backfill.IntervalType.HOUR,
         )
 
+        preview = preview_run_dates(backfill)
         runs = start_backfill(backfill)
 
         # 72 hourly dates, three days: one run per partition, Nov 3 already running.
@@ -141,3 +145,33 @@ class PartitionBackfillTest(DBTestCase):
         self.assertEqual(runs[0].variables['day'], '2026-11-01')
         self.assertEqual(runs[0].execution_partition, 'partitions/2026-11-01')
         self.assertNotEqual(busy.id, runs[-1].id)
+        # The form's preview shows the same runs, with the partition's bounds as the
+        # interval variables.
+        self.assertEqual([p['partition'] for p in preview], ['2026-11-01', '2026-11-02'])
+        self.assertEqual(preview[0]['execution_date'], '2026-11-01T00:00:00+00:00')
+        self.assertEqual(preview[0]['interval_end_datetime'], '2026-11-02T00:00:00+00:00')
+        self.assertEqual(preview[0]['interval_seconds'], 86400)
+        self.assertEqual(runs[1].variables['interval_start_datetime'],
+                         '2026-11-02T00:00:00+00:00')
+        self.assertNotIn('partition', runs[0].variables)
+
+    def test_a_partition_keyed_ds_backfills(self):
+        from mage_ai.orchestration.backfills.service import preview_run_dates
+        from mage_ai.orchestration.db.models.schedules import Backfill
+        from mage_ai.tests.factory import create_backfill
+
+        pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        asyncio.run(pipeline.update(dict(partitions=dict(
+            key='ds', hourly=dict(start='2026-11-01T00')))))
+        backfill = create_backfill(
+            pipeline.uuid,
+            start_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            end_datetime=datetime(2026, 11, 1, 2, tzinfo=timezone.utc),
+            interval_type=Backfill.IntervalType.HOUR,
+        )
+
+        preview = preview_run_dates(backfill)
+
+        self.assertEqual([p['ds'] for p in preview],
+                         ['2026-11-01T00', '2026-11-01T01', '2026-11-01T02'])
