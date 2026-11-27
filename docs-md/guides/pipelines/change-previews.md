@@ -29,8 +29,9 @@ Preview of orders_daily against run 41: done
 | After a changed block | Runs again, on the changed block's new output |
 | Neither | Not run; its stored output is the input of the blocks after it |
 | Exporter, sensor | Never runs: it writes to or waits on the outside |
-| SQL block | Never runs: it runs in the warehouse; the blocks after it read its stored output |
+| SQL block | Never runs: it runs in the warehouse |
 | Dynamic block | Never runs |
+| After a changed block that did not run | Not run, as its input would be the old one; when its own code changed it runs, on the run's stored output of that block, and says so |
 
 - The run to compare with is the pipeline's last completed run (`--run` names another).
   Its record says what code it ran (see [run records](run-records.md)); a

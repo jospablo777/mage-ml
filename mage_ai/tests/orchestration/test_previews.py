@@ -5,6 +5,7 @@ outputs are compared with the run's. Exporters never run.
 """
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from mage_ai.data_preparation.models.block import Block
@@ -127,6 +128,28 @@ class ChangePreviewTest(DBTestCase):
         transform = {r['block_uuid']: r for r in preview['blocks']}[self.transform_uuid]
         self.assertEqual(transform['status'], 'failed')
         self.assertIn("KeyError: 'missing'", transform['error'])
+
+    def test_what_reads_a_change_that_was_not_run_says_so(self):
+        def block(uuid, *upstream, language='python'):
+            return SimpleNamespace(uuid=uuid, type='transformer', language=language,
+                                   configuration={}, upstream_blocks=list(upstream))
+
+        query = block('query', language='sql')
+        clean = block('clean', query)
+        edited = block('edited', query)
+        report = block('report', clean)
+        with patch.object(previews, '_ordered', return_value=[query, clean, edited, report]):
+            rows = {r['block_uuid']: r for r in previews.plan(
+                None, dict(query='its code changed', edited='its code changed'),
+            )}
+        self.assertEqual(rows['query']['status'], 'not run')
+        self.assertEqual((rows['clean']['status'], rows['clean']['reason']),
+                         ('not run', 'it reads query, which changed and was not previewed'))
+        self.assertEqual(rows['report']['reason'],
+                         'it reads clean, which changed and was not previewed')
+        # Its own change still runs, on the baseline's output of what it reads.
+        self.assertEqual(rows['edited']['status'], 'run')
+        self.assertIn("reads query's output from the baseline run", rows['edited']['reason'])
 
     def test_a_pipeline_without_a_completed_run_cannot_be_previewed(self):
         with self.assertRaisesRegex(previews.PreviewError, 'no completed run'):

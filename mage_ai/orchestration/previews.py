@@ -186,18 +186,31 @@ def _not_run(block) -> Optional[str]:
 def plan(pipeline, changed: Dict[str, str]) -> List[Dict[str, Any]]:
     """Each block in order: run (a candidate), not run (with why), or unchanged."""
     candidates: Set[str] = set()
+    # Changed, or reading a change, but not run: what reads them has no new input.
+    unpreviewed: Set[str] = set()
     rows = []
     for block in _ordered(pipeline):
         upstream = [u.uuid for u in (block.upstream_blocks or [])]
         after = [u for u in upstream if u in candidates]
+        stale = [u for u in upstream if u in unpreviewed]
         why = changed.get(block.uuid) or (f'it reads {after[0]}, which changed' if after else None)
+        if why is None and stale:
+            unpreviewed.add(block.uuid)
+            rows.append(dict(block_uuid=block.uuid, status='not run', reason=(
+                f'it reads {stale[0]}, which changed and was not previewed'
+            )))
+            continue
         if why is None:
             rows.append(dict(block_uuid=block.uuid, status='unchanged', reason=''))
             continue
         skip = _not_run(block)
         if skip:
+            unpreviewed.add(block.uuid)
             rows.append(dict(block_uuid=block.uuid, status='not run', reason=f'{why}; it {skip}'))
             continue
+        if stale:
+            why = f"{why}; it reads {stale[0]}'s output from the baseline run, as {stale[0]} " \
+                'was not previewed'
         candidates.add(block.uuid)
         rows.append(dict(block_uuid=block.uuid, status='run', reason=why))
     return rows
