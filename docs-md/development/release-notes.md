@@ -52,6 +52,9 @@
   with nothing to declare: a column missing from the upstream block's data contract fails
   the compilation, one missing from its last stored output is a warning. The Compile panel
   lists them under Columns between blocks, with the line.
+- The Compile panel gives advice from the last 10 completed runs, each with the medians
+  it comes from: a block holding half or more of the run's time, a language switch passing
+  100 MB or more a run, and a slow block whose output is the same, by SHA-256, in every run.
 - The Compile panel also lists columns no downstream block reads, under Columns no block
   reads, when they are at least half of the upstream block's last stored output (1 MB or
   more), measured from the Parquet footer: the loader can select only the columns read.

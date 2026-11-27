@@ -42,6 +42,7 @@ export type CompilationSummaryType = {
   // an error against its contract, a warning against its last stored output.
   columns?: ColumnFindingType[];
   unused_columns?: UnusedColumnsType[];
+  advice?: AdviceType[];
   // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
   stream?: StreamPlanType;
 };
@@ -171,4 +172,12 @@ export type UnusedColumnsType = {
   readers: string[];
   unused_bytes: number;
   upstream: string;
+};
+
+/** Advice from the pipeline's last completed runs, with the measurement it comes from. */
+export type AdviceType = {
+  blocks: string[];
+  kind: 'bottleneck' | 'language_switch' | 'repeated_output';
+  measurement: { [key: string]: number | string };
+  message: string;
 };

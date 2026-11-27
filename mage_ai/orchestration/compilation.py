@@ -250,6 +250,15 @@ def summary_for(pipeline) -> Dict:
         unused = []
     if unused:
         summary['unused_columns'] = unused
+    # What the last completed runs measured (advisor.py).
+    try:
+        from mage_ai.orchestration import advisor
+
+        advice = advisor.advice_for(pipeline)
+    except Exception:
+        advice = []
+    if advice:
+        summary['advice'] = advice
     return summary
 
 

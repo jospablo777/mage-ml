@@ -549,6 +549,18 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
           </Spacing>
             )}
 
+          {summary?.advice?.length >= 1 && (
+          <Spacing mt={2}>
+            <Text bold small>From recent runs</Text>
+            {summary.advice.map(advice => (
+              <Text key={`${advice.kind}:${advice.blocks.join(':')}`} small>
+                <Text inline monospace small>{advice.blocks.join(' → ')}</Text>
+                <Text inline muted small> {advice.message}</Text>
+              </Text>
+            ))}
+          </Spacing>
+            )}
+
           {summary?.unused_columns?.length >= 1 && (
           <Spacing mt={2}>
             <Text bold small>Columns no block reads</Text>
