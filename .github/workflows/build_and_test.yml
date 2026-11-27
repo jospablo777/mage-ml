@@ -323,9 +323,9 @@ jobs:
             r: true
             # This group saves the shared Rust blocks cache: DuckDB (18 minutes of C++) is
             # warmed here so the SQL group finds it built. The playground's Rust pipelines
-            # build against its own Cargo.lock, so one of them is warmed too: built inside
-            # its test, it ran past the 900 s limit.
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[rust_session_scores]'"
+            # build against its own Cargo.lock, so they are warmed too: built inside their
+            # tests, two of them at once ran past the 900 s limit (I-538, I-543).
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[rust_session_scores]' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[rust_postgres_margins]' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[shape_diamond_store_scorecard]'"
           - id: study
             name: "MageML: pipeline shape study"
             # PostgreSQL only for the Rust warm-up's exported-service build.
