@@ -76,10 +76,10 @@ def names(service: str, environment: str) -> Dict[str, str]:
     return dict(current=base, previous=f'{base}-previous', volume=f'{base}-data')
 
 
-def take_savepoints(port: int, token: Optional[str], name: str,
+def take_savepoints(base_url: str, token: Optional[str], name: str,
                     timeout: float = 180) -> Tuple[List[str], List[str]]:
     """
-    Savepoint `name` of each stream of the service on `port`, taken while it runs
+    Savepoint `name` of each stream of the service at `base_url`, taken while it runs
     (POST /v1/streams/{pipeline}/savepoints). Returns the streams it was taken of, and notes
     on those skipped: a stream that cannot have one (it keeps no Kafka offsets), an engine
     that predates savepoints of running streams, or a deployment that does not answer. A
@@ -91,7 +91,7 @@ def take_savepoints(port: int, token: Optional[str], name: str,
 
     def call(method: str, path: str, body: Optional[Dict] = None) -> Dict:
         request = urllib.request.Request(
-            f'http://127.0.0.1:{port}{path}', method=method, headers=headers,
+            f'{base_url.rstrip("/")}{path}', method=method, headers=headers,
             data=json.dumps(body).encode() if body is not None else None,
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -171,7 +171,8 @@ class DockerTarget:
         current = self.inspect(service, environment) if had_current and savepoint else None
         if current is not None and current.state == 'running' and current.port:
             taken, notes = self.savepoints(
-                current.port, self.current_token(service, environment), savepoint,
+                f'http://127.0.0.1:{current.port}', self.current_token(service, environment),
+                savepoint,
             )
         if self._exists(n['previous']):
             self._run('rm', '-f', n['previous'])

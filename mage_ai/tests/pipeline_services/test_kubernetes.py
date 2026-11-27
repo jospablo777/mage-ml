@@ -115,6 +115,51 @@ class KubernetesTargetTest(TestCase):
         self.assertEqual(pod['volumes'][0]['persistentVolumeClaim']['claimName'],
                          'mage-shop-prod-data')
 
+    def test_a_redeploy_takes_a_savepoint_through_a_port_forward_first(self):
+        import contextlib
+
+        forwards, calls = [], []
+
+        @contextlib.contextmanager
+        def forward(arguments):
+            forwards.append(arguments)
+            yield 'http://127.0.0.1:43210'
+
+        def savepoints(url, token, name):
+            # Before the new revision is applied.
+            calls.append((url, name, len(self.kubectl.deployments)))
+            return ['orders'], []
+
+        self.target = kubernetes.KubernetesTarget(SETTINGS, runner=self.kubectl,
+                                                  forward=forward, savepoints=savepoints)
+        first = self.target.deploy('shop', 'prod', 'r/shop:1', dict(A='1'), {'lock': 'l1'},
+                                   timeout=60, savepoint='deploy-1')
+        self.assertEqual((first.savepoints, calls), ([], []), 'nothing ran before')
+
+        second = self.target.deploy('shop', 'prod', 'r/shop:2', dict(A='1'), {'lock': 'l2'},
+                                    timeout=60, savepoint='deploy-2')
+
+        self.assertEqual(calls, [('http://127.0.0.1:43210', 'deploy-2', 1)])
+        self.assertEqual(second.savepoints, ['orders'])
+        self.assertIn('port-forward', forwards[0])
+        self.assertIn('deployment/mage-shop-prod', forwards[0])
+
+    def test_a_port_forward_that_fails_is_noted_and_the_deploy_goes_on(self):
+        import contextlib
+
+        @contextlib.contextmanager
+        def forward(arguments):
+            raise OSError('kubectl port-forward did not start')
+            yield
+
+        self.target = kubernetes.KubernetesTarget(SETTINGS, runner=self.kubectl,
+                                                  forward=forward)
+        self.target.deploy('shop', 'prod', 'r/shop:1', dict(A='1'), {'lock': 'l1'}, timeout=60)
+        second = self.target.deploy('shop', 'prod', 'r/shop:2', dict(A='1'), {'lock': 'l2'},
+                                    timeout=60, savepoint='deploy-2')
+        self.assertEqual(second.image, 'r/shop:2')
+        self.assertIn('no port-forward', second.savepoint_notes[0])
+
     def test_objects_follow_the_settings(self):
         target = kubernetes.KubernetesTarget(dict(
             SETTINGS, storage='20Gi', storage_class='ibmc-block-gold',

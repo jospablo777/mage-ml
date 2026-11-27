@@ -27,6 +27,7 @@ from mage_ai.pipeline_services.deploy import (
     DeployError,
     Deployment,
     names,
+    take_savepoints,
 )
 from mage_ai.pipeline_services.kubernetes import NAME, secret_name
 
@@ -72,7 +73,8 @@ def _token() -> str:
 class CodeEngineTarget:
     def __init__(self, settings: Dict, environment: str = '', request: Optional[Request] = None,
                  token: Optional[Callable[[], str]] = None,
-                 sleep: Optional[Callable[[float], None]] = None):
+                 sleep: Optional[Callable[[float], None]] = None,
+                 savepoints: Optional[Callable] = None):
         missing = [key for key in ('region', 'project_id', 'image') if not settings.get(key)]
         if missing:
             raise DeployError(
@@ -89,6 +91,7 @@ class CodeEngineTarget:
         self._request = request or _http
         self._token = token or _token
         self._sleep = sleep or time.sleep
+        self.savepoints = savepoints or take_savepoints
         self._bearer: Optional[str] = None
 
     # API
@@ -162,7 +165,8 @@ class CodeEngineTarget:
         return spec
 
     def deploy(self, service: str, environment: str, image: str, env: Dict[str, str],
-               annotations: Dict[str, str], timeout: float = 600) -> Deployment:
+               annotations: Dict[str, str], timeout: float = 600,
+               savepoint: Optional[str] = None) -> Deployment:
         name = names(service, environment)['current']
         if len(name) > 63 or not NAME.match(name):
             raise DeployError(f'{name} is not a Code Engine app name: lowercase letters, '
@@ -171,6 +175,13 @@ class CodeEngineTarget:
         status, _ = self.call('POST', '/secrets',
                               dict(name=secret, format='generic', data=env), ok=(201, 409))
         before = self._app(name)
+        taken, notes = [], []
+        if savepoint and before is not None and before.get('endpoint'):
+            # The running app's streams, through its public endpoint; a private app's is not
+            # reachable from here, and gets none.
+            taken, notes = self.savepoints(
+                before['endpoint'], self.current_token(service, environment), savepoint,
+            )
         # The settings are part of what is recorded, so every change alters the variables
         # and makes a revision to wait for.
         current = dict(annotations, image=image, secret=secret,
@@ -186,7 +197,9 @@ class CodeEngineTarget:
             self._patch(name, before, spec)
         if self._wait(name, before, timeout):
             self._prune_secrets(name, {secret, (previous or {}).get('secret')})
-            return self.inspect(service, environment)
+            deployment = self.inspect(service, environment)
+            deployment.savepoints, deployment.savepoint_notes = taken, notes
+            return deployment
         failed = self._app(name) or {}
         reason = (failed.get('status_details') or {}).get('reason') or ''
         restored = False

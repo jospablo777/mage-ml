@@ -2156,7 +2156,7 @@ def service_deploy(
     ),
     savepoint: bool = typer.Option(
         True, '--savepoint/--no-savepoint',
-        help='take a savepoint of the running deployment\'s Kafka streams first (Docker).',
+        help='take a savepoint of the running deployment\'s Kafka streams first.',
     ),
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
@@ -2235,15 +2235,13 @@ def service_deploy(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     port = int(settings.get('port') or 6800)
-    savepoint_name = None
+    # The version before can start again from its streams' state as it was.
+    savepoint_name = f'deploy-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}' if savepoint else None
     try:
         if on_cluster:
-            deployment = target.deploy(name, env, image, values, labels, timeout=timeout)
+            deployment = target.deploy(name, env, image, values, labels, timeout=timeout,
+                                       savepoint=savepoint_name)
         else:
-            # The version before can start again from its streams' state as it was.
-            savepoint_name = (
-                f'deploy-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}' if savepoint else None
-            )
             deployment = target.deploy(name, env, image, port, values, labels=labels,
                                        timeout=timeout, savepoint=savepoint_name)
     except deploy.DeployError as error:

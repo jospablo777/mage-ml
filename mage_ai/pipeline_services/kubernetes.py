@@ -11,11 +11,12 @@ variables of the previous revision with its image; a Secret edited in place woul
 values that broke it. The commit, the lock and the image are annotations of the pod template
 for the same reason: an undo restores them, so status always describes what runs.
 """
+import contextlib
 import hashlib
 import json
 import re
 import subprocess
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Iterator, List, Optional
 
 from mage_ai.pipeline_services.deploy import (
     CONTAINER_PORT,
@@ -23,6 +24,7 @@ from mage_ai.pipeline_services.deploy import (
     DeployError,
     Deployment,
     names,
+    take_savepoints,
 )
 
 GROUP = 'ai.mageml'
@@ -31,6 +33,28 @@ REVISIONS = 10
 NAME = re.compile(r'^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
 
 Runner = Callable[[List[str], Optional[str]], subprocess.CompletedProcess]
+FORWARDED = re.compile(r'Forwarding from 127\.0\.0\.1:(\d+)')
+
+
+@contextlib.contextmanager
+def _port_forward(arguments: List[str]) -> Iterator[str]:
+    """kubectl port-forward to the deployment's API, for as long as the block runs."""
+    try:
+        process = subprocess.Popen(['kubectl', *arguments], stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+    except FileNotFoundError:
+        raise DeployError('kubectl is not installed; Kubernetes targets use it.') from None
+    try:
+        found = FORWARDED.search(process.stdout.readline() or '')
+        if not found:
+            raise OSError(f'kubectl port-forward did not start: {process.stderr.read(2000)}')
+        yield f'http://127.0.0.1:{found.group(1)}'
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
 
 
 def _kubectl(arguments: List[str], input: Optional[str] = None) -> subprocess.CompletedProcess:
@@ -43,7 +67,8 @@ def _kubectl(arguments: List[str], input: Optional[str] = None) -> subprocess.Co
 
 class KubernetesTarget:
     def __init__(self, settings: Dict, runner: Runner = _kubectl, environment: str = '',
-                 request_timeout: str = '30s'):
+                 request_timeout: str = '30s', forward: Optional[Callable] = None,
+                 savepoints: Optional[Callable] = None):
         self.context = settings.get('context')
         if not self.context:
             raise DeployError(
@@ -54,6 +79,8 @@ class KubernetesTarget:
         self.settings = settings
         self.runner = runner
         self.request_timeout = request_timeout
+        self.forward = forward or _port_forward
+        self.savepoints = savepoints or take_savepoints
         replicas = settings.get('replicas', 1)
         if replicas != 1:
             raise DeployError(
@@ -188,10 +215,24 @@ class KubernetesTarget:
     # Deploys
 
     def deploy(self, service: str, environment: str, image: str, env: Dict[str, str],
-               annotations: Dict[str, str], timeout: float = 300) -> Deployment:
+               annotations: Dict[str, str], timeout: float = 300,
+               savepoint: Optional[str] = None) -> Deployment:
         name = names(service, environment)['current']
         objects = self.manifests(service, environment, image, env, annotations)
         before = self._get('deployment', name)
+        taken, notes = [], []
+        if savepoint and before is not None:
+            # The running revision's streams, through a port-forward to its API.
+            try:
+                with self.forward([
+                    '--context', self.context, '--namespace', self.namespace,
+                    'port-forward', f'deployment/{name}', f':{CONTAINER_PORT}',
+                ]) as url:
+                    taken, notes = self.savepoints(
+                        url, self.current_token(service, environment), savepoint,
+                    )
+            except OSError as error:
+                notes = [f'none taken: no port-forward to the running deployment ({error})']
         # Secrets go on stdin, never on the command line.
         applied = self._run('apply', '--filename', '-', check=False,
                             input=json.dumps(dict(apiVersion='v1', kind='List', items=objects)))
@@ -207,7 +248,9 @@ class KubernetesTarget:
                             f'--timeout={int(timeout)}s', check=False)
         if rollout.returncode == 0:
             self._prune_secrets(service, environment)
-            return self.inspect(service, environment)
+            deployment = self.inspect(service, environment)
+            deployment.savepoints, deployment.savepoint_notes = taken, notes
+            return deployment
         logs = self._run('logs', f'deployment/{name}', '--tail', '40', check=False)
         undone = False
         if before is not None:

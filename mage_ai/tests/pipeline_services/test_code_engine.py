@@ -133,6 +133,27 @@ class CodeEngineTargetTest(TestCase):
         self.assertEqual(self.target.api_url('shop', 'prod'),
                          'https://mage-shop-prod.example.codeengine.appdomain.cloud')
 
+    def test_a_redeploy_takes_a_savepoint_through_the_apps_endpoint_first(self):
+        calls = []
+
+        def savepoints(url, token, name):
+            calls.append((url, name, self.app()['image_reference']))
+            return ['orders'], []
+
+        self.target = code_engine.CodeEngineTarget(
+            SETTINGS, request=self.api, token=lambda: 't0ken', sleep=lambda s: None,
+            savepoints=savepoints,
+        )
+        self.target.deploy('shop', 'prod', 'icr.io/team/shop:aaa', dict(REGION='eu'),
+                           {'lock': 'l1'}, timeout=60, savepoint='deploy-1')
+        second = self.target.deploy('shop', 'prod', 'icr.io/team/shop:bbb', dict(REGION='eu'),
+                                    {'lock': 'l2'}, timeout=60, savepoint='deploy-2')
+
+        # Taken of the app still running the image before.
+        self.assertEqual(calls, [('https://mage-shop-prod.example.codeengine.appdomain.cloud',
+                                  'deploy-2', 'icr.io/team/shop:aaa')])
+        self.assertEqual(second.savepoints, ['orders'])
+
     def test_an_unchanged_redeploy_patches_nothing(self):
         self.deploy()
         calls = len(self.api.calls)

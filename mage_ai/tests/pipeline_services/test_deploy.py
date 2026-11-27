@@ -146,10 +146,10 @@ class DeploySavepointTest(TestCase):
         self.calls = []
         self.fail = False
 
-        def savepoints(port, token, name):
+        def savepoints(url, token, name):
             # Taken while the deployment before still runs.
             running = self.docker.containers['mage-shop-prod']['running']
-            self.calls.append((port, token, name, running))
+            self.calls.append((url, token, name, running))
             if self.fail:
                 raise deploy.DeployError('savepoint deploy-1 of stream orders failed (500)')
             return ['orders'], ['clicks: no savepoint, it keeps no Kafka offsets']
@@ -169,7 +169,7 @@ class DeploySavepointTest(TestCase):
 
         second = self.deploy('mage-shop:2')
 
-        self.assertEqual(self.calls, [(7001, 'tok', 'deploy-1', True)])
+        self.assertEqual(self.calls, [('http://127.0.0.1:7001', 'tok', 'deploy-1', True)])
         self.assertEqual(second.savepoints, ['orders'])
         self.assertEqual(second.savepoint_notes,
                          ['clicks: no savepoint, it keeps no Kafka offsets'])
@@ -234,7 +234,7 @@ class TakeSavepointsTest(TestCase):
             ('POST', '/v1/streams/old/savepoints'): (404, None),
         })
 
-        taken, notes = deploy.take_savepoints(port, 'tok', 'deploy-1')
+        taken, notes = deploy.take_savepoints(f'http://127.0.0.1:{port}', 'tok', 'deploy-1')
 
         self.assertEqual(taken, ['orders'])
         self.assertIn('hooks: no savepoint, Savepoints keep Kafka offsets', notes[0])
@@ -248,7 +248,7 @@ class TakeSavepointsTest(TestCase):
                 503, dict(error='Stream orders did not settle within 120 seconds')),
         })
         with self.assertRaisesRegex(deploy.DeployError, 'did not settle.*--no-savepoint'):
-            deploy.take_savepoints(port, 'tok', 'deploy-1')
+            deploy.take_savepoints(f'http://127.0.0.1:{port}', 'tok', 'deploy-1')
 
     def test_a_deployment_that_does_not_answer_does_not_hold_up_the_deploy(self):
         import socket
@@ -256,7 +256,8 @@ class TakeSavepointsTest(TestCase):
         with socket.socket() as unused:
             unused.bind(('127.0.0.1', 0))
             port = unused.getsockname()[1]
-        taken, notes = deploy.take_savepoints(port, 'tok', 'deploy-1', timeout=2)
+        taken, notes = deploy.take_savepoints(f'http://127.0.0.1:{port}', 'tok', 'deploy-1',
+                                              timeout=2)
         self.assertEqual(taken, [])
         self.assertIn('did not answer', notes[0])
 

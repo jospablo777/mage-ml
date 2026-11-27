@@ -338,8 +338,9 @@ A stream without samples has no tests; batch pipelines have none yet. Samples ar
 of Git by default, since captured messages can hold real data, so CI runs only the samples
 committed: write the ones that should guard a deploy, and commit them.
 
-Before it stops the running deployment, `deploy` takes a savepoint of each of its Kafka
-streams (Docker targets), named for the time, such as `deploy-20261127-181500`: the version
+Before it replaces the running deployment, `deploy` takes a savepoint of each of its Kafka
+streams, named for the time, such as `deploy-20261127-181500` (on Kubernetes through a
+`kubectl port-forward`, on Code Engine through the app's public endpoint): the version
 before can start again from the stream state it had, with
 `MAGE_SERVICE_START_FROM_SAVEPOINT`. A savepoint the running deployment fails to take stops
 the deploy before anything changes; a deployment that does not answer is noted and replaced.
