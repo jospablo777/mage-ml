@@ -63,6 +63,7 @@ export const PIPELINE_COMPILATIONS: 'pipeline_compilations' = 'pipeline_compilat
 export const PIPELINE_PARTITIONS: 'pipeline_partitions' = 'pipeline_partitions';
 export const CHANGE_PREVIEWS: 'change_previews' = 'change_previews';
 export const INGESTION_SETUPS: 'ingestion_setups' = 'ingestion_setups';
+export const DATASETS: 'datasets' = 'datasets';
 export const PIPELINE_DOCUMENTATIONS: 'pipeline_documentations' = 'pipeline_documentations';
 export const PIPELINE_DEPENDENCIES: 'pipeline_dependencies' = 'pipeline_dependencies';
 export const AUDIT_EVENTS: 'audit_events' = 'audit_events';
@@ -194,6 +195,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PIPELINE_PARTITIONS],
   [CHANGE_PREVIEWS],
   [INGESTION_SETUPS],
+  [DATASETS],
   [PIPELINE_DOCUMENTATIONS],
   [PIPELINE_DEPENDENCIES],
   [AUDIT_EVENTS],

@@ -315,6 +315,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Python workers](guides/pipelines/python-workers.md)
 - [Run records and reproducing runs](guides/pipelines/run-records.md)
 - [Change previews](guides/pipelines/change-previews.md)
+- [Datasets](guides/pipelines/datasets.md)
 - [Experiments with MLflow](guides/pipelines/experiments.md)
 - [Model release checks](guides/pipelines/model-releases.md)
 - [Model inference](guides/pipelines/model-inference.md)

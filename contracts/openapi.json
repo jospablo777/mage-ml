@@ -1015,6 +1015,31 @@
     },
     "type": "object"
    },
+   "Dataset": {
+    "properties": {
+     "block": {},
+     "block_run_id": {},
+     "checks": {},
+     "columns": {},
+     "data_through": {},
+     "dependencies": {},
+     "description": {},
+     "freshness": {},
+     "id": {},
+     "max_age": {},
+     "name": {},
+     "output": {},
+     "owner": {},
+     "pipeline": {},
+     "pipeline_run_id": {},
+     "published_at": {},
+     "rows": {},
+     "runs": {},
+     "source": {},
+     "time_column": {}
+    },
+    "type": "object"
+   },
    "Download": {
     "properties": {
      "token": {},
@@ -8707,6 +8732,136 @@
      "data_providers"
     ]
    }
+  },
+  "/api/datasets": {
+   "get": {
+    "operationId": "list_datasets",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "datasets": {
+           "items": {
+            "$ref": "#/components/schemas/Dataset"
+           },
+           "type": "array"
+          },
+          "metadata": {
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "list datasets",
+    "tags": [
+     "datasets"
+    ]
+   },
+   "post": {
+    "operationId": "create_datasets",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "dataset": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "dataset": {
+           "$ref": "#/components/schemas/Dataset"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create datasets",
+    "tags": [
+     "datasets"
+    ]
+   }
+  },
+  "/api/datasets/{id}": {
+   "delete": {
+    "operationId": "delete_datasets",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "dataset": {
+           "$ref": "#/components/schemas/Dataset"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "delete datasets",
+    "tags": [
+     "datasets"
+    ]
+   },
+   "get": {
+    "operationId": "detail_datasets",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "dataset": {
+           "$ref": "#/components/schemas/Dataset"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail datasets",
+    "tags": [
+     "datasets"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
   },
   "/api/downloads": {
    "post": {
@@ -21901,6 +22056,15 @@
    ],
    "schema": "DataProvider"
   },
+  "datasets": {
+   "operations": [
+    "list",
+    "create",
+    "detail",
+    "delete"
+   ],
+   "schema": "Dataset"
+  },
   "downloads": {
    "operations": [
     "create"
@@ -22658,6 +22822,7 @@
   "custom_designs": "no list or detail reached",
   "custom_templates": "no list or detail reached",
   "data_contracts": "no list or detail reached",
+  "datasets": "no list or detail reached",
   "downloads": "no list or detail reached",
   "event_rules": "no list or detail reached",
   "execution_states": "no list or detail reached",

@@ -493,6 +493,7 @@
               "guides/pipelines/python-workers",
               "guides/pipelines/run-records",
               "guides/pipelines/change-previews",
+              "guides/pipelines/datasets",
               "guides/pipelines/experiments",
               "guides/pipelines/model-releases",
               "guides/pipelines/model-inference",

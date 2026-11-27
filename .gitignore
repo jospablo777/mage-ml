@@ -201,7 +201,8 @@ package-lock.json
 package.json
 test.py
 test/
-test_data*
+# Test data at the root; a pattern without the slash hid test files named test_data*.
+/test_data*
 test_project/
 /data_loaders/
 .ssh_tunnel/

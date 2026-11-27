@@ -44,6 +44,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `custom_templates` | Viewer | Viewer | Editor | Editor | Editor |
 | `data_contracts` | Viewer | Viewer | Editor | No one | No one |
 | `data_providers` | Viewer | No one | No one | No one | No one |
+| `datasets` | Viewer | Viewer | Editor | No one | Editor |
 | `downloads` | No one | No one | Viewer | No one | No one |
 | `event_rules` | No one | Viewer | No one | No one | No one |
 | `execution_frameworks` | Viewer | Viewer | No one | No one | No one |

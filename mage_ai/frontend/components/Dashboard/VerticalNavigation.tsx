@@ -17,6 +17,7 @@ import useProject from '@utils/models/project/useProject';
 import {
   AlertTriangle,
   Database,
+  Table,
   BranchAlt,
   CubeWithArrowDown,
   GraphWithNodes,
@@ -129,6 +130,14 @@ const DEFAULT_NAV_ITEMS = ({
           label: () => 'Pipeline runs',
           linkProps: {
             href: '/pipeline-runs',
+          },
+        },
+        {
+          Icon: Table,
+          id: 'datasets',
+          label: () => 'Datasets',
+          linkProps: {
+            href: '/datasets',
           },
         },
         {

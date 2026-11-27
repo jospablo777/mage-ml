@@ -1,0 +1,43 @@
+---
+title: "Datasets"
+description: "Name the block outputs people rely on, and see if each is fresh, passing its checks, who owns it and what it reads."
+---
+
+A dataset is a block output a project names: `daily_sales` is the output of
+`aggregate_sales` in `sales_daily`. The **Datasets** page, in the left navigation, finds
+datasets by name, owner or pipeline and shows each one's state:
+
+| Shown | From |
+| --- | --- |
+| Published, and by which run | The latest completed run of the block |
+| Data through | The largest value of the dataset's time column, from the stored output's statistics |
+| Fresh or stale | Data through (or, without a time column, published) against `max_age` |
+| Checks passing or failing | The block's latest run and its [monitors](/guides/pipelines/monitoring) |
+| Rows and columns | The stored output's Parquet footer |
+| Reads, read by | Registered datasets upstream and downstream, through the pipeline's blocks and the [pipeline dependencies](/guides/pipelines/dependencies) |
+| The output | ColumnAtlas on the published run's output |
+
+Freshness and checks are separate: data can be current and its checks failing, or a run
+can publish today the data of last week. Reading the state scans no rows.
+
+## Register a dataset
+
+From the page, or in `datasets.yaml` at the project's root, reviewed and versioned with
+the code:
+
+```yaml
+datasets:
+  - id: daily_sales
+    name: Daily sales
+    description: Revenue per store and day.
+    owner: ana@example.com
+    pipeline: sales_daily
+    block: aggregate_sales
+    output: output_0          # the default
+    time_column: day          # optional: the data's own time
+    max_age: 1d               # optional: 30m, 6h, 1d, 2w
+```
+
+- `id` is lowercase letters, digits and `_`. One output is one dataset.
+- Without `max_age`, freshness is unknown, and the page says so.
+- The outputs of global data products are offered as drafts to register.
