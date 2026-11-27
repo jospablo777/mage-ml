@@ -224,6 +224,9 @@ def test_sigterm_drains_written_batches_and_a_restart_repeats_none(
         second = RunningService(stream_service_binary(), directory, tmp_path / 'data2',
                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
         second.start()
+        # Running before it is stopped: when the first run wrote every message, a SIGTERM
+        # right after the start came before the engine handled it (exit -15, no log).
+        second.wait_running()
         written += consume(consumer, 3000 - len(written))
         second.stop()
 

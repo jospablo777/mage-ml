@@ -280,6 +280,18 @@ def prepare(
     )
 
 
+ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+PROGRESS = ('Compiling', 'Downloaded', 'Updating', 'Blocking')
+
+
+def progress_line(line: str) -> Optional[str]:
+    """A line of cargo's progress worth showing, such as "Compiling polars v0.55.2" or
+    "Blocking waiting for file lock on build directory", without its colors (cargo runs
+    with CARGO_TERM_COLOR=always, so a colored line never started with the word)."""
+    text = ANSI.sub('', line).strip()
+    return text if text.startswith(PROGRESS) else None
+
+
 def _run_cargo(
     arguments: List[str], prepared: Prepared, stream: bool,
 ) -> subprocess.CompletedProcess:
@@ -309,9 +321,9 @@ def _run_cargo(
     def read_stderr():
         for line in process.stderr:
             stderr_lines.append(line)
-            # Progress such as "Compiling polars v0.55.2", useful on a first build.
-            if stream and line.lstrip().startswith(('Compiling', 'Downloaded', 'Updating')):
-                print(line.rstrip(), flush=True)
+            shown = progress_line(line) if stream else None
+            if shown:
+                print(shown, flush=True)
 
     readers = [
         threading.Thread(target=read_stdout, daemon=True),

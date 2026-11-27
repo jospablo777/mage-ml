@@ -251,4 +251,5 @@ class RunningService:
 
     def stop(self):
         self.process.send_signal(signal.SIGTERM)
-        assert self.process.wait(timeout=60) == 0, self.log.read_text()[-4000:]
+        code = self.process.wait(timeout=60)
+        assert code == 0, f'exit {code}:\n{self.log.read_text()[-4000:]}'
