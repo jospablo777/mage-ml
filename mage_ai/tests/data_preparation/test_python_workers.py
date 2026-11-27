@@ -41,6 +41,12 @@ class PythonWorkersTest(DBTestCase):
         cls.patcher = patch.dict('os.environ', {environments.ENVIRONMENTS_DIR_ENV: cls.cache})
         cls.patcher.start()
 
+    def setUp(self):
+        super().setUp()
+        # A prepare a test started (through the API) ends before the next test: its thread
+        # wrote the worker's environment after the next test deleted the worker (I-574).
+        self.addCleanup(environments.wait_for_prepares)
+
     @classmethod
     def tearDownClass(cls):
         cls.patcher.stop()
@@ -502,6 +508,20 @@ class PythonWorkersTest(DBTestCase):
         left = [m for m in environments.environments_dir().glob(f'*/{environments.MARKER}')
                 if json.loads(m.read_text()).get('source') == str(folder.resolve())]
         self.assertEqual(left, [])
+
+    def test_a_worker_being_prepared_is_not_deleted(self):
+        self.worker()
+        key = (str(Path(self.repo_path).resolve()), 'tools')
+        with environments._prepare_jobs_lock:
+            environments._prepare_jobs[key] = dict(name='tools', lines=[], problems=[],
+                                                   state='running')
+        try:
+            with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                        'is being prepared'):
+                python_workers.delete(self.repo_path, 'tools')
+        finally:
+            with environments._prepare_jobs_lock:
+                environments._prepare_jobs.pop(key, None)
 
     def test_the_api_manages_workers_for_editors_and_shows_them_to_viewers(self):
         import asyncio

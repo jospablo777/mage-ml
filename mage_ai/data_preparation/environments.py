@@ -1203,6 +1203,18 @@ def start_prepare(repo_path: str, alias: str, lock: bool = False) -> Dict:
         return dict(job, lines=list(job['lines']))
 
 
+def wait_for_prepares(timeout: float = 600) -> bool:
+    """Waits until no prepare job runs (tests, so one's thread never outlives it); whether
+    they all ended in time."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with _prepare_jobs_lock:
+            if not any(job['state'] == 'running' for job in _prepare_jobs.values()):
+                return True
+        time.sleep(0.1)
+    return False
+
+
 def prepare_job(repo_path: str, alias: str) -> Optional[Dict]:
     key = (str(Path(repo_path).resolve()), normalized_alias(alias))
     with _prepare_jobs_lock:

@@ -1171,6 +1171,11 @@ def delete(repo_path: str, alias: str) -> Dict:
             f'Python worker {worker.alias} runs blocks of {len(used)} pipeline'
             f'{"" if len(used) == 1 else "s"}: {where}. Choose another worker for them '
             'first.')
+    job = environments.prepare_job(repo_path, worker.alias)
+    if job and job['state'] == 'running':
+        # Its environment would be written after the folder is gone, and left behind.
+        raise PipelineEnvironmentError(
+            f'Python worker {worker.alias} is being prepared; delete it when that ends.')
     source = str(Path(worker.definition).resolve())
     removed = 0
     for marker in environments.environments_dir().glob(f'*/{environments.MARKER}'):
