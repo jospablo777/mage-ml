@@ -839,6 +839,10 @@ class BlockExecutor:
             return None
         project = lineage._project_name()
         attempts = (self.retry_metadata or {}).get('attempts') or 1
+        from mage_ai.orchestration.lineage_tables import sql_datasets
+
+        # The tables a SQL block reads and writes, named as other tools name them.
+        tables_read, tables_written = sql_datasets(self.block)
         attempt = dict(
             project=project,
             job=f'{self.pipeline.uuid}.{self.block_uuid}',
@@ -846,12 +850,14 @@ class BlockExecutor:
             parent=(lineage.run_id(project, 'pipeline_run', pipeline_run.id),
                     self.pipeline.uuid),
             inputs=[lineage.block_dataset(project, self.pipeline.uuid, upstream)
-                    for upstream in (self.block.upstream_block_uuids or [])],
+                    for upstream in (self.block.upstream_block_uuids or [])] + tables_read,
+            tables=tables_written,
         )
         lineage.emit(lineage.event(
             project, attempt['job'], attempt['run'], parent=attempt['parent'],
             inputs=attempt['inputs'],
-            outputs=[lineage.block_dataset(project, self.pipeline.uuid, self.block_uuid)],
+            outputs=[lineage.block_dataset(project, self.pipeline.uuid, self.block_uuid)]
+            + tables_written,
         ))
         return attempt
 
@@ -911,7 +917,7 @@ class BlockExecutor:
         lineage.emit(lineage.event(
             attempt['project'], attempt['job'], attempt['run'], outcome=outcome,
             parent=attempt['parent'], error=error, inputs=attempt['inputs'],
-            outputs=[output],
+            outputs=[output] + attempt['tables'],
         ))
 
     def _checkpoint(self, global_vars: Dict):

@@ -20,6 +20,9 @@
   validate against the OpenLineage 2-0-2 schemas.
 - MageML's own pipeline runs and block runs send the same events, with run ids derived
   from the project and the run, and the columns of each block's stored output.
+- SQL blocks' lineage names the database tables they read and write, in OpenLineage's
+  naming (PostgreSQL, MySQL, ClickHouse, Snowflake, BigQuery, DuckDB), from the query
+  (sqlglot) and the block's io_config profile.
 
 ### Traces
 

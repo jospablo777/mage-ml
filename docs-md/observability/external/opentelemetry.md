@@ -76,6 +76,12 @@ OpenLineage events of its pipeline runs and block runs, as exported services do
   parent, the upstream blocks' outputs as inputs and its own output as output, with the
   columns of its stored Parquet output;
 - a failed attempt carries its error.
+- a SQL block also names the database tables it reads and writes, as OpenLineage's naming
+  spec does (`postgres://host:port` with `database.schema.table`, `mysql://host:port` with
+  `database.table`, ClickHouse, Snowflake, BigQuery and DuckDB likewise), from its query and
+  its io_config profile, so a catalog joins MageML's lineage with other tools' lineage of
+  the same tables. A block's own output table is its output; with raw SQL, the tables it
+  inserts into or creates are.
 
 `OPENLINEAGE_ENDPOINT` (default `api/v1/lineage`), `OPENLINEAGE_API_KEY`,
 `OPENLINEAGE_NAMESPACE` (default: the project's folder name) and `OPENLINEAGE_DISABLED`
