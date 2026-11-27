@@ -141,6 +141,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
   - [Retrying block runs from a pipeline run](orchestration/pipeline-runs/retrying-block-runs.md)
   - [Saving block output as CSV file](orchestration/pipeline-runs/saving-block-output-as-csv.md)
   - [Query pipeline run metadata from database](orchestration/pipeline-runs/database-query.md)
+- [Partitions](orchestration/partitions.md)
 - **Backfills**
   - [Backfilling pipelines](orchestration/backfills/overview.md)
   - [Backfill guide](orchestration/backfills/guides.md)

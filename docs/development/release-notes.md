@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Partitions
+
+- A pipeline can declare partitions (hourly, daily, weekly or monthly from a start date in a
+  time zone, or a list of values) in its metadata.yaml. Each partition runs as an ordinary
+  pipeline run with the partition as a variable and its outputs in its own folder, and is
+  missing, queued, running, failed, done, or stale when the code changed since it ran or a
+  declared upstream pipeline's same partition ran after it. `mage partitions` and
+  `/api/pipeline_partitions` show them, run the missing, stale or failed ones, and accept the
+  current code for changes that do not change results.
+
 ### Checkpoints inside long blocks
 
 - `kwargs['checkpoint'].save(key, value)` and `.load(key, default)` keep a block's progress

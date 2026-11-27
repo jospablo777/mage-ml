@@ -223,6 +223,7 @@
                   "orchestration/pipeline-runs/database-query"
                 ]
               },
+              "orchestration/partitions",
               {
                 "group": "Backfills",
                 "icon": "clock-rotate-left",
