@@ -302,6 +302,7 @@ def make_app(
         (r'/version-control', MainPageHandler),
         (r'/monitors', MainPageHandler),
         (r'/incidents', MainPageHandler),
+        (r'/ingestion', MainPageHandler),
         (r'/block-layout', MainPageHandler),
         (r'/services', MainPageHandler),
         (r'/workers', MainPageHandler),

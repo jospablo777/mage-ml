@@ -60,6 +60,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `global_data_products` | Viewer | Viewer | Editor | Editor | Editor |
 | `global_hooks` | Admin | Admin | Admin | Admin | Admin |
 | `incidents` | Viewer | No one | No one | No one | No one |
+| `ingestion_setups` | No one | No one | Editor | No one | No one |
 | `integration_destinations` | Viewer | No one | Viewer | No one | No one |
 | `integration_source_streams` | No one | No one | No one | Viewer | No one |
 | `integration_sources` | Viewer | Viewer | Editor | Editor | No one |

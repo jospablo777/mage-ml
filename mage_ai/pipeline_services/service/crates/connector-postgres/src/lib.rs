@@ -117,6 +117,8 @@ pub struct Settings {
     history: Option<history::History>,
     /// Mirror mode: the table kept as its source is (mirror.rs).
     mirror: Option<mirror::Mirror>,
+    /// The source table of a routed batch (`{_mage_table}`), which names its mirror key.
+    source_table: Option<String>,
 }
 
 impl Settings {
@@ -178,6 +180,7 @@ impl Settings {
             connect_timeout: text(config, "connect_timeout").and_then(|t| t.parse().ok()),
             history,
             mirror,
+            source_table: None,
         })
     }
 
@@ -398,7 +401,9 @@ impl PgSink {
             }
         }
         let unique: Vec<String> = match &settings.mirror {
-            Some(mirror) => mirror.key_of(&settings.table)?.to_vec(),
+            Some(mirror) => mirror
+                .key_of(settings.source_table.as_deref().unwrap_or(&settings.table))?
+                .to_vec(),
             None => settings.unique.clone(),
         };
         let mut columns = Self::columns(client, settings).await?;
@@ -563,7 +568,8 @@ impl PgSink {
         client: &Client,
         values: &[Vec<u8>],
     ) -> Result<(), ConnectorError> {
-        let mut groups: BTreeMap<String, Vec<Vec<u8>>> = BTreeMap::new();
+        // By table: the destination table and the source table it mirrors.
+        let mut groups: BTreeMap<(String, String), Vec<Vec<u8>>> = BTreeMap::new();
         for (row, value) in values.iter().enumerate() {
             let fields: BTreeMap<String, Box<RawValue>> =
                 serde_json::from_slice(value).map_err(|_| {
@@ -578,11 +584,19 @@ impl PgSink {
                     self.settings.table
                 )));
             }
-            groups.entry(table).or_default().push(value.clone());
+            let source = fields
+                .get("_mage_table")
+                .and_then(|v| serde_json::from_str::<String>(v.get()).ok())
+                .unwrap_or_default();
+            groups
+                .entry((table, source))
+                .or_default()
+                .push(value.clone());
         }
-        for (table, rows) in groups {
+        for ((table, source), rows) in groups {
             let mut settings = self.settings.clone();
             settings.table = table;
+            settings.source_table = Some(source);
             let sink = PgSink {
                 settings,
                 client: Mutex::new(None),

@@ -141,7 +141,7 @@ impl PgSink {
     ) -> Result<(), ConnectorError> {
         let settings = &self.settings;
         let key: Vec<String> = mirror
-            .key_of(&settings.table)?
+            .key_of(settings.source_table.as_deref().unwrap_or(&settings.table))?
             .iter()
             .map(|k| settings.column(k))
             .collect();
@@ -279,7 +279,9 @@ mod tests {
         };
         let prefix = format!("mirror_{}", std::process::id());
         config["table"] = format!("{prefix}_{{_mage_table}}").into();
-        config["mirror"] = serde_json::json!({"key": "id"});
+        // Keys by source table, with the copies named apart from it.
+        config["mirror"] =
+            serde_json::json!({"key": {"orders": ["id"], "customers": ["id"], "plain": ["id"]}});
         let sink = PgSink::new(&config).unwrap();
         let first = [
             change("orders", 1, "a", "insert", 1),

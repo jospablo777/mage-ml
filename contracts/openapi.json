@@ -3135,6 +3135,20 @@
     },
     "type": "object"
    },
+   "IngestionSetup": {
+    "properties": {
+     "action": {},
+     "checks": {},
+     "columns": {},
+     "pipeline_uuid": {},
+     "ready": {},
+     "review": {},
+     "rows": {},
+     "table": {},
+     "tables": {}
+    },
+    "type": "object"
+   },
    "IntegrationDestination": {
     "properties": {
      "docs": {
@@ -10393,6 +10407,46 @@
     "summary": "list incidents",
     "tags": [
      "incidents"
+    ]
+   }
+  },
+  "/api/ingestion_setups": {
+   "post": {
+    "operationId": "create_ingestion_setups",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "ingestion_setup": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "ingestion_setup": {
+           "$ref": "#/components/schemas/IngestionSetup"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create ingestion_setups",
+    "tags": [
+     "ingestion_setups"
     ]
    }
   },
@@ -21969,6 +22023,12 @@
    ],
    "schema": "Incident"
   },
+  "ingestion_setups": {
+   "operations": [
+    "create"
+   ],
+   "schema": "IngestionSetup"
+  },
   "integration_destinations": {
    "operations": [
     "list",
@@ -22610,6 +22670,7 @@
   "global_data_products": "no list or detail reached",
   "global_hooks": "no list or detail reached",
   "incidents": "no list or detail reached",
+  "ingestion_setups": "no list or detail reached",
   "integration_source_streams": "no list or detail reached",
   "interactions": "no list or detail reached",
   "kernels": "not called: starts a Jupyter kernel",

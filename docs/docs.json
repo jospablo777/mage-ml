@@ -425,6 +425,7 @@
                 "icon": "water",
                 "pages": [
                   "guides/streaming/introduction",
+                  "guides/streaming/guided-ingestion",
                   {
                     "group": "Sources",
                     "pages": [

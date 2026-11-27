@@ -16,6 +16,7 @@ import api from '@api';
 import useProject from '@utils/models/project/useProject';
 import {
   AlertTriangle,
+  Database,
   BranchAlt,
   CubeWithArrowDown,
   GraphWithNodes,
@@ -128,6 +129,14 @@ const DEFAULT_NAV_ITEMS = ({
           label: () => 'Pipeline runs',
           linkProps: {
             href: '/pipeline-runs',
+          },
+        },
+        {
+          Icon: Database,
+          id: 'ingestion',
+          label: () => 'Ingestion',
+          linkProps: {
+            href: '/ingestion',
           },
         },
         {

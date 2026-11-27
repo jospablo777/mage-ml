@@ -261,6 +261,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
   - [Send data to Amplitude](guides/amplitude/send.md)
 - **Streaming**
   - [Overview](guides/streaming/introduction.md)
+  - [Copy a database and keep it in step](guides/streaming/guided-ingestion.md)
   - **Sources**
     - [ActiveMQ](guides/streaming/sources/activemq.md)
     - [Amazon SQS](guides/streaming/sources/amazon-sqs.md)
