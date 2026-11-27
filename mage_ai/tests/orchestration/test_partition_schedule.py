@@ -65,3 +65,56 @@ class PartitionScheduleTest(DBTestCase):
 
         runs = PipelineRun.query.filter(PipelineRun.pipeline_uuid == pipeline.uuid).all()
         self.assertEqual(sorted(r.partition for r in runs), ['2026-11-05', '2026-11-06'])
+
+
+class UpstreamScheduleTest(DBTestCase):
+    """schedule: on_upstream: a partition runs once its upstream pipelines' are done."""
+
+    def make(self, name, **settings):
+        pipeline = Pipeline.create(f'{self._testMethodName}_{name}', repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        asyncio.run(pipeline.update(dict(partitions=dict(
+            key='region', values=['eu', 'us', 'apac'], **settings))))
+        return Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+
+    def complete(self, pipeline, value, at, code=None):
+        run, _ = run_partition(pipeline, value)
+        run.update(status=PipelineRun.PipelineRunStatus.COMPLETED, completed_at=at,
+                   metrics=dict(run_record=dict(code=code)) if code else None)
+        return run
+
+    def test_partitions_follow_their_upstream_and_code_changes_wait(self):
+        from unittest.mock import patch
+
+        raw = self.make('raw')
+        model = self.make('model', upstream=[raw.uuid], schedule='on_upstream')
+        self.assertEqual(partition_schedule.due(model), [], 'nothing upstream is done')
+
+        self.complete(raw, 'eu', datetime(2026, 11, 1, 1))
+        self.complete(raw, 'us', datetime(2026, 11, 1, 2))
+        self.assertEqual(partition_schedule.due(model), ['eu', 'us'])
+        queued = partition_schedule.tick([model])
+        self.assertEqual(queued, [f'{model.uuid}/eu', f'{model.uuid}/us'])
+        # Queued: not queued twice.
+        self.assertEqual(partition_schedule.due(model), [])
+
+        for run in PipelineRun.query.filter(PipelineRun.pipeline_uuid == model.uuid):
+            run.update(status=PipelineRun.PipelineRunStatus.COMPLETED,
+                       completed_at=datetime(2026, 11, 1, 3))
+        self.assertEqual(partition_schedule.due(model), [])
+
+        # eu upstream ran again: the model's eu is stale because of it, and runs again.
+        self.complete(raw, 'eu', datetime(2026, 11, 1, 4))
+        self.assertEqual(partition_schedule.due(model), ['eu'])
+
+        # A code change makes us stale too, which waits for Run stale.
+        from mage_ai.orchestration import partition_state
+
+        self.complete(model, 'us', datetime(2026, 11, 1, 5), code='old')
+        self.complete(raw, 'us', datetime(2026, 11, 1, 6))
+        with patch.object(partition_state, '_code_now', return_value='new'):
+            self.assertEqual(partition_schedule.due(model), ['eu'])
+
+    def test_on_upstream_needs_upstream(self):
+        with self.assertRaisesRegex(PartitionError, 'on_upstream needs upstream'):
+            partitions.parse(dict(key='region', values=['eu'], schedule='on_upstream'))

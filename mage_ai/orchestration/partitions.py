@@ -54,7 +54,8 @@ class Declaration:
     close_after: timedelta = timedelta(0)
     values: List[str] = field(default_factory=list)
     upstream: List[str] = field(default_factory=list)
-    # 'on_close': the scheduler queues each partition when it closes (partition_schedule.py).
+    # 'on_close': the scheduler queues each partition when it closes; 'on_upstream': when its
+    # upstream pipelines' same partition is done (partition_schedule.py).
     schedule: Optional[str] = None
     catch_up: int = 30
 
@@ -122,15 +123,19 @@ def parse(document: Any) -> Optional[Declaration]:
     if not isinstance(upstream, list) or not all(isinstance(u, str) and u for u in upstream):
         raise PartitionError('partitions: upstream is a list of pipeline UUIDs.')
     schedule = document.get('schedule')
-    if schedule not in (None, 'on_close'):
-        raise PartitionError('partitions: schedule is on_close, or left out to run them when '
-                             'asked.')
+    if schedule not in (None, 'on_close', 'on_upstream'):
+        raise PartitionError('partitions: schedule is on_close (each partition when it '
+                             'closes), on_upstream (when its upstream pipelines\' same '
+                             'partition is done), or left out to run them when asked.')
+    if schedule == 'on_upstream' and not upstream:
+        raise PartitionError('partitions: schedule: on_upstream needs upstream, the pipelines '
+                             'whose partitions it follows.')
     catch_up = document.get('catch_up', 30)
     if isinstance(catch_up, bool) or not isinstance(catch_up, int) or catch_up < 1:
         raise PartitionError('partitions: catch_up is how many closed partitions are queued '
                              'at once, 1 or more.')
     kind = kinds[0]
-    if kind == 'values' and schedule:
+    if kind == 'values' and schedule == 'on_close':
         raise PartitionError('partitions: schedule: on_close is for time partitions; values '
                              'do not close.')
     if kind == 'values':
@@ -145,7 +150,7 @@ def parse(document: Any) -> Optional[Declaration]:
         if len(set(values)) != len(values):
             raise PartitionError('partitions: each value is listed once.')
         return Declaration(key=key, kind=kind, values=values, upstream=list(upstream),
-                           catch_up=catch_up)
+                           schedule=schedule, catch_up=catch_up)
     settings = document[kind] or {}
     if not isinstance(settings, dict):
         raise PartitionError(f'partitions: {kind} is a mapping with start.')

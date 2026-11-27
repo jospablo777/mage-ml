@@ -2306,7 +2306,8 @@ def _schedule_all():
         )
     )
 
-    # Partitions that run when they close (partition_schedule.py).
+    # Partitions that run when they close, or when their upstream partitions are done
+    # (partition_schedule.py).
     try:
         from mage_ai.orchestration import partition_schedule
 
@@ -2316,7 +2317,7 @@ def _schedule_all():
             ) if pipeline is not None
         )
     except Exception as error:
-        logger.warning(f'Queuing closed partitions failed: {error}')
+        logger.warning(f'Queuing partitions failed: {error}')
 
     # Sync schedules from yaml file to DB
     try:

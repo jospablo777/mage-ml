@@ -59,6 +59,11 @@
   each time partition when it closes, catching up after downtime (at most `catch_up` at once).
   A backfill of a pipeline with time partitions runs the partitions holding its dates, once
   each, as partition runs.
+- With `schedule: on_upstream`, a partition runs once the same partition of every upstream
+  pipeline is done, when it never ran or is stale only because an upstream one ran again: a
+  chain of partitioned pipelines follows its first one, and repairing upstream partitions
+  repairs the ones after them. Value partitions kept no `schedule` when parsed; they keep it
+  now.
 
 ### Checkpoints inside long blocks
 

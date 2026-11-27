@@ -42,7 +42,7 @@ partitions:
 | `close_after` | How long after its end a time partition exists, such as `2h` or `1d` (default none) |
 | `values` | Fixed partitions, such as regions or tenants |
 | `upstream` | Pipelines with the same partitions whose output this one reads |
-| `schedule` | `on_close`: the scheduler queues each time partition when it closes, so a daily pipeline runs each day for the day before. Left out, partitions run when you ask |
+| `schedule` | `on_close`: the scheduler queues each time partition when it closes, so a daily pipeline runs each day for the day before. `on_upstream`: each partition runs once the same partition of every `upstream` pipeline is done (see [Chains of pipelines](#chains-of-pipelines)). Left out, partitions run when you ask |
 | `catch_up` | With `on_close`, how many closed partitions that never ran are queued at once, newest first (default 30). After downtime the partitions that closed meanwhile are queued; when `on_close` is first turned on, older partitions wait for Run missing |
 
 A partition is named `2026-11-01T13` (hourly), `2026-11-01` (daily), `2026-11-02` (weekly: its
@@ -114,6 +114,40 @@ partition with its state, why it is stale and its latest run, and the count of e
 "action": "run" | "accept_code", "select": "missing" | "stale" | "failed" | [partitions]}}`
 acts on them and returns the states after. Running them needs an editor, as triggering a
 pipeline does.
+
+## Chains of pipelines
+
+A pipeline that reads another's partitions declares it in `upstream`; with
+`schedule: on_upstream` it also runs after it, partition by partition:
+
+```yaml
+# pipelines/orders_raw/metadata.yaml
+partitions:
+  key: day
+  daily: {start: 2026-01-01}
+  schedule: on_close
+
+# pipelines/daily_sales/metadata.yaml
+partitions:
+  key: day
+  daily: {start: 2026-01-01}
+  upstream: [orders_raw]
+  schedule: on_upstream
+```
+
+Each scheduler pass queues the partitions of `daily_sales` whose `orders_raw` partition is
+done and that never ran, or are stale only because `orders_raw` ran again after them, at
+most `catch_up` at once, newest first. So:
+
+- a day of `orders_raw` that closes and completes is followed by the same day of
+  `daily_sales`;
+- repairing `orders_raw` (Run failed, Run stale, or a backfill of its days) repairs
+  `daily_sales` after it, day by day, without a second action;
+- a partition of `daily_sales` that is stale because its own code changed, or failed, waits
+  for Run stale or Run failed, as everywhere else.
+
+A pipeline can follow several upstream pipelines: it runs a partition once all of theirs are
+done. Value partitions follow their upstream the same way, in the order they are listed.
 
 ## Partitions and backfills
 
