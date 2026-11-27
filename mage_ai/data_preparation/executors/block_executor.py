@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 import traceback
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Union
@@ -650,6 +651,7 @@ class BlockExecutor:
                             outputs_cache = {**(outputs_cache or {}), **missing}
 
                         attempt = self._lineage_start(block_run_id, pipeline_run)
+                        traced = self._trace_start(pipeline_run)
                         try:
                             result = self._execute(
                                 analyze_outputs=analyze_outputs,
@@ -678,12 +680,15 @@ class BlockExecutor:
                                 **kwargs,
                             )
                             self._lineage_end(attempt, 'COMPLETE')
+                            self._trace_end(traced)
                             return result
                         except Exception as error:
                             self._lineage_end(attempt, 'FAIL', error)
+                            self._trace_end(traced, error)
                             raise
                         except BaseException as err:
                             self._lineage_end(attempt, 'ABORT')
+                            self._trace_end(traced, err)
                             if isinstance(err, (
                                 KeyboardInterrupt,
                                 SystemExit,
@@ -849,6 +854,45 @@ class BlockExecutor:
             outputs=[lineage.block_dataset(project, self.pipeline.uuid, self.block_uuid)],
         ))
         return attempt
+
+    def _trace_start(self, pipeline_run) -> Optional[Dict]:
+        """
+        The attempt's span (orchestration/traces.py), started now under its pipeline run's;
+        block code sees it as TRACEPARENT while it runs. None without an endpoint.
+        """
+        from mage_ai.orchestration import traces
+
+        if pipeline_run is None or traces.config() is None:
+            return None
+        from mage_ai.orchestration.lineage import _project_name
+
+        trace_id, parent_id = traces.run_ids(_project_name(), pipeline_run.id)
+        span_id = traces.new_span_id()
+        traced = dict(
+            trace_id=trace_id, parent_id=parent_id, span_id=span_id, start=time.time_ns(),
+            previous=os.environ.get('TRACEPARENT'), pipeline_run_id=pipeline_run.id,
+        )
+        os.environ['TRACEPARENT'] = traces.traceparent(trace_id, span_id)
+        return traced
+
+    def _trace_end(self, traced: Optional[Dict], error=None) -> None:
+        if traced is None:
+            return
+        from mage_ai.orchestration import traces
+
+        if traced['previous'] is None:
+            os.environ.pop('TRACEPARENT', None)
+        else:
+            os.environ['TRACEPARENT'] = traced['previous']
+        attempt = (self.retry_metadata or {}).get('attempts') or 1
+        traces.emit(traces.span(
+            f'block {self.block_uuid}', traced['trace_id'], traced['span_id'],
+            traced['parent_id'], traced['start'], time.time_ns(),
+            {'mage.pipeline': self.pipeline.uuid if self.pipeline else None,
+             'mage.run_id': str(traced['pipeline_run_id']), 'mage.block': self.block_uuid,
+             'mage.attempt': attempt},
+            error=f'{type(error).__name__}: {error}' if error is not None else None,
+        ))
 
     def _lineage_end(self, attempt: Optional[Dict], outcome: str, error=None) -> None:
         if attempt is None:

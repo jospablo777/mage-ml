@@ -1381,6 +1381,9 @@ def run_block(
             output_dir=str(directory / 'outputs'),
             run_tests=True,
         )
+        # The block attempt's span (orchestration/traces.py): the block's code continues it.
+        if os.environ.get('TRACEPARENT'):
+            request['traceparent'] = os.environ['TRACEPARENT']
         # The block run's checkpoints folder, which the worker opens as the block's.
         checkpoint = (global_vars or {}).get('checkpoint')
         if getattr(checkpoint, 'directory', None):

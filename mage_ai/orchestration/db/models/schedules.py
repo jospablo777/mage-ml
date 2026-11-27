@@ -1429,12 +1429,13 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
             {PipelineRun.status: status}, synchronize_session=False
         )
         db_connection.session.commit()
-        # One statement, no attribute events: their lineage is sent here.
-        from mage_ai.orchestration import lineage
+        # One statement, no attribute events: their lineage and spans are sent here.
+        from mage_ai.orchestration import lineage, traces
 
-        if lineage.config() is not None:
+        if lineage.config() is not None or traces.config() is not None:
             for run in PipelineRun.query.filter(PipelineRun.id.in_(pipeline_run_ids)):
                 lineage.pipeline_run_status(run, status)
+                traces.pipeline_run_ended(run, status)
 
     @classmethod
     def create(
@@ -2219,11 +2220,16 @@ class Backfill(BaseModel):
 
 
 @sa_event.listens_for(PipelineRun.status, 'set')
-def _pipeline_run_lineage(target, value, oldvalue, initiator):
-    """A pipeline run's status changed: its OpenLineage event (orchestration/lineage.py)."""
+def _pipeline_run_status_changed(target, value, oldvalue, initiator):
+    """
+    A pipeline run's status changed: its OpenLineage event (orchestration/lineage.py) and,
+    when it ended, its span (orchestration/traces.py).
+    """
     if target.id is None or value == oldvalue:
         return
-    from mage_ai.orchestration import lineage
+    from mage_ai.orchestration import lineage, traces
 
     if lineage.config() is not None:
         lineage.pipeline_run_status(target, value)
+    if traces.config() is not None:
+        traces.pipeline_run_ended(target, value)

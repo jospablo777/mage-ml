@@ -31,6 +31,9 @@
   delaying runs. The gateway traces `/api/` requests and passes its span to the server.
 - Streams trace each batch from its read to its commit, with its transform and sink writes
   as child spans.
+- MageML's own pipeline runs and block runs are traced too (OTLP/HTTP): a span per run and
+  one per block attempt under it, sent from the attempt's process, with ids derived from
+  the run so every process agrees; block code gets its span as `TRACEPARENT`.
 
 ### Stream services
 

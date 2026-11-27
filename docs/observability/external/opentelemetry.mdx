@@ -50,6 +50,23 @@ takes `OTEL_EXPORTER_OTLP_ENDPOINT` as its gRPC endpoint, the gateway sends its 
 Exported pipeline services trace their API requests, runs and block attempts the same way;
 see [Traces](/production/pipeline-services#traces).
 
+### Pipeline runs and block runs
+
+MageML's own runs are traced too, over OTLP/HTTP: a span `run <pipeline>` per pipeline run,
+from its start to its end, and under it a span `block <block>` per attempt of each block run,
+with `mage.attempt` and the error of a failed attempt. A run's blocks run in other processes,
+so the run's trace and span ids come from the project and the run's id, the same in every
+process. Block code gets its attempt's span as `TRACEPARENT` (in named Python workers too),
+so spans it makes join the run's trace.
+
+Since the server's exporter takes `OTEL_EXPORTER_OTLP_ENDPOINT` as gRPC, runs are traced when
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` names the collector's HTTP endpoint
+(`http://collector:4318/v1/traces`), or when `OTEL_EXPORTER_OTLP_PROTOCOL` is
+`http/protobuf`. `OTEL_SERVICE_NAME` (default `mageml-runs`), `OTEL_EXPORTER_OTLP_HEADERS`,
+`OTEL_RESOURCE_ATTRIBUTES` and `OTEL_TRACES_SAMPLER=traceidratio` with
+`OTEL_TRACES_SAMPLER_ARG` apply. A block run's process waits at most 5 seconds at its end
+for its spans to be sent.
+
 ## Lineage (OpenLineage)
 
 With `OPENLINEAGE_URL` set (a Marquez, DataHub or OpenMetadata endpoint), MageML sends
