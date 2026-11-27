@@ -205,6 +205,44 @@ class RunOnSampleTest(StreamSampleTestCase):
         self.assertEqual(result['outputs'][self.score.uuid], [{'amount': 4, 'score': -1}])
 
 
+class SqlSampleRunTest(StreamSampleTestCase):
+    """A stream's SQL block runs on sample messages after the Python blocks before it."""
+
+    def tearDown(self):
+        sample_runner.stop_workers()
+        super().tearDown()
+
+    def test_a_sql_block_runs_on_the_messages_of_the_block_before(self):
+        clean = self.add('clean', 'transformer', '''
+            @transformer
+            def clean(messages, *args, **kwargs):
+                return [m for m in messages if m.get('amount') is not None]
+        ''', upstream=[self.source])
+        high = self.add('high', 'transformer', '''
+            SELECT card, amount > threshold AS high FROM {{ df_1 }} CROSS JOIN broadcast
+        ''', upstream=[clean], language='sql')
+
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, high.uuid,
+            [dict(card='a', amount=50), dict(card='b', amount=None), dict(card='c', amount=150)],
+            variables=dict(broadcast=dict(threshold=100)),
+        )
+
+        self.assertNotIn('error', result)
+        self.assertEqual(result['outputs'][high.uuid],
+                         [dict(card='a', high=False), dict(card='c', high=True)])
+        self.assertEqual([b['block_uuid'] for b in result['blocks']], [clean.uuid, high.uuid])
+
+    def test_a_failing_query_names_its_block(self):
+        bad = self.add('bad', 'transformer', 'SELECT nope FROM messages',
+                       upstream=[self.source], language='sql')
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, bad.uuid, [dict(a=1)],
+        )
+        self.assertEqual(result['error']['block_uuid'], bad.uuid)
+        self.assertIn('nope', result['error']['message'])
+
+
 class SampleApiTest(StreamSampleTestCase):
     """The API the editor uses: /api/pipelines/<uuid>/stream_samples and stream_sample_runs."""
 

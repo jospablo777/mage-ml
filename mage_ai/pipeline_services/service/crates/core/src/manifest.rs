@@ -1065,12 +1065,13 @@ impl Pipeline {
                 Language::Python
                     | Language::Rust
                     | Language::R
+                    | Language::Sql
                     | Language::Window
                     | Language::Lookup
             ) {
                 problems.push(format!(
-                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python, Rust or R, \
-                     or are windows or lookups.",
+                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python, Rust, R or \
+                     SQL, or are windows or lookups.",
                     block.uuid, block.language
                 ));
             }

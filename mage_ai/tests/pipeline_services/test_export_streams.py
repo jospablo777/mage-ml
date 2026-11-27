@@ -554,6 +554,44 @@ class LookupExportTest(StreamExportTestCase):
         self.assertIsNotNone(pipeline['stream']['errors'].get('dead_letter'))
 
 
+class StreamSqlExportTest(StreamExportTestCase):
+    """A stream's SQL transformer runs in the engine (its sql feature), without Python."""
+
+    QUERY = """
+        SELECT card, amount > threshold AS high
+        FROM {{ df_1 }} CROSS JOIN broadcast;
+    """
+
+    def picked(self, query):
+        source = self.add('source', 'data_loader', SOURCE, language='yaml')
+        pick = self.add('pick', 'transformer', query, upstream=[source], language='sql')
+        self.add('out', 'data_exporter', SINK, upstream=[pick], language='yaml')
+        return pick
+
+    def test_a_sql_transformer_becomes_a_sql_block_of_the_engine(self):
+        pick = self.picked(self.QUERY)
+
+        capture_ = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        [entry] = [b for b in capture_.manifest['pipelines'][0]['blocks']
+                   if b['uuid'] == pick.uuid]
+        self.assertEqual((entry['language'], entry['upstream']), ('sql', []))
+        self.assertTrue(entry['file'].endswith('.sql'))
+        self.assertIn('sql', capture_.engine_features)
+        # Batch SQL runs in the Python worker; a stream's runs in the engine.
+        self.assertFalse(capture_.needs_python)
+
+    def test_other_references_are_explained(self):
+        self.picked('SELECT * FROM {{ df_2 }} JOIN {{ variables("x") }}')
+        problems = self.problems()
+        self.assertIn('{{ df_2 }}', problems)
+        self.assertIn('reads the table messages (also {{ df_1 }}) and broadcast', problems)
+
+    def test_a_query_the_engine_cannot_run_is_refused_at_export(self):
+        self.picked('SELECT * FROM messages WHERE amount > (SELECT threshold FROM broadcast)')
+        self.assertIn('services do not run comparisons with a subquery', self.problems())
+
+
 class WindowExportTest(StreamExportTestCase):
     WINDOW = '''
         window:

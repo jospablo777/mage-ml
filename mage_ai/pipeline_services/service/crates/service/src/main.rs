@@ -46,6 +46,8 @@ mod stream_chain;
 mod stream_lookup;
 mod stream_python;
 mod stream_rust;
+#[cfg(feature = "sql")]
+mod stream_sql;
 mod stream_time;
 mod stream_trace;
 mod stream_window;
@@ -896,10 +898,12 @@ async fn start_service(
             recovered.join(", ")
         ));
     }
+    // A stream's SQL blocks run in the engine; other SQL blocks in the Python worker.
     let needs_python = manifest.pipelines.iter().any(|p| {
-        p.blocks
-            .iter()
-            .any(|b| matches!(b.language, Language::Python | Language::R | Language::Sql))
+        p.blocks.iter().any(|b| {
+            matches!(b.language, Language::Python | Language::R)
+                || (b.language == Language::Sql && p.stream.is_none())
+        })
     });
     let python = if needs_python {
         let worker = common.worker.clone().unwrap_or_else(|| {
@@ -1003,7 +1007,8 @@ async fn start_service(
             WarmPython::WithRunOf(pipeline) => {
                 let needs_python = service.manifest.pipeline(&pipeline).is_some_and(|p| {
                     p.blocks.iter().any(|b| {
-                        matches!(b.language, Language::Python | Language::R | Language::Sql)
+                        matches!(b.language, Language::Python | Language::R)
+                            || (b.language == Language::Sql && p.stream.is_none())
                     })
                 });
                 if needs_python {

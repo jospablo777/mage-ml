@@ -130,6 +130,8 @@ class Capture:
     uv_version: Optional[str] = None
     # A block has a data contract or a monitor: the engine builds with its checks.
     has_checks: bool = False
+    # A stream has a SQL block, which the engine runs on Polars SQL (its sql feature).
+    has_stream_sql: bool = False
 
     @property
     def streams(self) -> List[Dict]:
@@ -154,6 +156,8 @@ class Capture:
         features = {ENGINE_FEATURES[k] for k in self.connector_kinds if k in ENGINE_FEATURES}
         if self.has_checks:
             features.add('checks')
+        if self.has_stream_sql:
+            features.add('sql')
         # Audit records can be copied off the instance (MAGE_SERVICE_AUDIT_URL).
         if self.audits:
             features.add('object-store')
@@ -167,7 +171,7 @@ class Capture:
     def needs_db2_client(self) -> bool:
         return any(name.lower().replace('_', '-') == 'ibm-db' for name in self.requirements) or any(
             b['language'] == 'sql' and (b.get('configuration') or {}).get('data_provider') == 'db2'
-            for p in self.manifest.get('pipelines') or [] for b in p['blocks']
+            for b in _batch_blocks(self.manifest)
         )
 
     @property
@@ -201,11 +205,12 @@ class Capture:
 
     @property
     def needs_python(self) -> bool:
-        # The Python worker runs R blocks too, with Mage's R runner, and SQL blocks.
+        # The Python worker runs R blocks too, with Mage's R runner, and SQL blocks; a
+        # stream's SQL blocks run in the engine.
         return any(
-            b['language'] in ('python', 'r', 'sql')
+            b['language'] in ('python', 'r')
             for p in self.manifest['pipelines'] for b in p['blocks']
-        )
+        ) or any(b['language'] == 'sql' for b in _batch_blocks(self.manifest))
 
 
 def _digest(path: Path) -> str:
@@ -1872,10 +1877,16 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
                 entry['upstream'] = [u for u in entry['upstream'] if u != source_block.uuid]
                 blocks.append(entry)
             continue
+        if language == 'sql':
+            entry = _stream_sql_entry(pipeline, block, project, prefix, capture_, problems)
+            if entry is not None:
+                entry['upstream'] = [u for u in entry['upstream'] if u != source_block.uuid]
+                blocks.append(entry)
+            continue
         if language not in ('python', 'rust', 'r'):
             problems.append(
                 f'{prefix}, block {block.uuid} is written in {language}; services run stream '
-                'transformers written in Python, Rust or R.'
+                'transformers written in Python, Rust, R or SQL.'
             )
             continue
         entry = _block_entry(pipeline, block, project, repo_config, capture_, problems, {},
@@ -2174,6 +2185,63 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
 
 WINDOW_TYPES = ('tumbling', 'hopping', 'session')
 WINDOW_FUNCTIONS = ('sum', 'min', 'max', 'avg', 'distinct')
+
+
+def _batch_blocks(manifest: Dict):
+    """The blocks of the manifest's pipelines that are not streams."""
+    for pipeline in manifest.get('pipelines') or []:
+        if not pipeline.get('stream'):
+            yield from pipeline['blocks']
+
+
+STREAM_SQL_REFERENCE = re.compile(r'\{\{(.*?)\}\}', re.S)
+
+
+def _stream_sql_entry(pipeline, block, project: Path, prefix: str, capture_: Capture,
+                      problems: List[str]) -> Optional[Dict]:
+    """
+    A stream's SQL transformer, which the engine runs on each batch with Polars SQL: the
+    batch is the table `messages` (Mage's `{{ df_1 }}` too), the stream's broadcast values
+    the table `broadcast` (stream_sql.rs).
+    """
+    where = f'{prefix}, block {block.uuid}'
+    path = Path(block.file_path).resolve()
+    try:
+        text = path.read_text()
+    except OSError as error:
+        problems.append(f'{where}: {error}')
+        return None
+    others = sorted({
+        reference.strip() for reference in STREAM_SQL_REFERENCE.findall(text)
+        if reference.strip() != 'df_1'
+    })
+    if others:
+        problems.append(
+            f'{where} uses {", ".join("{{ " + o + " }}" for o in others)}; a stream\'s SQL '
+            'block reads the table messages (also {{ df_1 }}) and broadcast.'
+        )
+        return None
+    from mage_ai.streaming import sql as stream_sql
+
+    try:
+        stream_sql.query_of(text)
+    except stream_sql.StreamSqlError as error:
+        problems.append(f'{where}: {error}.')
+        return None
+    if len(block.upstream_block_uuids or []) > 1:
+        problems.append(f'{where} reads {len(block.upstream_block_uuids)} blocks; a stream '
+                        'block reads one.')
+        return None
+    capture_.files.add(path)
+    capture_.has_stream_sql = True
+    return dict(
+        uuid=block.uuid,
+        type='transformer',
+        language='sql',
+        file=str(path.relative_to(project)),
+        sha256=_digest(path),
+        upstream=list(block.upstream_block_uuids or []),
+    )
 
 
 def _is_lookup(pipeline, block) -> bool:
@@ -2868,7 +2936,8 @@ def _profiles_used(capture_: Capture, profiles: Iterable[str]) -> Set[str]:
         if metadata.is_file():
             text = metadata.read_text(errors='replace')
             named.update(PROFILE_SETTING.findall(text))
-            if any(b['language'] == 'sql' for b in pipeline['blocks']) and \
+            if not pipeline.get('stream') and \
+                    any(b['language'] == 'sql' for b in pipeline['blocks']) and \
                     'data_provider_profile' not in text:
                 named.add('default')
     return named & profiles
@@ -3267,7 +3336,7 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
     for module, packages in LAZY_IMPORTS.items():
         if module in modules:
             candidates += packages
-    if any(b['language'] == 'sql' for p in capture_.manifest['pipelines'] for b in p['blocks']):
+    if any(b['language'] == 'sql' for b in _batch_blocks(capture_.manifest)):
         # What the SQL runner imports to render queries and use PostgreSQL.
         candidates += [
             'jinja2', 'inflection', 'mage_ai.io.config',
@@ -3275,7 +3344,7 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
         ]
         providers = {
             (b.get('configuration') or {}).get('data_provider')
-            for p in capture_.manifest['pipelines'] for b in p['blocks'] if b['language'] == 'sql'
+            for b in _batch_blocks(capture_.manifest) if b['language'] == 'sql'
         }
         if 'postgres' in providers:
             candidates += ['psycopg2', 'mage_ai.io.postgres', 'mage_ai.io.postgres_types']

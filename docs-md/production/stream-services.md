@@ -285,6 +285,12 @@ orders_counts: savepoint before-v2 with 2 state files and the offsets of 2 parti
 - Broadcast values are not part of a savepoint: a stream started from one keeps the values
   set since.
 
+#### SQL blocks
+
+A stream's SQL transformers run in the engine on Polars SQL: the export builds the engine with
+SQL when a stream has one, and a stream whose transformers are all SQL runs without Python.
+See [SQL blocks](../guides/streaming/introduction.md#sql-blocks) for what a query reads.
+
 #### Broadcast values
 
 Thresholds, rules, flags and model versions that blocks read change while the service runs:

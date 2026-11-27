@@ -787,3 +787,18 @@ class StreamingBlockTemplateTest(TestCase):
             language=BlockLanguage.YAML, pipeline_type=PipelineType.STREAMING,
         )
         self.assertIn("api_key: \"{{ env_var('AMPLITUDE_API_KEY') }}\"", code)
+
+    def test_a_stream_sql_transformer_starts_with_a_query_the_stream_runs(self):
+        from mage_ai.streaming import sql as stream_sql
+
+        code = fetch_template_source(
+            BlockType.TRANSFORMER, dict(), language=BlockLanguage.SQL,
+            pipeline_type=PipelineType.STREAMING,
+        )
+        self.assertIn('CROSS JOIN broadcast', code)
+        self.assertEqual(stream_sql.run(code, [dict(a=1)]), [dict(a=1)])
+        # Outside streams a SQL block starts empty, as before.
+        self.assertEqual(
+            fetch_template_source(BlockType.TRANSFORMER, dict(), language=BlockLanguage.SQL),
+            '',
+        )

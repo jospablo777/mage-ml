@@ -51,6 +51,16 @@ def build_template_from_suggestion(suggestion: Mapping) -> str:
     )
 
 
+# A stream's SQL transformer (streaming/sql.py, the engine's stream_sql.rs).
+STREAM_SQL_TEMPLATE = """\
+-- Each batch of messages is the table messages (also {{ df_1 }}): a row per message, a
+-- column per field. The stream's broadcast values are the one-row table broadcast:
+-- FROM messages CROSS JOIN broadcast. Each row the query returns is a message.
+SELECT *
+FROM messages
+"""
+
+
 def fetch_template_source(
     block_type: Union[BlockType, str],
     config: Mapping[str, str],
@@ -63,6 +73,8 @@ def fetch_template_source(
         # A SQL template is the file as it is: its {{ df_1 }} and {{ execution_date }}
         # are filled in when the block runs, not when it is made.
         if 'template_path' not in config:
+            if pipeline_type == PipelineType.STREAMING and block_type == BlockType.TRANSFORMER:
+                return STREAM_SQL_TEMPLATE
             return template_source
         return template_env.loader.get_source(template_env, config['template_path'])[0]
 

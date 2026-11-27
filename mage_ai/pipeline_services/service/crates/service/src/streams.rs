@@ -798,12 +798,17 @@ fn transform_session(
     if let Some(block) = order.iter().find(|b| {
         !matches!(
             b.language,
-            Language::Python | Language::Rust | Language::R | Language::Window | Language::Lookup
+            Language::Python
+                | Language::Rust
+                | Language::R
+                | Language::Sql
+                | Language::Window
+                | Language::Lookup
         )
     }) {
         return Err(format!(
-            "stream block {} is in {:?}; stream blocks run in Python, Rust, R or are windows \
-             or lookups",
+            "stream block {} is in {:?}; stream blocks run in Python, Rust, R or SQL, or are \
+             windows or lookups",
             block.uuid, block.language
         ));
     }
@@ -892,7 +897,10 @@ fn regions(order: &[Block]) -> Vec<Vec<Block>> {
         match regions.last_mut() {
             Some(region)
                 if region[0].language == block.language
-                    && !matches!(block.language, Language::Window | Language::Lookup)
+                    && !matches!(
+                        block.language,
+                        Language::Window | Language::Lookup | Language::Sql
+                    )
                     && region[0].python_worker == block.python_worker
                     && region[0].language_environment() == block.language_environment() =>
             {
@@ -1007,6 +1015,24 @@ fn region_session(
     let broadcast = service
         .broadcast(&pipeline.uuid)
         .map_err(|e| format!("its broadcast values: {e}"))?;
+    if blocks[0].language == Language::Sql {
+        let block = &blocks[0];
+        let file = service.project_dir().join(&block.file);
+        let text = std::fs::read_to_string(&file)
+            .map_err(|e| format!("SQL block {}: reading {}: {e}", block.uuid, file.display()))?;
+        #[cfg(feature = "sql")]
+        return Ok(Box::new(
+            crate::stream_sql::SqlSession::new(&block.uuid, &text, broadcast)
+                .map_err(|e| format!("SQL block {}: {e}", block.uuid))?,
+        ));
+        #[cfg(not(feature = "sql"))]
+        return Err(format!(
+            "SQL block {}: this engine is built without SQL stream blocks (the sql feature); \
+             an export with a SQL stream block builds it with them ({} characters of SQL)",
+            block.uuid,
+            text.len()
+        ));
+    }
     if matches!(blocks[0].language, Language::Rust | Language::R) {
         let session = crate::stream_rust::RustStreamSession::new(
             service.clone(),

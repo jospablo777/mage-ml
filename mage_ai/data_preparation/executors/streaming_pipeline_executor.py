@@ -314,6 +314,19 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     outputs_by_block[downstream_block.uuid] = run_rust(
                         downstream_block, data, kwargs,
                     )
+                elif (downstream_block.type == BlockType.TRANSFORMER
+                        and downstream_block.language == BlockLanguage.SQL):
+                    # As the engine runs it: Polars SQL over the batch (streaming/sql.py).
+                    from mage_ai.streaming import sql as stream_sql
+
+                    try:
+                        outputs_by_block[downstream_block.uuid] = stream_sql.run(
+                            downstream_block.content or '',
+                            data if isinstance(data, list) else [data],
+                            kwargs.get('broadcast'),
+                        )
+                    except Exception as error:
+                        raise Exception(f'{downstream_block.uuid}: {error}') from error
                 elif downstream_block.type == BlockType.TRANSFORMER:
                     held = block_state(downstream_block)
                     # A service's blocks get the stream's broadcast values; here they get

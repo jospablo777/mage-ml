@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### SQL stream blocks
+
+- A stream's SQL transformer runs a query on each batch: the batch is the table `messages`,
+  the stream's broadcast values the table `broadcast`. Services run it in the engine on Polars
+  SQL, without Python (about 0.4 ms for a 500-message batch); the editor runs the same query
+  with Polars on stream runs and sample messages.
+
 ### Python 3.14
 
 - MageML runs on Python 3.12 to 3.14; CI tests 3.12 and 3.14. pandas 3.1 deprecations in

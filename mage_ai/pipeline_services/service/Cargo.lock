@@ -3582,6 +3582,7 @@ dependencies = [
  "mage-service-core",
  "mage-stream-core",
  "mage-stream-ports",
+ "polars",
  "ring",
  "rusqlite",
  "serde",

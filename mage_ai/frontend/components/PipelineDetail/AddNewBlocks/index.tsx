@@ -38,6 +38,7 @@ import {
   groupBlockTemplates,
   RMenuItems,
   RustMenuItems,
+  SQLMenuItems,
 } from './utils';
 
 type AddNewBlocksProps = {
@@ -257,6 +258,8 @@ function AddNewBlocks({
           label: () => 'Python',
           uuid: 'transformers/python',
         },
+        // SQL stream transformers run in the engine on each batch (Polars SQL).
+        SQLMenuItems(addNewBlock, BlockTypeEnum.TRANSFORMER),
         // Rust and R stream transformers run in one resident program per stream.
         RMenuItems(addNewBlock, BlockTypeEnum.TRANSFORMER),
         RustMenuItems(addNewBlock, BlockTypeEnum.TRANSFORMER),

@@ -252,6 +252,36 @@ that gets a partition reads its state. Credentials come from the environment as 
 object storage sink (`AWS_ENDPOINT_URL` for MinIO and other S3-compatible stores). Windows
 run on the engine, in exported services and in the Run tab, not in MageML's own streaming.
 
+## SQL blocks
+
+A SQL transformer runs a query on each batch of messages. The batch is the table `messages`
+(`{{ df_1 }}` also names it), a row per message and a column per field; each row the query
+returns is a message:
+
+```sql
+SELECT card, amount * 1.1 AS amount_usd, upper(country) AS country
+FROM messages CROSS JOIN broadcast
+WHERE amount > fraud_threshold
+```
+
+The stream's [broadcast values](#broadcast-values) are the one-row table `broadcast`, so a
+threshold changes without editing the query. In an exported service the query runs in the
+engine on Polars SQL, with no Python; a stream whose transformers are all SQL starts no
+Python worker. In the editor, **Execute pipeline** and sample runs run the same query with
+Polars, reading the batch the same way.
+
+| Works | Not in SQL blocks |
+| --- | --- |
+| `SELECT`, `WHERE`, expressions and functions, `CASE`, `GROUP BY` within a batch, `ORDER BY`, `UNION`, `CROSS JOIN broadcast` | Scalar subqueries in comparisons (`> (SELECT ...)`): use `CROSS JOIN broadcast` |
+| One upstream block (`messages`) | Other tables and `{{ df_2 }}`: enrich with a [lookup](#lookups) first |
+| Each batch on its own | State across batches: use [windows](#windows) or [keyed state](#keyed-state) |
+
+Columns follow the batch, in the order fields first appear: a field that no message of a
+batch has is not a column of that batch, and a query that names it fails the batch. A column
+is Boolean, a 64-bit integer, a float or text by its values; a field with mixed types, an
+object or an array is its JSON text. A message that is not a JSON object fails on its own,
+to the dead-letter sink when the stream has one.
+
 ## Lookups
 
 A transformer written in YAML with `lookup:` adds to each message the row of a PostgreSQL

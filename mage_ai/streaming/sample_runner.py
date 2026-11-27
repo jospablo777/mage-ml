@@ -139,8 +139,8 @@ def stop_workers() -> None:
 
 def _language_runs(pipeline, block_uuid: str) -> Optional[List[List]]:
     """
-    The blocks from the source down to block_uuid in runs of one language, when any is Rust
-    (they form one chain, as services run them); None when they are all Python.
+    The blocks from the source down to block_uuid in runs of one language, when any is Rust,
+    R or SQL (they form one chain, as services run them); None when they are all Python.
     """
     blocks = pipeline.blocks_by_uuid
     if block_uuid not in blocks:
@@ -154,11 +154,11 @@ def _language_runs(pipeline, block_uuid: str) -> Optional[List[List]]:
             break
         block = blocks.get(parents[0]) if parents else None
     languages = [str(getattr(b.language, 'value', b.language)) for b in chain]
-    if not {'rust', 'r'} & set(languages):
+    if not {'rust', 'r', 'sql'} & set(languages):
         return None
-    unknown = sorted(set(languages) - {'python', 'rust', 'r'})
+    unknown = sorted(set(languages) - {'python', 'rust', 'r', 'sql'})
     if unknown:
-        raise SampleRunError(f'Stream blocks run in Python, Rust or R, not {unknown[0]}.')
+        raise SampleRunError(f'Stream blocks run in Python, Rust, R or SQL, not {unknown[0]}.')
     runs: List[List] = []
     for block, language in zip(chain, languages):
         if runs and str(getattr(runs[-1][0].language, 'value', runs[-1][0].language)) == language:
@@ -352,6 +352,28 @@ def _run_rust(repo_path: str, pipeline, block_uuid: str, chain: List, messages: 
     return result
 
 
+def _run_sql(run: List, messages: List[Any], kwargs: Dict) -> Dict:
+    """Each SQL block's query on the messages of the block before it (streaming/sql.py)."""
+    from mage_ai.streaming import sql as stream_sql
+
+    part: Dict = dict(logs=[], outputs={}, blocks=[])
+    current = messages
+    for block in run:
+        started = time.monotonic()
+        try:
+            out = stream_sql.run(block.content or '', current, kwargs.get('broadcast'))
+        except Exception as error:
+            part['error'] = dict(block_uuid=block.uuid, message=str(error), details=None)
+            return part
+        part['outputs'][block.uuid] = out
+        part['blocks'].append(dict(
+            block_uuid=block.uuid, seconds=round(time.monotonic() - started, 6),
+            messages_in=len(current), messages_out=len(out),
+        ))
+        current = out
+    return part
+
+
 def _first_failing_rust(program, batch: List[bytes]) -> Optional[Dict]:
     """
     The first message of the batch that fails in the block on its own, with its index; the
@@ -383,6 +405,8 @@ def _run_language_runs(repo_path: str, pipeline, block_uuid: str, runs: List[Lis
         language = str(getattr(run[0].language, 'value', run[0].language))
         if language in ('rust', 'r'):
             part = _run_rust(repo_path, pipeline, run[-1].uuid, run, current, variables)
+        elif language == 'sql':
+            part = _run_sql(run, current, kwargs)
         else:
             chain = [_chain_entry(pipeline, block, [run[i - 1].uuid] if i else [])
                      for i, block in enumerate(run)]

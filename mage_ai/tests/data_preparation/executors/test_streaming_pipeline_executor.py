@@ -262,6 +262,35 @@ class BroadcastRunTest(StreamRunCase):
         self.assertEqual(self.tagged(dict(broadcast=dict(threshold=100))), [False, True])
 
 
+class SqlRunTest(StreamRunCase):
+    """In the editor, a stream's SQL block runs on each batch as the engine runs it."""
+
+    def test_a_sql_block_filters_each_batch_with_the_broadcast_values(self):
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        pick = self.add('pick', 'transformer', '''
+            SELECT card, amount > threshold AS high
+            FROM {{ df_1 }} CROSS JOIN broadcast
+            WHERE card <> 'skip'
+        ''', upstream=[source], language=BlockLanguage.SQL)
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[pick], language=BlockLanguage.YAML)
+        _, sinks = self.run_pipeline(
+            ['sink'],
+            first=[dict(card='a', amount=50), dict(card='skip', amount=1)],
+            later=[[dict(card='b', amount=150)]],
+            variables=dict(broadcast=dict(threshold=100)),
+        )
+        self.assertEqual(
+            [m for batch in sinks['sink'].batches for m in batch],
+            [dict(card='a', high=False), dict(card='b', high=True)],
+        )
+
+
 class KeyedStateRunTest(StreamRunCase):
     """In the editor, keyed state lives in memory for the run, from empty."""
 

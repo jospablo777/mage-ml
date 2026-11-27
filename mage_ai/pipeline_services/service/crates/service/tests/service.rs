@@ -1821,6 +1821,68 @@ fn a_python_block_keeps_keyed_state_over_a_restart() {
     assert_eq!(seen(&service), [("a".into(), 4), ("b".into(), 2)]);
 }
 
+const SQL_BLOCK: &str = "-- High amounts, by the stream's threshold.\nSELECT card, amount, amount > threshold AS high\nFROM {{ df_1 }} CROSS JOIN broadcast\nWHERE country <> 'XX';\n";
+
+#[test]
+fn a_sql_block_runs_in_the_engine_with_the_broadcast_values() {
+    let mut manifest = webhook_manifest(json!({}), 1 << 20);
+    manifest["pipelines"][0]["blocks"][0] = json!({
+        "uuid": "tag", "type": "transformer", "language": "sql",
+        "file": "transformers/tag.sql", "sha256": "0", "upstream": []
+    });
+    let mut service = Service::with_manifest(&manifest, &[("transformers/tag.sql", SQL_BLOCK)]);
+    let env = [("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")];
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    let (status, set) = service
+        .request_text(
+            "PUT",
+            "/v1/streams/hooks/broadcast/threshold",
+            Some(TOKEN),
+            r#"{"value": 100}"#,
+        )
+        .unwrap();
+    assert_eq!(status, 200, "{set}");
+    let (status, reply) = service
+        .request_with(
+            "POST",
+            "/v1/streams/hooks/messages",
+            Some("ingest-secret"),
+            r#"[{"card": "a", "amount": 50, "country": "CR"},
+                {"card": "b", "amount": 150, "country": "US"},
+                {"card": "c", "amount": 500, "country": "XX"}]"#,
+            &[("Idempotency-Key", "1")],
+        )
+        .unwrap();
+    assert_eq!(status, 200, "{reply}");
+    let log = std::fs::read_to_string(service.dir.path().join("service.log")).unwrap();
+    let rows: Vec<Value> = log
+        .lines()
+        .filter(|l| l.contains("\"high\""))
+        .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+        .map(|r| r.get("value").cloned().unwrap_or(r))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            json!({"card": "a", "amount": 50, "high": false}),
+            json!({"card": "b", "amount": 150, "high": true}),
+        ]
+    );
+    // SQL needs no Python: the service started no worker for it.
+    assert_eq!(python_workers(&service), 0);
+}
+
+/// The Python workers the service runs: its children running worker.py.
+fn python_workers(service: &Service) -> usize {
+    let pid = service.child.as_ref().unwrap().id().to_string();
+    let out = Command::new("pgrep")
+        .args(["-P", &pid, "-f", "worker.py"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).lines().count()
+}
+
 const THRESHOLD_BLOCK: &str = "@transformer\ndef tag(messages, *args, **kwargs):\n    threshold = kwargs['broadcast'].get('threshold', 0)\n    return [dict(m, high=m['amount'] > threshold, threshold=threshold) for m in messages]\n";
 
 #[test]
@@ -1871,6 +1933,8 @@ fn a_broadcast_value_changed_through_the_api_applies_from_the_next_batch_on() {
     };
 
     send(&service, "1", r#"[{"amount": 50}]"#);
+    // The control for the SQL stream's check: a Python block's stream runs a worker.
+    assert!(python_workers(&service) > 0);
     let (status, set) = put(
         &service,
         TOKEN,

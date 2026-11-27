@@ -108,7 +108,7 @@ export const createDataSourceMenuItems = (
     }));
 };
 
-function SQLMenuItems(
+export function SQLMenuItems(
   addNewBlock: (block: BlockRequestPayloadType) => void,
   blockType: BlockTypeEnum,
 ) {
