@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 from typing import List, Optional, Union
@@ -818,6 +819,70 @@ def monitor_silence(
         typer.echo(f'Monitor {monitor} notifies again.')
     else:
         typer.echo(f'Monitor {monitor} is silenced until {entry["until"]}.')
+
+
+@app.command('partitions')
+def partitions_command(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the partitioned pipeline.'),
+    state: Union[str, None] = typer.Option(
+        None, help='only partitions in this state: missing, queued, running, failed, stale, '
+        'done.',
+    ),
+    run: Union[str, None] = typer.Option(
+        None, help='queue runs of the missing, stale or failed partitions, or of a list '
+        '(comma-separated).',
+    ),
+    accept_code: Union[str, None] = typer.Option(
+        None, '--accept-code', help='mark these stale partitions (stale, or a comma-separated '
+        'list) done with the current code, without running them.',
+    ),
+):
+    """
+    Show the state of a pipeline's partitions, and run or accept them (ADR-0039): a
+    partition is missing, queued, running, failed, stale (its code, or a declared upstream
+    pipeline's same partition, changed after it ran) or done.
+    """
+    from mage_ai.orchestration import partition_state
+    from mage_ai.orchestration.partition_runs import run_selected
+    from mage_ai.orchestration.partitions import PartitionError
+
+    def choice(text):
+        return text if text in ('missing', 'stale', 'failed') else [
+            v.strip() for v in text.split(',') if v.strip()]
+
+    project_path = os.path.abspath(project_path)
+    pipeline = _run_records_setup(project_path, pipeline_uuid)
+    # The run history as this version needs it (pipeline_run.partition): a project may have
+    # no server or scheduler that migrated it yet.
+    from mage_ai.orchestration.db.database_manager import database_manager
+
+    database_manager.run_migrations(log_level=logging.WARNING)
+    try:
+        if run:
+            result = run_selected(pipeline, choice(run))
+            typer.echo(f'Queued {len(result["created"])} partition run(s); '
+                       f'{len(result["active"])} already had one.')
+        if accept_code:
+            values = partition_state.select(pipeline, choice(accept_code))
+            partition_state.accept_code(pipeline, values)
+            typer.echo(f'Accepted the current code for {len(values)} partition(s).')
+        found = partition_state.states(pipeline)
+    except PartitionError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    counts = ', '.join(f'{n} {s}' for s, n in found['counts'].items() if n)
+    typer.echo(f'{pipeline_uuid}: {found["total"]} partitions of {found["key"]} '
+               f'({counts or "none yet"}).')
+    for row in found['partitions']:
+        if state and row['state'] != state:
+            continue
+        why = '; '.join(
+            'code changed' if r['kind'] == 'code' else f'{r["pipeline"]} ran again'
+            for r in row['stale_because']
+        )
+        run_id = f'  run {row["run_id"]}' if row['run_id'] else ''
+        typer.echo(f'  {row["partition"]}  {row["state"]}{run_id}' + (f'  ({why})' if why else ''))
 
 
 @app.command('verify-fusion')
