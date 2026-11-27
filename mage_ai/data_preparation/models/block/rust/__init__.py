@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from mage_ai.data_preparation import block_environments
 from mage_ai.data_preparation.models.block import Block, ConditionalBlock
 from mage_ai.data_preparation.models.block.rust import build as rust_build
 from mage_ai.data_preparation.models.block.rust import exchange
@@ -143,6 +144,7 @@ def execute_rust_code(
     execution_partition: str = None,
     label: str = None,
     io_config: Optional[Dict] = None,
+    environment: Optional[str] = None,
 ) -> RustRun:
     """
     Builds the code as a block of block_type when it changed, then runs it. io_config is
@@ -152,7 +154,8 @@ def execute_rust_code(
     if block_type not in EXECUTABLE_BLOCK_TYPES:
         raise RustBlockError(f'Rust blocks cannot be {block_type} blocks.')
     try:
-        prepared = rust_build.prepare(code, block_type, block_uuid, repo_path, label=label)
+        prepared = rust_build.prepare(code, block_type, block_uuid, repo_path, label=label,
+                                      environment=environment)
         built = rust_build.build(prepared)
     except (RustSourceError, rust_build.RustBuildError) as error:
         raise RustBlockError(str(error)) from error
@@ -260,6 +263,7 @@ def execute_rust_chain(
     pipeline_uuid: str = None,
     execution_partition: str = None,
     io_config: Optional[Dict] = None,
+    environment: Optional[str] = None,
 ) -> RustChainRun:
     """
     Runs consecutive Rust blocks in one process (mage::run_chain): each block's lazy
@@ -267,7 +271,7 @@ def execute_rust_chain(
     last block's output is computed and returned.
     """
     try:
-        prepared = rust_build.prepare_chain(members, repo_path)
+        prepared = rust_build.prepare_chain(members, repo_path, environment)
         built = rust_build.build_chain(prepared)
     except (RustSourceError, rust_build.RustBuildError) as error:
         raise RustBlockError(str(error)) from error
@@ -445,6 +449,7 @@ class RustBlock(Block):
             input_vars=input_vars,
             label=label,
             pipeline_uuid=self.pipeline_uuid,
+            environment=block_environments.selection(self, 'rust'),
             repo_path=self.repo_path,
             io_config=block_io_config(self),
         )
@@ -539,6 +544,7 @@ class RustConditionalBlock(ConditionalBlock):
                 input_vars=input_vars,
                 label=label,
                 pipeline_uuid=self.pipeline_uuid,
+                environment=block_environments.selection(self, 'rust'),
                 repo_path=self.repo_path,
             )
             decisions = [value for value in run.outputs if isinstance(value, bool)]

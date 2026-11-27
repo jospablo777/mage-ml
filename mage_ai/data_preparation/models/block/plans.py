@@ -94,16 +94,24 @@ VIEW_KEY = '__mage_view__'
 
 def chains_with(block, following) -> bool:
     """
-    Whether the block may plan for the next block of its stage: both Rust, both R, or a
-    ClickHouse, DuckDB or PostgreSQL SQL block that replaces its table followed by a SQL
-    block of the same database and profile.
+    Whether the block may plan for the next block of its stage: both Rust or both R in the
+    same environment (one R session or one Rust program runs a chain), or a ClickHouse,
+    DuckDB or PostgreSQL SQL block that replaces its table followed by a SQL block of the
+    same database and profile.
     """
+    from mage_ai.data_preparation import block_environments
     from mage_ai.data_preparation.models.constants import BlockLanguage
 
     if block is None or following is None:
         return False
     if block.language in (BlockLanguage.RUST, BlockLanguage.R):
-        return following.language == block.language
+        if following.language != block.language:
+            return False
+        try:
+            return block_environments.selection(block) == block_environments.selection(following)
+        except block_environments.EnvironmentNameError:
+            # The block's own run reports the name.
+            return False
     if block.language == BlockLanguage.SQL and following.language == BlockLanguage.SQL:
         return sql_view_problem(block) is None and _provider(following) == _provider(block) and (
             (block.configuration or {}).get('data_provider_profile')
@@ -284,6 +292,8 @@ def run(plan: Plan, block, execution_partition: Optional[str] = None):
     """Runs a plan's chain; returns the run: the last block's outputs and the tests."""
     from mage_ai.data_preparation.models.constants import BlockType
 
+    from mage_ai.data_preparation import block_environments
+
     steps = plan.steps
     if plan.language == 'rust':
         from mage_ai.data_preparation.models.block import rust
@@ -305,6 +315,7 @@ def run(plan: Plan, block, execution_partition: Optional[str] = None):
                 io_config=rust.block_io_config(
                     block.pipeline.get_block(steps[-1]['block_uuid']) or block,
                 ),
+                environment=block_environments.selection(block, 'rust'),
             )
         except rust.RustChainError as error:
             raise _chain_failure(error.block_uuid, str(error), steps) from error
@@ -320,6 +331,7 @@ def run(plan: Plan, block, execution_partition: Optional[str] = None):
             repo_path=block.repo_path,
             pipeline_uuid=block.pipeline_uuid,
             execution_partition=execution_partition,
+            environment=block_environments.selection(block, 'r'),
         )
     except execution.RChainError as error:
         raise _chain_failure(error.block_uuid, str(error), steps) from error

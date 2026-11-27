@@ -454,6 +454,10 @@ def pipeline_environment(pipeline) -> Optional[Environment]:
                 'requirements; a worker holds its packages in its own pyproject.toml.'
             )
         return None
+    if isinstance(config, dict) and not (config.get('requirements') or config.get('python')):
+        # Only the R or Rust blocks' environments (block_environments.py): Python blocks
+        # use Mage's.
+        return None
     if not isinstance(config, dict):
         raise PipelineEnvironmentError(
             f'The environment of pipeline {pipeline.uuid} must be a mapping with '

@@ -15,13 +15,15 @@ from . import runtime
 RUNNER = Path(__file__).parent / 'stream_runner.R'
 
 
-def stream_command(repo_path: Optional[str], supervised: bool = True) -> Dict:
+def stream_command(
+    repo_path: Optional[str], supervised: bool = True, environment: Optional[str] = None,
+) -> Dict:
     """
     `command` (argv without the directory), `env` and `cwd` of the R stream program.
     `supervised`: R stops once this process is gone; the service engine, which starts the
     program itself and supervises it, asks without.
     """
-    config = runtime.r_config(repo_path)
+    config = runtime.r_config(repo_path, environment)
     libraries = runtime.prepare(config)
     env = dict(os.environ)
     env.pop('MAGE_R_LIBRARY', None)

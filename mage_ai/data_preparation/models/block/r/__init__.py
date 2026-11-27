@@ -10,6 +10,7 @@ from it.
 import os
 from typing import Callable, Dict, List, Optional
 
+from mage_ai.data_preparation import block_environments
 from mage_ai.data_preparation.models.block import Block, ConditionalBlock
 from mage_ai.data_preparation.models.block.r import exchange, runtime  # noqa: F401
 from mage_ai.data_preparation.models.block.r.execution import (  # noqa: F401
@@ -80,6 +81,7 @@ class RBlock(Block):
             block_uuid=self.uuid,
             pipeline_uuid=self.pipeline_uuid,
             execution_partition=execution_partition,
+            environment=block_environments.selection(self, 'r'),
         )
         # The tests ran in R with the output; run_tests reports them as Mage reports the
         # tests of Python blocks, after the output is stored.
@@ -138,6 +140,7 @@ class RConditionalBlock(ConditionalBlock):
                 block_uuid=self.uuid,
                 pipeline_uuid=self.pipeline_uuid,
                 execution_partition=execution_partition,
+                environment=block_environments.selection(self, 'r'),
             )
             decisions = [value for value in run.outputs if isinstance(value, bool)]
             if not decisions:

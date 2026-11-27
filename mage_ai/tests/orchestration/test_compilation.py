@@ -92,6 +92,21 @@ class CompilationTest(DBTestCase):
         self.assertEqual(compilation.start(pipeline).state, 'nothing')
         self.assertEqual(compilation.summary_for(pipeline)['languages'], ['sql'])
 
+    def test_each_r_environment_the_blocks_use_is_prepared_once(self):
+        pipeline = self.pipeline([
+            ('fit', 'transformer', 'r', None),
+            ('plot', 'transformer', 'r', None),
+            ('report', 'transformer', 'r', None),
+        ])
+        prefix = f'{self._testMethodName}_'
+        pipeline.get_block(f'{prefix}fit').configuration = dict(r_environment='models')
+        pipeline.get_block(f'{prefix}report').configuration = dict(r_environment='Models')
+        units = [u for u in compilation.units_for(pipeline) if u.kind == 'r_environment']
+        self.assertEqual([(u.label, self.names([u])[0][1]) for u in units], [
+            ('R environment and packages', ['plot']),
+            ('R environment models and packages', ['fit', 'report']),
+        ])
+
     def test_a_polyglot_pipeline_compiles_every_language(self):
         pipeline = self.pipeline([
             ('load', 'data_loader', 'python', None),
@@ -104,7 +119,7 @@ class CompilationTest(DBTestCase):
             ('python_check', ['load']),
             ('r_check', ['score']),
             ('rust_chain', ['double', 'again']),
-            ('r_environment', []),
+            ('r_environment', ['score']),
         ])
         summary = compilation.summary_for(pipeline)
         self.assertEqual(summary['languages'], ['python', 'r', 'rust', 'sql'])

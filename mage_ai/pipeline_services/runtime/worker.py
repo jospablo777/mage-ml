@@ -583,6 +583,7 @@ def run_r_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, f
             repo_path=os.environ.get('MAGE_REPO_PATH'),
             block_uuid=block['uuid'],
             pipeline_uuid=block.get('pipeline_uuid'),
+            environment=block.get('r_environment'),
         )
     except execution.RBlockError as error:
         raise BlockError('run', str(error))
@@ -633,6 +634,7 @@ def run_r_chain(
             global_vars=variables,
             repo_path=os.environ.get('MAGE_REPO_PATH'),
             pipeline_uuid=blocks[0].get('pipeline_uuid'),
+            environment=blocks[0].get('r_environment'),
         )
     except execution.RChainError as error:
         raise BlockError('run', str(error), block_uuid=error.block_uuid)
@@ -1534,7 +1536,8 @@ def serve(requests=None, channel=None) -> None:
                 _r_execution()
                 stream = importlib.import_module('mage_service_r.stream')
                 result = stream.stream_command(os.environ.get('MAGE_REPO_PATH') or os.getcwd(),
-                                               supervised=False)
+                                               supervised=False,
+                                               environment=request.get('r_environment'))
             elif request.get('op') == 'stream_load':
                 # Compiles a stream's blocks (their top-level code runs) without a batch,
                 # and says what each takes: the engine sends a table's rows as a file.

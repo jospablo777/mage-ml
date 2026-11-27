@@ -84,9 +84,24 @@ class RConfig:
         return self.project_dir is not None
 
 
-def r_config(repo_path: Optional[str] = None) -> RConfig:
+def r_config(repo_path: Optional[str] = None, environment: Optional[str] = None) -> RConfig:
+    """
+    The R environment blocks run with: `environment` names one of the project's named
+    environments (r_environments/<name>, ADR-0040); None or `default` is the project's own,
+    from MAGE_R_PROJECT_DIR, <project>/r or the project directory.
+    """
+    from mage_ai.data_preparation import block_environments
+
+    try:
+        environment = block_environments.normalized(environment)
+        if environment != block_environments.DEFAULT:
+            block_environments.require(repo_path or os.getcwd(), 'r', environment)
+    except block_environments.EnvironmentNameError as error:
+        raise REnvironmentError(str(error)) from error
     project_dir = os.getenv('MAGE_R_PROJECT_DIR')
-    if project_dir:
+    if environment != block_environments.DEFAULT:
+        resolved = block_environments.folder(repo_path or os.getcwd(), 'r', environment).resolve()
+    elif project_dir:
         path = Path(project_dir)
         if not path.is_absolute() and repo_path:
             path = Path(repo_path) / path

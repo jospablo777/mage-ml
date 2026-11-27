@@ -5,6 +5,7 @@ from typing import Dict
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
+from mage_ai.data_preparation import block_environments
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.settings.repo import get_repo_path
 
@@ -42,12 +43,13 @@ class RustCheckResource(GenericResource):
         try:
             prepared = rust_build.prepare(
                 content, block.type, block.uuid, block.repo_path or repo_path, label=label,
+                environment=block_environments.selection(block, 'rust'),
             )
             diagnostics = await asyncio.to_thread(rust_build.check, prepared)
             items = [diagnostic.to_dict() for diagnostic in diagnostics]
         except RustSourceError as error:
             items = [dict(level='error', line=1, column=1, message=str(error), rendered=str(error))]
-        except rust_build.RustBuildError as error:
+        except (rust_build.RustBuildError, block_environments.EnvironmentNameError) as error:
             items = [dict(level='error', line=None, column=None, message=str(error),
                           rendered=str(error))]
         return cls(dict(

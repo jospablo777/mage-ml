@@ -232,6 +232,18 @@ class Prepared:
     key_text: Optional[Callable[[], str]] = None
 
 
+def _workspace(repo_path: str, environment: Optional[str]) -> ws.Workspace:
+    """The block's Rust environment, set up when it is the default one; a named one must
+    exist (block_environments.require says which do)."""
+    from mage_ai.data_preparation import block_environments
+
+    try:
+        environment = block_environments.require(repo_path, 'rust', environment)
+    except block_environments.EnvironmentNameError as error:
+        raise RustBuildError(str(error)) from error
+    return ws.init(repo_path, environment)
+
+
 def prepare(
     code: str,
     block_type: BlockType,
@@ -239,6 +251,7 @@ def prepare(
     repo_path: str,
     label: Optional[str] = None,
     stream: bool = False,
+    environment: Optional[str] = None,
 ) -> Prepared:
     """`stream`: a stream transformer, built as a resident program run on each batch."""
     source = block_source.analyze(code, block_type)
@@ -246,9 +259,9 @@ def prepare(
         raise block_source.RustSourceError(
             f'A stream runs Rust transformers; this block is a {block_type} block.',
         )
-    workspace = ws.init(repo_path)
+    workspace = _workspace(repo_path, environment)
     sdk = ws.sync_sdk(workspace)
-    crate = ws.crate_name(block_uuid)
+    crate = ws.crate_name(block_uuid, workspace.environment)
     main = block_source.main_rs(source)
     generated = (block_source.generated_stream_main(source) if stream
                  else block_source.generated_main(source))
@@ -344,7 +357,12 @@ def _chain_errors(stdout: str) -> List[str]:
     return errors
 
 
-_CRATE_NAMED = re.compile(r'(?:unlinked crate|undeclared crate or module|unresolved import) `(\w+)')
+# rustc's wordings across versions: 1.8x "undeclared crate or module", 1.9x "cannot find
+# module or crate" and "unlinked crate".
+_CRATE_NAMED = re.compile(
+    r'(?:unlinked crate|undeclared crate or module|cannot find module or crate|'
+    r'unresolved import) `(\w+)'
+)
 _NOT_CRATES = {'crate', 'self', 'super', 'std', 'core', 'alloc', 'mage'}
 
 
@@ -362,11 +380,40 @@ def missing_crate_hint(errors: List[Diagnostic], workspace: ws.Workspace) -> Opt
     if not missing:
         return None
     lines = '\n'.join(f'{name} = "<version>"' for name in missing)
-    return (
+    where = '' if workspace.environment == 'default' \
+        else f' (the Rust environment {workspace.environment})'
+    hint = (
         f'Blocks can use the crates under [workspace.dependencies] in '
-        f'{workspace.cargo_toml}. Add {", ".join(missing)} there with the version you need:\n'
-        f'{lines}'
+        f'{workspace.cargo_toml}{where}. Add {", ".join(missing)} there with the version you '
+        f'need:\n{lines}'
     )
+    elsewhere = _environments_listing(workspace, missing)
+    if elsewhere:
+        hint += f'\nOr run the block in {elsewhere}, which lists it.'
+    return hint
+
+
+def _environments_listing(workspace: ws.Workspace, crates: List[str]) -> Optional[str]:
+    """The project's other Rust environments that list every one of the crates."""
+    from mage_ai.data_preparation import block_environments
+
+    root = workspace.repo_path
+    if root is None:
+        return None
+    names = [block_environments.DEFAULT, *block_environments.named(root, 'rust')]
+    found = []
+    for name in names:
+        if name == workspace.environment:
+            continue
+        try:
+            other = ws.of_environment(root, name)
+            listed = {c.replace('-', '_') for c in ws.dependencies(other)}
+        except Exception:
+            continue
+        if all(crate in listed for crate in crates):
+            found.append(f'the {name} environment' if name != 'default'
+                         else 'the default environment')
+    return ' or '.join(found) or None
 
 
 _GATED = re.compile(r'gated behind the `(\w+)` feature')
@@ -563,9 +610,12 @@ class ChainMember:
     block_uuid: str
 
 
-def chain_crate_name(block_uuids: List[str]) -> str:
+def chain_crate_name(block_uuids: List[str], environment: Optional[str] = None) -> str:
     # A block_ name keeps chain crates out of the lock fingerprint, as block crates are.
-    digest = hashlib.sha256('\0'.join(block_uuids).encode()).hexdigest()[:12]
+    # Another environment's chain gets another crate, as block crates do (ws.crate_name).
+    named = list(block_uuids) if environment in (None, 'default') else [environment,
+                                                                        *block_uuids]
+    digest = hashlib.sha256('\0'.join(named).encode()).hexdigest()[:12]
     return f'block_chain_{digest}'
 
 
@@ -581,12 +631,14 @@ def chain_module(source: block_source.BlockSource) -> str:
     )
 
 
-def prepare_chain(members: List[ChainMember], repo_path: str) -> Prepared:
+def prepare_chain(
+    members: List[ChainMember], repo_path: str, environment: Optional[str] = None,
+) -> Prepared:
     """
     A crate that runs a chain of Rust blocks in one process (mage::run_chain): each
     block's code is a module of it, so the blocks' crates and code stay as they are.
     """
-    workspace = ws.init(repo_path)
+    workspace = _workspace(repo_path, environment)
     sdk = ws.sync_sdk(workspace)
     crates = [ws.crate_name(m.block_uuid) for m in members]
     files = {}
@@ -601,7 +653,7 @@ def prepare_chain(members: List[ChainMember], repo_path: str) -> Prepared:
         + ''.join(f'mod {crate};\n' for crate in crates)
         + '\nfn main() {\n    mage::run_chain(vec![\n' + entries + '    ]);\n}\n'
     )
-    crate = chain_crate_name([m.block_uuid for m in members])
+    crate = chain_crate_name([m.block_uuid for m in members], workspace.environment)
     directory = ws.write_block_crate(workspace, crate, files)
     key = _cache_key(
         workspace, crate, ''.join(files[name] for name in sorted(files)), sdk,

@@ -186,9 +186,15 @@ def build_stream_program(block, repo_path: str) -> Path:
     """The block's program, from the binary cache or built now."""
     from mage_ai.data_preparation.models.block.rust import build as rust_build
 
-    prepared = rust_build.prepare(
-        Path(block.file_path).read_text(), block.type, block.uuid, repo_path, stream=True,
-    )
+    from mage_ai.data_preparation import block_environments
+
+    try:
+        prepared = rust_build.prepare(
+            Path(block.file_path).read_text(), block.type, block.uuid, repo_path, stream=True,
+            environment=block_environments.selection(block, 'rust'),
+        )
+    except (rust_build.RustBuildError, block_environments.EnvironmentNameError) as error:
+        raise RustSampleError(str(error))
     try:
         return rust_build.build(prepared, stream=False).binary
     except rust_build.RustBuildError as error:
@@ -241,7 +247,9 @@ class RStreamProgram(StreamProgram):
                  timeout: float):
         from mage_ai.data_preparation.models.block.r.stream import stream_command
 
-        command = stream_command(repo_path)
+        from mage_ai.data_preparation import block_environments
+
+        command = stream_command(repo_path, environment=block_environments.selection(block, 'r'))
         super().__init__(
             command['command'],
             [_with_state_key(

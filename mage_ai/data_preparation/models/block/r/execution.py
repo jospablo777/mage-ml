@@ -80,6 +80,7 @@ def execute_r_chain(
     repo_path: str = None,
     pipeline_uuid: str = None,
     execution_partition: str = None,
+    environment: str = None,
 ) -> RChainRun:
     """
     Runs consecutive R blocks in one R session (mageml::run_chain): R starts and loads
@@ -89,7 +90,7 @@ def execute_r_chain(
     for step in steps:
         if step['block_type'] not in BLOCK_TYPES:
             raise RBlockError(f"R blocks cannot be {step['block_type']} blocks.")
-    config = runtime.r_config(repo_path)
+    config = runtime.r_config(repo_path, environment)
     libraries = runtime.prepare(config)
 
     job_dir = tempfile.mkdtemp(prefix='mage_r_chain_')
@@ -186,11 +187,12 @@ def execute_r_code(
     block_uuid: str = None,
     pipeline_uuid: str = None,
     execution_partition: str = None,
+    environment: str = None,
 ) -> RRun:
     """Run R code as a block of block_type."""
     if block_type not in EXECUTABLE_BLOCK_TYPES:
         raise RBlockError(f'R blocks cannot be {block_type} blocks.')
-    config = runtime.r_config(repo_path)
+    config = runtime.r_config(repo_path, environment)
     libraries = runtime.prepare(config)
 
     job_dir = tempfile.mkdtemp(prefix='mage_r_')

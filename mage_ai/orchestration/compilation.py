@@ -172,9 +172,36 @@ def units_for(pipeline) -> List[Unit]:
             elif segment['blocks'][0] == uuid:
                 uuids = list(segment['blocks'])
                 units.append(Unit('rust_chain', ' → '.join(uuids), 'rust', uuids))
-    if any(_language(b) == 'r' for b in blocks):
-        units.append(Unit('r_environment', 'R environment and packages', 'r', []))
+    # One check per R environment the blocks use (ADR-0040).
+    by_environment: Dict[str, List[str]] = {}
+    for block in blocks:
+        if _language(block) == 'r':
+            by_environment.setdefault(_environment_of(block), []).append(block.uuid)
+    for environment, uuids in sorted(by_environment.items()):
+        label = 'R environment and packages' if environment == 'default' \
+            else f'R environment {environment} and packages'
+        units.append(Unit('r_environment', label, 'r', uuids))
     return units
+
+
+def _environment_of(block) -> str:
+    """The R or Rust environment a block selects; a name that is not one is reported by
+    the unit that uses it."""
+    from mage_ai.data_preparation import block_environments
+
+    try:
+        return block_environments.selection(block)
+    except block_environments.EnvironmentNameError:
+        return str((block.configuration or {}).get(
+            block_environments.BLOCK_KEYS.get(_language(block), ''), 'default'))
+
+
+def _unit_environment(pipeline, unit: 'Unit') -> Optional[str]:
+    from mage_ai.data_preparation import block_environments
+
+    if not unit.block_uuids:
+        return None
+    return block_environments.selection(pipeline.get_block(unit.block_uuids[0]))
 
 
 def summary_for(pipeline) -> Dict:
@@ -662,17 +689,20 @@ def _compile_unit(pipeline, unit: Unit) -> None:
                                    block_type=pipeline.get_block(uuid).type, block_uuid=uuid)
             for uuid in unit.block_uuids
         ]
-        built = rust_build.build_chain(rust_build.prepare_chain(members, pipeline.repo_path))
+        built = rust_build.build_chain(rust_build.prepare_chain(
+            members, pipeline.repo_path, _unit_environment(pipeline, unit),
+        ))
         unit.state = 'cached' if built.cached else 'compiled'
     elif unit.kind == 'rust_block':
         block = pipeline.get_block(unit.block_uuids[0])
-        prepared = rust_build.prepare(_code(block), block.type, block.uuid, pipeline.repo_path)
+        prepared = rust_build.prepare(_code(block), block.type, block.uuid, pipeline.repo_path,
+                                      environment=_unit_environment(pipeline, unit))
         built = rust_build.build(prepared, stream=False)
         unit.state = 'cached' if built.cached else 'compiled'
     elif unit.kind == 'r_environment':
         from mage_ai.data_preparation.models.block.r import runtime
 
-        runtime.prepare(runtime.r_config(pipeline.repo_path))
+        runtime.prepare(runtime.r_config(pipeline.repo_path, _unit_environment(pipeline, unit)))
         unit.state = 'compiled'
 
 
@@ -697,25 +727,33 @@ def code_fingerprint(pipeline) -> str:
 
 
 def environment_fingerprint(pipeline) -> str:
-    """The Rust workspace's part: its manifest, toolchain and locked dependencies, without
-    the block crates that compiling itself adds to Cargo.lock."""
+    """The Rust workspaces' part: the manifest, toolchain and locked dependencies of each
+    Rust environment the blocks use, without the block crates that compiling itself adds
+    to Cargo.lock."""
     import hashlib
 
     from mage_ai.data_preparation.models.block.rust import build as rust_build
     from mage_ai.data_preparation.models.block.rust import workspace as ws
 
+    environments = sorted({
+        _environment_of(b) for b in compiled_blocks(pipeline) if _language(b) == 'rust'
+    } | {'default'})
     digest = hashlib.sha256()
-    try:
-        root = ws.workspace_root(pipeline.repo_path)
-        for name in ('Cargo.toml', 'rust-toolchain.toml'):
-            path = root / name
-            if path.is_file():
-                digest.update(path.read_bytes())
-        lock = root / 'Cargo.lock'
-        if lock.is_file():
-            digest.update(rust_build._lock_fingerprint(lock).encode())
-    except Exception:
-        pass
+    for environment in environments:
+        try:
+            root = ws.workspace_root(pipeline.repo_path, environment)
+            if environment != 'default':
+                # The default's digest stays as before named environments existed.
+                digest.update(f'\0{environment}\0'.encode())
+            for name in ('Cargo.toml', 'rust-toolchain.toml'):
+                path = root / name
+                if path.is_file():
+                    digest.update(path.read_bytes())
+            lock = root / 'Cargo.lock'
+            if lock.is_file():
+                digest.update(rust_build._lock_fingerprint(lock).encode())
+        except Exception:
+            pass
     return digest.hexdigest()[:32]
 
 

@@ -76,6 +76,10 @@ class RustWorkspaceError(Exception):
 @dataclass(frozen=True)
 class Workspace:
     root: Path
+    # Its name among the project's Rust environments (block_environments.py, ADR-0040).
+    environment: str = 'default'
+    # The project it belongs to, when known.
+    repo_path: Optional[str] = None
 
     @property
     def cargo_toml(self) -> Path:
@@ -101,11 +105,25 @@ class Workspace:
         return self.generated / 'blocks' / crate
 
 
-def workspace_root(repo_path: str) -> Path:
+def workspace_root(repo_path: str, environment: Optional[str] = None) -> Path:
+    """The workspace of a Rust environment: `default` is <project>/rust (or
+    MAGE_RUST_PROJECT_DIR), others are rust_environments/<name>."""
+    from mage_ai.data_preparation import block_environments
+
+    environment = block_environments.normalized(environment)
+    if environment != block_environments.DEFAULT:
+        return block_environments.folder(repo_path, 'rust', environment)
     override = os.getenv('MAGE_RUST_PROJECT_DIR')
     if override:
         return Path(override)
     return Path(repo_path) / 'rust'
+
+
+def of_environment(repo_path: str, environment: Optional[str] = None) -> Workspace:
+    from mage_ai.data_preparation import block_environments
+
+    environment = block_environments.normalized(environment)
+    return Workspace(workspace_root(repo_path, environment), environment, str(repo_path))
 
 
 def target_dir() -> Path:
@@ -131,9 +149,10 @@ def _write_if_changed(path: Path, text: str) -> bool:
     return True
 
 
-def init(repo_path: str) -> Workspace:
-    """Creates the project's Rust environment; existing files are kept."""
-    workspace = Workspace(workspace_root(repo_path))
+def init(repo_path: str, environment: Optional[str] = None) -> Workspace:
+    """Creates a Rust environment of the project (the default one unless named); existing
+    files are kept."""
+    workspace = of_environment(repo_path, environment)
     workspace.root.mkdir(parents=True, exist_ok=True)
     for path, text in (
         (workspace.cargo_toml, CARGO_TOML),
@@ -230,10 +249,15 @@ def dependencies(workspace: Workspace) -> List[str]:
     return names
 
 
-def crate_name(block_uuid: str) -> str:
+def crate_name(block_uuid: str, environment: Optional[str] = None) -> str:
+    """
+    A block's crate. Block uuids that differ only in punctuation get different crates, and
+    so does a block in another environment than `default`: every environment builds into
+    the shared target directory, where a binary's path is its crate's name.
+    """
     name = re.sub(r'[^a-z0-9_]', '_', block_uuid.lower()).strip('_') or 'block'
-    # Block uuids that differ only in punctuation get different crates.
-    suffix = hashlib.sha256(block_uuid.encode()).hexdigest()[:8]
+    hashed = block_uuid if environment in (None, 'default') else f'{environment}/{block_uuid}'
+    suffix = hashlib.sha256(hashed.encode()).hexdigest()[:8]
     return f'block_{name[:48]}_{suffix}'
 
 

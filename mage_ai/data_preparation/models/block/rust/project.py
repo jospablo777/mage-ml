@@ -56,22 +56,33 @@ def block_files(repo_path: str) -> List[RustBlockFile]:
 
 
 def build_all(repo_path: str, stream: bool = True) -> List[BuildReport]:
+    """Builds each Rust block file in every environment its pipelines run it in (ADR-0040),
+    or in the default one when no pipeline uses it."""
+    from mage_ai.data_preparation import block_environments
+
+    used = block_environments.of_block_files(repo_path, 'rust')
     reports = []
     for block in block_files(repo_path):
-        try:
-            prepared = rust_build.prepare(
-                block.path.read_text(encoding='utf-8'),
-                block.block_type,
-                block.uuid,
-                repo_path,
-                label=block.label,
-            )
-            built = rust_build.build(prepared, stream=stream)
-            reports.append(BuildReport(
-                block=block, cached=built.cached, ok=True, seconds=built.seconds,
-            ))
-        except (RustSourceError, rust_build.RustBuildError) as error:
-            reports.append(BuildReport(block=block, error=str(error), ok=False))
+        for environment in used.get(block.uuid) or [block_environments.DEFAULT]:
+            label = block.label if environment == block_environments.DEFAULT \
+                else f'{block.label} ({environment})'
+            labelled = RustBlockFile(block_type=block.block_type, label=label, path=block.path,
+                                     uuid=block.uuid)
+            try:
+                prepared = rust_build.prepare(
+                    block.path.read_text(encoding='utf-8'),
+                    block.block_type,
+                    block.uuid,
+                    repo_path,
+                    label=block.label,
+                    environment=environment,
+                )
+                built = rust_build.build(prepared, stream=stream)
+                reports.append(BuildReport(
+                    block=labelled, cached=built.cached, ok=True, seconds=built.seconds,
+                ))
+            except (RustSourceError, rust_build.RustBuildError) as error:
+                reports.append(BuildReport(block=labelled, error=str(error), ok=False))
     return reports
 
 
