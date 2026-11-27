@@ -184,6 +184,25 @@ pub trait Transaction: Send + Sync {
     fn abort(&self) -> BoxFuture<'_, ()>;
 }
 
+/// Exactly-once into a database (Kafka to PostgreSQL, `EXACTLY_ONCE_POSTGRES.md`): the
+/// database keeps the source's positions, written in the same transaction as the rows. The
+/// source names each commit's position; the transaction stores it.
+pub trait PositionNames: Send + Sync {
+    /// Each commit as (its partition's name, the next position to read), refused when the
+    /// partition is no longer this reader's.
+    fn named(&self, commits: &[Commit]) -> Result<Vec<(String, i64)>, ConnectorError>;
+    /// The positions were committed: the source reads on past them.
+    fn committed(&self, named: &[(String, i64)]);
+}
+
+/// Where a source starts the partitions it is assigned, read from the database that keeps
+/// its positions. Claiming a partition fences its earlier reader: that reader's next commit
+/// of it is refused.
+pub trait StartPositions: Send + Sync {
+    /// For each partition name, the next position to read; None when none is kept.
+    fn claim(&self, partitions: &[String]) -> Result<Vec<Option<i64>>, ConnectorError>;
+}
+
 /// A row user code rejected, by its index in the input batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowError {

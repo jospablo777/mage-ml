@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Exactly once from Kafka into PostgreSQL
+
+- `delivery: exactly_once` on a Kafka source now also works when every sink, dead letters
+  included, is PostgreSQL on one database: the rows and the source's next offsets commit in
+  one PostgreSQL transaction, and each partition starts where `mageml_stream_positions` says.
+  An instance that lost a partition to another commits nothing of it. A stream whose sinks
+  mix Kafka and PostgreSQL, or are anything else, is refused with the sinks it has.
+
 ### Named R and Rust environments
 
 - Besides each language's default environment (`r/`, `rust/`), a project can have named R

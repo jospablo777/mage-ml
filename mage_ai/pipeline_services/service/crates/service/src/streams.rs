@@ -569,12 +569,28 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
     })
 }
 
-/// Exactly-once delivery (I-36): the source and every sink, dead letters included, are Kafka
-/// on one cluster, and the sinks write through one transaction that commits the source's
-/// offsets. Keyed state is refused: it is saved apart from the transaction, so a crash
-/// between the two would apply replayed messages to it twice.
+/// Exactly-once delivery: a Kafka source whose sinks, dead letters included, write through
+/// one transaction that commits the source's positions with them, a Kafka one (I-36) or a
+/// PostgreSQL one (EXACTLY_ONCE_POSTGRES.md).
 #[cfg(feature = "kafka")]
 fn exactly_once_parts(
+    service: &Arc<Service>,
+    pipeline: &Pipeline,
+    log: RunLog,
+) -> Result<StreamParts, String> {
+    use mage_service_core::manifest::ExactlyOnceTarget;
+
+    let stream = pipeline.stream.as_ref().expect("a stream");
+    match stream.exactly_once_target()? {
+        ExactlyOnceTarget::Kafka => kafka_to_kafka_parts(service, pipeline, log),
+        ExactlyOnceTarget::Postgres => kafka_to_postgres_parts(service, pipeline, log),
+    }
+}
+
+/// Kafka sinks on the source's cluster write through one Kafka transaction that commits the
+/// source's offsets (I-36).
+#[cfg(feature = "kafka")]
+fn kafka_to_kafka_parts(
     service: &Arc<Service>,
     pipeline: &Pipeline,
     log: RunLog,
@@ -584,19 +600,6 @@ fn exactly_once_parts(
         .chain(&stream.sinks)
         .chain(stream.errors.dead_letter.as_ref())
         .collect();
-    let others: Vec<&str> = connectors
-        .iter()
-        .filter(|c| c.kind != ConnectorKind::Kafka)
-        .map(|c| c.name.as_str())
-        .collect();
-    if !others.is_empty() {
-        return Err(format!(
-            "delivery: exactly_once needs Kafka for the source and every sink, dead letters \
-             included; {} {} not Kafka.",
-            others.join(", "),
-            if others.len() == 1 { "is" } else { "are" },
-        ));
-    }
     let cluster =
         mage_connector_kafka::cluster(&settings(service, &stream.source)).map_err(|e| e.message)?;
     for connector in &connectors[1..] {
@@ -651,6 +654,84 @@ fn exactly_once_parts(
         tap,
         time: stream.time.clone().map(crate::stream_time::Lateness::new),
         transaction: Some(Arc::new(transaction)),
+    })
+}
+
+/// PostgreSQL sinks on one database write through one PostgreSQL transaction that keeps the
+/// source's positions in `mageml_stream_positions`; the source starts each partition it is
+/// assigned where that table says (EXACTLY_ONCE_POSTGRES.md).
+#[cfg(feature = "kafka")]
+fn kafka_to_postgres_parts(
+    service: &Arc<Service>,
+    pipeline: &Pipeline,
+    log: RunLog,
+) -> Result<StreamParts, String> {
+    let stream = pipeline.stream.as_ref().expect("a stream");
+    let outputs: Vec<&Connector> = stream
+        .sinks
+        .iter()
+        .chain(stream.errors.dead_letter.as_ref())
+        .collect();
+    let transaction = mage_connector_postgres::transaction::PgTransaction::new(
+        &settings(service, outputs[0]),
+        &pipeline.uuid,
+    )
+    .map_err(|e| e.message)?;
+    for connector in &outputs[1..] {
+        if !transaction
+            .same_database(&settings(service, connector))
+            .map_err(|e| e.message)?
+        {
+            return Err(format!(
+                "delivery: exactly_once commits the rows of every sink in one PostgreSQL \
+                 transaction, so they must write to one database as one user; {} writes \
+                 elsewhere than {}.",
+                connector.name, outputs[0].name
+            ));
+        }
+    }
+    let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
+    let transform = transform_session(service, pipeline, log, tap)?;
+    let batch = &stream.batch;
+    let source = mage_connector_kafka::KafkaSource::with_start_positions(
+        &static_membership(settings(service, &stream.source), &pipeline.uuid),
+        mage_connector_kafka::BatchLimits {
+            max_records: batch.max_records,
+            max_bytes: batch.max_bytes,
+            max_wait: Duration::from_millis(batch.max_wait_ms),
+        },
+        in_flight_bytes(stream),
+        Some(transaction.clone() as Arc<dyn mage_stream_ports::StartPositions>),
+    )
+    .map_err(|e| e.message)?;
+    transaction.name_positions_with(source.position_names());
+    let mut sinks = Vec::new();
+    for connector in &stream.sinks {
+        let sink = transaction
+            .sink(&settings(service, connector))
+            .map_err(|e| e.message)?;
+        sinks.push((Arc::new(sink) as Arc<dyn Sink>, connector.after.clone()));
+    }
+    let dead_letter = match &stream.errors.dead_letter {
+        Some(connector) => Some(Arc::new(
+            transaction
+                .sink(&settings(service, connector))
+                .map_err(|e| e.message)?,
+        ) as Arc<dyn Sink>),
+        None => None,
+    };
+    Ok(StreamParts {
+        name: pipeline.uuid.clone(),
+        source: Box::new(source),
+        sinks,
+        dead_letter,
+        transform,
+        config: runner_config(stream),
+        shutdown_deadline: Duration::from_secs(20),
+        pause: None,
+        tap,
+        time: stream.time.clone().map(crate::stream_time::Lateness::new),
+        transaction: Some(transaction as Arc<dyn mage_stream_ports::Transaction>),
     })
 }
 

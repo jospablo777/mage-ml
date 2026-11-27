@@ -24,7 +24,8 @@ OpenSearch), Protobuf messages, and passwords written in the file.
 Every stream is at least once: a batch is acknowledged only after its sinks wrote it, so a
 crash or restart can repeat the batches that were in flight, and never loses one. "Repeats
 absorbed" names how a sink writes a repeated batch only once, where it can. A Kafka to
-Kafka stream can be [exactly once](#exactly-once-kafka-to-kafka) instead.
+Kafka stream, or Kafka to PostgreSQL, can be
+[exactly once](#exactly-once-kafka-to-kafka) instead.
 
 | `connector_type` | Source: acknowledged | Source: instances | Sink: confirmed | Repeats absorbed | Unlike MageML |
 | --- | --- | --- | --- | --- | --- |
@@ -261,6 +262,31 @@ runs as fast as at least once (67,500 against 66,000 messages a second on a lapt
   partition that moves to another instance then finds its state there.
 - Consumers that read with `read_uncommitted` (kafka-python's default, not librdkafka's)
   also see the messages of aborted transactions.
+
+#### Exactly once, Kafka to PostgreSQL
+
+The same `delivery: exactly_once` on a Kafka source whose sinks, dead letters included, are
+all PostgreSQL: the rows of every sink and the source's next offsets commit in one
+PostgreSQL transaction, about once a second or sooner. A table without a unique constraint
+then gets each message's rows once, through crashes, restarts and rebalances.
+
+- The offsets are kept in `mageml_stream_positions`, in the first sink's schema, one row per
+  stream and partition. When the stream starts, or is assigned a partition, the partition
+  starts where that table says; a partition it has no row for starts as at least once does
+  (the group's committed offset, else `auto_offset_reset`). The consumer group's own offsets
+  are not used.
+- Taking a partition raises its epoch in the table, and a commit updates a partition's
+  offset only at the epoch its instance took it: an instance that lost a partition to
+  another commits nothing of it, and stops.
+- Every sink must write to one database as one user (the same host, port, database and
+  username); the service refuses others, naming the sink.
+- A failed write or commit leaves nothing of the transaction; the stream stops, and at its
+  restart it reads from the kept offsets.
+- No transaction stays open while the stream is idle: one begins with the next batch.
+- Tested with 50,000 messages into a table without a unique constraint and the engine
+  killed (SIGKILL) three times mid-stream: each message one row
+  (`integration_tests/kafka/test_exactly_once_postgres.py`); the same test at least once
+  wrote 2,600 of them twice.
 
 ### Webhooks
 

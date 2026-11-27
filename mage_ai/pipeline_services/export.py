@@ -1626,8 +1626,10 @@ def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optiona
               capture_: Capture, problems: List[str]) -> Optional[str]:
     """
     The stream's delivery from its Kafka source's `delivery` setting: exactly_once commits
-    the source's offsets with the sinks' writes in one Kafka transaction (I-36), so the
-    source and every sink, dead letters included, must be Kafka.
+    the source's positions with the sinks' writes in one transaction, a Kafka one (I-36) when
+    every sink, dead letters included, is Kafka, or a PostgreSQL one when every one is
+    PostgreSQL (EXACTLY_ONCE_POSTGRES.md). The engine's manifest check says the same
+    (Stream::exactly_once_target).
     """
     delivery = (source.get('config') or {}).pop('delivery', None)
     if delivery in (None, '', 'at_least_once'):
@@ -1637,22 +1639,38 @@ def _delivery(prefix: str, source: Dict, sinks: List[Dict], dead_letter: Optiona
             f'{prefix}: delivery is at_least_once or exactly_once, not {delivery!r}.'
         )
         return None
-    others = [c['name'] for c in [source, *sinks, *([dead_letter] if dead_letter else [])]
-              if c.get('kind') != 'kafka']
-    if others:
+    if source.get('kind') != 'kafka':
         problems.append(
-            f'{prefix}: delivery: exactly_once needs Kafka for the source and every sink, '
-            f'dead letters included; {", ".join(others)} '
-            f'{"is" if len(others) == 1 else "are"} not Kafka.'
+            f'{prefix}: delivery: exactly_once needs a Kafka source; {source["name"]} is not '
+            'Kafka.'
         )
         return None
-    capture_.notes.append(
-        f'{prefix} writes exactly once: the sinks\' messages and the source\'s offsets commit '
-        'in one Kafka transaction, about once a second, so consumers that read with '
-        'isolation.level=read_committed see each output once, through crashes and '
-        'rebalances. The sinks must be on the source\'s cluster.'
+    outputs = [*sinks, *([dead_letter] if dead_letter else [])]
+    kinds = {c.get('kind') for c in outputs}
+    if kinds == {'kafka'}:
+        capture_.notes.append(
+            f'{prefix} writes exactly once: the sinks\' messages and the source\'s offsets '
+            'commit in one Kafka transaction, about once a second, so consumers that read with '
+            'isolation.level=read_committed see each output once, through crashes and '
+            'rebalances. The sinks must be on the source\'s cluster.'
+        )
+        return 'exactly_once'
+    if kinds == {'postgres'}:
+        capture_.notes.append(
+            f'{prefix} writes exactly once: the sinks\' rows and the source\'s next offsets '
+            'commit in one PostgreSQL transaction, about once a second, and each partition '
+            'starts where mageml_stream_positions (in the first sink\'s schema) says, through '
+            'crashes and rebalances. The sinks must write to one database as one user.'
+        )
+        return 'exactly_once'
+    listed = ', '.join(f'{c["name"]} ({c.get("kind")})' for c in outputs)
+    problems.append(
+        f'{prefix}: delivery: exactly_once needs every sink, dead letters included, to be '
+        'Kafka (on the source\'s cluster) or every one to be PostgreSQL (on one database): '
+        f'the outputs commit in one transaction with the source\'s positions; this stream '
+        f'writes to {listed}.'
     )
-    return 'exactly_once'
+    return None
 
 
 def _marked_dead_letter(block, pipeline) -> bool:

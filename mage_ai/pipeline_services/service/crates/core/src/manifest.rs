@@ -237,8 +237,56 @@ pub enum Delivery {
     #[default]
     AtLeastOnce,
     /// Kafka to Kafka: outputs and positions commit in one transaction, so
-    /// `read_committed` consumers see each message's outputs once.
+    /// `read_committed` consumers see each message's outputs once. Kafka to PostgreSQL: the
+    /// rows and the source's positions commit in one PostgreSQL transaction.
     ExactlyOnce,
+}
+
+/// Where an exactly-once stream's outputs and positions commit together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExactlyOnceTarget {
+    /// A Kafka transaction on the source's cluster (EXACTLY_ONCE_KAFKA.md).
+    Kafka,
+    /// A PostgreSQL transaction on the sinks' database (EXACTLY_ONCE_POSTGRES.md).
+    Postgres,
+}
+
+impl Stream {
+    /// What `delivery: exactly_once` commits in: a Kafka source whose sinks, dead letters
+    /// included, are all Kafka or all PostgreSQL. Whether they share one cluster or one
+    /// database is checked with their settings, when the stream starts.
+    pub fn exactly_once_target(&self) -> Result<ExactlyOnceTarget, String> {
+        if self.source.kind != ConnectorKind::Kafka {
+            return Err(format!(
+                "delivery: exactly_once needs a Kafka source; {} is not Kafka.",
+                self.source.name
+            ));
+        }
+        let outputs: Vec<&Connector> = self
+            .sinks
+            .iter()
+            .chain(self.errors.dead_letter.iter())
+            .collect();
+        for (target, kind) in [
+            (ExactlyOnceTarget::Kafka, ConnectorKind::Kafka),
+            (ExactlyOnceTarget::Postgres, ConnectorKind::Postgres),
+        ] {
+            if outputs.iter().all(|c| c.kind == kind) {
+                return Ok(target);
+            }
+        }
+        let names: Vec<String> = outputs
+            .iter()
+            .map(|c| format!("{} ({})", c.name, c.kind.as_str()))
+            .collect();
+        Err(format!(
+            "delivery: exactly_once needs every sink, dead letters included, to be Kafka (on \
+             the source's cluster) or every one to be PostgreSQL (on one database): the \
+             outputs commit in one transaction with the source's positions; this stream \
+             writes to {}.",
+            names.join(", ")
+        ))
+    }
 }
 
 impl Delivery {
@@ -1052,21 +1100,10 @@ impl Pipeline {
                  dead_letter), and the stream has none: add one, or set on_late: pass."
             ));
         }
-        if stream.delivery == Delivery::ExactlyOnce {
-            let others: Vec<&str> = std::iter::once(&stream.source)
-                .chain(&stream.sinks)
-                .chain(stream.errors.dead_letter.iter())
-                .filter(|c| c.kind != ConnectorKind::Kafka)
-                .map(|c| c.name.as_str())
-                .collect();
-            if !others.is_empty() {
-                problems.push(format!(
-                    "Pipeline {name}: delivery: exactly_once needs Kafka for the source and \
-                     every sink, dead letters included; {} {} not Kafka.",
-                    others.join(", "),
-                    if others.len() == 1 { "is" } else { "are" }
-                ));
-            }
+        if stream.delivery == Delivery::ExactlyOnce
+            && let Err(problem) = stream.exactly_once_target()
+        {
+            problems.push(format!("Pipeline {name}: {problem}"));
         }
         let batch = &stream.batch;
         if batch.max_records == 0 || batch.max_bytes < 1024 {
@@ -1525,13 +1562,42 @@ mod tests {
     }
 
     #[test]
-    fn exactly_once_needs_kafka_everywhere_and_is_left_out_when_at_least_once() {
+    fn exactly_once_needs_kafka_outputs_or_postgres_outputs_and_is_left_out_when_at_least_once() {
         let mut stream = kafka_to_http();
         stream["delivery"] = json!("exactly_once");
         let problems = stream_manifest(json!([block("score", &[])]), stream.clone())
             .validate(None)
             .join("\n");
-        assert!(problems.contains("scores is not Kafka"), "{problems}");
+        assert!(
+            problems.contains("this stream writes to scores (http)"),
+            "{problems}"
+        );
+
+        // All PostgreSQL: rows and positions commit in one PostgreSQL transaction.
+        let mut postgres = stream.clone();
+        postgres["sinks"][0]["kind"] = json!("postgres");
+        let parsed: Stream = serde_json::from_value(postgres.clone()).unwrap();
+        assert_eq!(
+            parsed.exactly_once_target(),
+            Ok(ExactlyOnceTarget::Postgres)
+        );
+        // Kafka dead letters next to PostgreSQL rows cannot commit in one transaction.
+        postgres["errors"] = json!({"dead_letter": {"name": "dl", "kind": "kafka"}});
+        let mixed: Stream = serde_json::from_value(postgres).unwrap();
+        let problem = mixed.exactly_once_target().unwrap_err();
+        assert!(
+            problem.contains("scores (postgres), dl (kafka)"),
+            "{problem}"
+        );
+        let mut from_http = stream.clone();
+        from_http["source"]["kind"] = json!("http");
+        let parsed: Stream = serde_json::from_value(from_http).unwrap();
+        assert!(
+            parsed
+                .exactly_once_target()
+                .unwrap_err()
+                .contains("needs a Kafka source; orders is not Kafka")
+        );
 
         stream["sinks"][0]["kind"] = json!("kafka");
         stream["sinks"][0]["config"] = json!({"bootstrap_server": "kafka:9092", "topic": "s"});

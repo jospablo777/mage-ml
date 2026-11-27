@@ -22,6 +22,7 @@
 
 pub mod cdc;
 mod replication;
+pub mod transaction;
 
 pub use mage_pg::connect_url;
 use mage_pg::{tls, tls_mode};
@@ -221,6 +222,8 @@ fn describe(error: &tokio_postgres::Error) -> String {
 pub struct PgSink {
     settings: Settings,
     client: Mutex<Option<Client>>,
+    /// Exactly-once: the stream's transaction, which the sink writes in.
+    shared: Option<std::sync::Arc<transaction::PgTransaction>>,
 }
 
 impl PgSink {
@@ -231,36 +234,43 @@ impl PgSink {
         Ok(PgSink {
             settings,
             client: Mutex::new(None),
+            shared: None,
         })
     }
 
     async fn connect(&self) -> Result<Client, ConnectorError> {
-        let settings = &self.settings;
-        let mut config = Config::new();
-        config
-            .host(&settings.host)
-            .port(settings.port)
-            .dbname(&settings.database)
-            .user(&settings.user)
-            .application_name("mage-stream");
-        if let Some(password) = &settings.password {
-            config.password(password);
-        }
-        if let Some(seconds) = settings.connect_timeout {
-            config.connect_timeout(Duration::from_secs(seconds));
-        }
-        let (mode, connector) = tls_for(settings)?;
-        config.ssl_mode(mode);
-        let (client, connection) = config
-            .connect(connector)
-            .await
-            .map_err(|e| classify(&format!("connecting to {}", settings.label()), e))?;
-        tokio::spawn(async move {
-            let _ = connection.await;
-        });
-        Ok(client)
+        connect(&self.settings).await
     }
+}
 
+/// A connection with the settings' database and credentials.
+async fn connect(settings: &Settings) -> Result<Client, ConnectorError> {
+    let mut config = Config::new();
+    config
+        .host(&settings.host)
+        .port(settings.port)
+        .dbname(&settings.database)
+        .user(&settings.user)
+        .application_name("mage-stream");
+    if let Some(password) = &settings.password {
+        config.password(password);
+    }
+    if let Some(seconds) = settings.connect_timeout {
+        config.connect_timeout(Duration::from_secs(seconds));
+    }
+    let (mode, connector) = tls_for(settings)?;
+    config.ssl_mode(mode);
+    let (client, connection) = config
+        .connect(connector)
+        .await
+        .map_err(|e| classify(&format!("connecting to {}", settings.label()), e))?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
+}
+
+impl PgSink {
     /// The table's columns and their types, empty when it does not exist.
     async fn columns(
         client: &impl tokio_postgres::GenericClient,
@@ -279,11 +289,30 @@ impl PgSink {
         Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
     }
 
-    async fn write_batch(
-        &self,
-        client: &mut Client,
-        values: &[Vec<u8>],
-    ) -> Result<(), ConnectorError> {
+    /// A batch in its own transaction.
+    async fn write_batch(&self, client: &Client, values: &[Vec<u8>]) -> Result<(), ConnectorError> {
+        client
+            .batch_execute("BEGIN")
+            .await
+            .map_err(|e| classify("starting a transaction", e))?;
+        let written = self.write_rows(client, values).await;
+        let done = match written {
+            Ok(()) => client
+                .batch_execute("COMMIT")
+                .await
+                .map_err(|e| classify("committing", e)),
+            Err(error) => Err(error),
+        };
+        if done.is_err() {
+            // Nothing of the batch stays; a closed connection is replaced by the caller.
+            let _ = client.batch_execute("ROLLBACK").await;
+        }
+        done
+    }
+
+    /// A batch's rows, in the transaction open on `client` (the batch's own, or the stream's
+    /// with exactly-once delivery).
+    async fn write_rows(&self, client: &Client, values: &[Vec<u8>]) -> Result<(), ConnectorError> {
         let settings = &self.settings;
         // The messages' fields, their columns, and the types the values ask for.
         let mut keys: BTreeMap<String, String> = BTreeMap::new();
@@ -328,11 +357,7 @@ impl PgSink {
                 )));
             }
         }
-        let transaction = client
-            .transaction()
-            .await
-            .map_err(|e| classify("starting a transaction", e))?;
-        let mut columns = Self::columns(&transaction, settings).await?;
+        let mut columns = Self::columns(client, settings).await?;
         if columns.is_empty() {
             let definitions: Vec<String> = kinds
                 .iter()
@@ -364,7 +389,7 @@ impl PgSink {
                     )
                 }))
                 .collect();
-            transaction
+            client
                 .batch_execute(&format!(
                     "CREATE SCHEMA IF NOT EXISTS {}; CREATE TABLE IF NOT EXISTS {} ({})",
                     quote(&settings.schema),
@@ -373,7 +398,7 @@ impl PgSink {
                 ))
                 .await
                 .map_err(|e| classify(&format!("creating {}", settings.label()), e))?;
-            columns = Self::columns(&transaction, settings).await?;
+            columns = Self::columns(client, settings).await?;
         } else {
             let missing: Vec<String> = kinds
                 .iter()
@@ -387,7 +412,7 @@ impl PgSink {
                 })
                 .collect();
             if !missing.is_empty() {
-                transaction
+                client
                     .batch_execute(&format!(
                         "ALTER TABLE {} {}",
                         settings.full_table(),
@@ -395,7 +420,7 @@ impl PgSink {
                     ))
                     .await
                     .map_err(|e| classify("adding columns", e))?;
-                columns = Self::columns(&transaction, settings).await?;
+                columns = Self::columns(client, settings).await?;
             }
         }
         let names: Vec<&String> = keys.keys().collect();
@@ -404,12 +429,7 @@ impl PgSink {
             .map(|column| columns.get(*column).map_or("text", String::as_str))
             .collect();
         if !types.iter().any(|t| t.ends_with("[]")) {
-            self.copy_rows(&transaction, &names, &types, &keys, &rows)
-                .await?;
-            return transaction
-                .commit()
-                .await
-                .map_err(|e| classify("committing", e));
+            return self.copy_rows(client, &names, &types, &keys, &rows).await;
         }
         let expressions: Vec<String> = names
             .iter()
@@ -474,18 +494,14 @@ impl PgSink {
         }
         array.push(b']');
         let payload = String::from_utf8(array).expect("checked UTF-8 rows");
-        let statement = transaction
+        let statement = client
             .prepare_typed(&sql, &[Type::TEXT])
             .await
             .map_err(|e| classify(&format!("preparing the write to {}", settings.label()), e))?;
-        transaction
+        client
             .execute(&statement, &[&payload])
             .await
             .map_err(|e| classify(&format!("writing to {}", settings.label()), e))?;
-        transaction
-            .commit()
-            .await
-            .map_err(|e| classify("committing", e))?;
         Ok(())
     }
 }
@@ -495,7 +511,7 @@ impl PgSink {
     /// table with the last message of each key, as one by one.
     async fn copy_rows(
         &self,
-        transaction: &tokio_postgres::Transaction<'_>,
+        client: &Client,
         names: &[&String],
         types: &[&str],
         keys: &BTreeMap<String, String>,
@@ -534,7 +550,7 @@ impl PgSink {
                 target.join(", ")
             )
         } else {
-            transaction
+            client
                 .batch_execute(&format!(
                     "CREATE TEMP TABLE mage_stage (LIKE {}) ON COMMIT DROP; \
                      ALTER TABLE mage_stage ADD COLUMN \"__mage_row\" BIGINT",
@@ -547,7 +563,7 @@ impl PgSink {
                 target.join(", ")
             )
         };
-        let sink = transaction
+        let sink = client
             .copy_in::<_, bytes::Bytes>(copy.as_str())
             .await
             .map_err(|e| classify(&format!("writing to {}", settings.label()), e))?;
@@ -576,10 +592,11 @@ impl PgSink {
             format!("ON CONFLICT ({}) DO NOTHING", unique.join(", "))
         };
         // A key twice in one batch: the last message wins, as it would one by one.
-        transaction
+        client
             .batch_execute(&format!(
                 "INSERT INTO {table} ({cols}) SELECT {cols} FROM (SELECT DISTINCT ON ({keys}) * \
-                 FROM mage_stage ORDER BY {keys}, \"__mage_row\" DESC) AS d {conflict}",
+                 FROM mage_stage ORDER BY {keys}, \"__mage_row\" DESC) AS d {conflict}; \
+                 DROP TABLE mage_stage",
                 table = settings.full_table(),
                 cols = target.join(", "),
                 keys = unique.join(", "),
@@ -727,11 +744,14 @@ impl Sink for PgSink {
                 return Ok(());
             }
             let values: Vec<Vec<u8>> = rows.into_iter().map(|r| r.value).collect();
+            if let Some(shared) = &self.shared {
+                return shared.write(self, &values).await;
+            }
             let mut guard = self.client.lock().await;
             if guard.as_ref().is_none_or(|c| c.is_closed()) {
                 *guard = Some(self.connect().await?);
             }
-            let client = guard.as_mut().expect("connected");
+            let client = guard.as_ref().expect("connected");
             let result = self.write_batch(client, &values).await;
             if let Err(error) = &result
                 && error.retryable

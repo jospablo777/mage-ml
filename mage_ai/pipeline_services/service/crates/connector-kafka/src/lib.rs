@@ -25,12 +25,13 @@ use std::time::{Duration, Instant};
 use mage_stream_core::BatchId;
 use mage_stream_ports::{
     AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, Confirmation,
-    ConnectorError, Envelope, EnvelopeBuilder, Header, PartitionId, Position, RecordBatch, Sink,
-    SinkCapabilities, Source, SourceCapabilities, SourceEvent, Transaction, read_envelope,
+    ConnectorError, Envelope, EnvelopeBuilder, Header, PartitionId, Position, PositionNames,
+    RecordBatch, Sink, SinkCapabilities, Source, SourceCapabilities, SourceEvent, StartPositions,
+    Transaction, read_envelope,
 };
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, Rebalance};
+use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, Rebalance, RebalanceProtocol};
 use rdkafka::error::{KafkaError, KafkaResult, RDKafkaErrorCode};
 use rdkafka::message::{Header as KafkaHeader, Headers, Message, OwnedHeaders};
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer as _};
@@ -129,6 +130,7 @@ fn assign_from(
     consumer: &KafkaConsumer,
     table: &Mutex<Table>,
     offset: &Value,
+    starts: Option<&dyn StartPositions>,
 ) -> Result<Vec<(u32, AssignmentEpoch)>, ConnectorError> {
     let fatal = |message: &str| ConnectorError::fatal(format!("Kafka source offset: {message}"));
     let partitions: Vec<(String, i32)> = offset["partitions"]
@@ -170,6 +172,7 @@ fn assign_from(
             )));
         }
     };
+    let starts_kept = starts;
     let mut starts = TopicPartitionList::new();
     let mut by_time = TopicPartitionList::new();
     for element in committed.elements() {
@@ -206,6 +209,9 @@ fn assign_from(
                 .add_partition_offset(element.topic(), element.partition(), offset)
                 .map_err(connector_error)?;
         }
+    }
+    if let Some(kept) = starts_kept {
+        claim_starts(kept, &mut starts)?;
     }
     consumer.assign(&starts).map_err(connector_error)?;
     let mut table = table.lock().unwrap_or_else(|p| p.into_inner());
@@ -568,6 +574,8 @@ enum Polled {
     Confirmed,
     Event(SourceEvent),
     Error(KafkaError),
+    /// A failure that stops the stream, such as kept positions that could not be read.
+    Fatal(String),
 }
 
 /// A polled message and its value decoded for the blocks (Avro as JSON), or why it could
@@ -637,10 +645,51 @@ fn with_metadata(message: &rdkafka::message::OwnedMessage, data: &[u8]) -> Vec<u
     .into_bytes()
 }
 
+/// A partition's name where a database keeps its position (exactly-once into PostgreSQL):
+/// topic names have no `/`.
+pub fn partition_name(topic: &str, partition: i32) -> String {
+    format!("{topic}/{partition}")
+}
+
+/// Starts each listed partition at the position `kept` has for it; one it has none for
+/// starts as it would without (the group's committed offset, or `offset`).
+fn claim_starts(
+    kept: &dyn StartPositions,
+    list: &mut TopicPartitionList,
+) -> Result<(), ConnectorError> {
+    let partitions: Vec<(String, i32)> = list
+        .elements()
+        .iter()
+        .map(|e| (e.topic().to_string(), e.partition()))
+        .collect();
+    if partitions.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<String> = partitions
+        .iter()
+        .map(|(topic, partition)| partition_name(topic, *partition))
+        .collect();
+    let found = kept.claim(&names)?;
+    if found.len() != names.len() {
+        return Err(ConnectorError::fatal(
+            "Kafka: the kept positions do not match the partitions claimed",
+        ));
+    }
+    for ((topic, partition), next) in partitions.iter().zip(found) {
+        if let Some(next) = next {
+            list.set_partition_offset(topic, *partition, Offset::Offset(next))
+                .map_err(connector_error)?;
+        }
+    }
+    Ok(())
+}
+
 struct RebalanceContext {
     table: Arc<Mutex<Table>>,
     polled: mpsc::Sender<Polled>,
     stopped: Arc<AtomicBool>,
+    /// Exactly-once into a database: where assigned partitions start.
+    starts: Option<Arc<dyn StartPositions>>,
 }
 
 impl ClientContext for RebalanceContext {}
@@ -664,6 +713,68 @@ impl RebalanceContext {
 }
 
 impl ConsumerContext for RebalanceContext {
+    /// As rdkafka's own, besides one step: with kept positions (exactly-once into a
+    /// database), each assigned partition is claimed and starts where the database says,
+    /// before librdkafka starts fetching it. A claim that fails assigns nothing and stops the
+    /// stream: reading from the group's offsets would write those messages again.
+    fn rebalance(
+        &self,
+        consumer: &BaseConsumer<Self>,
+        err: rdkafka::types::RDKafkaRespErr,
+        tpl: &mut TopicPartitionList,
+    ) {
+        use rdkafka::types::RDKafkaRespErr;
+
+        let assign = err == RDKafkaRespErr::RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS;
+        let rebalance = match err {
+            RDKafkaRespErr::RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS => Rebalance::Assign(tpl),
+            RDKafkaRespErr::RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS => Rebalance::Revoke(tpl),
+            _ => Rebalance::Error(KafkaError::Rebalance(err.into())),
+        };
+        self.pre_rebalance(consumer, &rebalance);
+        if assign
+            && let Some(kept) = &self.starts
+            && let Err(error) = claim_starts(kept.as_ref(), tpl)
+        {
+            let _ = self.send(Polled::Fatal(format!(
+                "the stream's kept positions could not be read, so its partitions were not \
+                 started: {}",
+                error.message
+            )));
+            return;
+        }
+        let cooperative = matches!(
+            consumer.rebalance_protocol(),
+            RebalanceProtocol::Cooperative
+        );
+        let native = consumer.client().native_ptr();
+        // SAFETY: as rdkafka's default rebalance: the client and the list outlive the calls.
+        unsafe {
+            match (assign, cooperative) {
+                (true, true) => {
+                    rdkafka::bindings::rd_kafka_incremental_assign(native, tpl.ptr());
+                }
+                (true, false) => {
+                    rdkafka::bindings::rd_kafka_assign(native, tpl.ptr());
+                }
+                (false, true) => {
+                    rdkafka::bindings::rd_kafka_incremental_unassign(native, tpl.ptr());
+                }
+                (false, false) => {
+                    rdkafka::bindings::rd_kafka_assign(native, std::ptr::null());
+                }
+            }
+        }
+        let rebalance = if assign {
+            Rebalance::Assign(tpl)
+        } else if err == RDKafkaRespErr::RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS {
+            Rebalance::Revoke(tpl)
+        } else {
+            Rebalance::Error(KafkaError::Rebalance(err.into()))
+        };
+        self.post_rebalance(consumer, &rebalance);
+    }
+
     /// Runs on the poll thread before partitions go. The partitions keep their epochs while
     /// the stream finishes their batches in flight and commits them (I-34), so the next owner
     /// starts after them; after REVOKE_WITHIN they go anyway, and what was not done is read
@@ -1167,6 +1278,17 @@ impl KafkaSource {
         limits: BatchLimits,
         byte_budget: u64,
     ) -> Result<KafkaSource, ConnectorError> {
+        Self::with_start_positions(config, limits, byte_budget, None)
+    }
+
+    /// A source whose partitions start where `starts` says (exactly-once into a database,
+    /// which keeps the positions): each assigned partition is claimed there first.
+    pub fn with_start_positions(
+        config: &Value,
+        limits: BatchLimits,
+        byte_budget: u64,
+        starts: Option<Arc<dyn StartPositions>>,
+    ) -> Result<KafkaSource, ConnectorError> {
         let topics: Vec<String> = match (config.get("topics"), text(config, "topic")) {
             (Some(Value::Array(list)), _) if !list.is_empty() => list
                 .iter()
@@ -1214,6 +1336,7 @@ impl KafkaSource {
                 table: table.clone(),
                 polled: tx,
                 stopped: stop.clone(),
+                starts: starts.clone(),
             })
             .map_err(connector_error)?;
         let reading = Reading {
@@ -1226,7 +1349,7 @@ impl KafkaSource {
         let mut initial = std::collections::VecDeque::new();
         if let Some(offset) = config.get("offset").filter(|o| !o.is_null()) {
             // Mage's offset: the listed partitions, assigned without the group's rebalancing.
-            for (id, epoch) in assign_from(&consumer, &table, offset)? {
+            for (id, epoch) in assign_from(&consumer, &table, offset, starts.as_deref())? {
                 initial.push_back(SourceEvent::Assigned {
                     partition: PartitionId(id),
                     epoch,
@@ -1564,6 +1687,9 @@ impl Source for KafkaSource {
                     Ok(Some(Polled::Confirmed)) => {}
                     Ok(Some(Polled::Event(event))) => return Ok(self.handle(event)),
                     Ok(Some(Polled::Error(error))) => return Err(connector_error(error)),
+                    Ok(Some(Polled::Fatal(message))) => {
+                        return Err(ConnectorError::fatal(format!("Kafka: {message}")));
+                    }
                     Ok(None) => return Ok(SourceEvent::End),
                     Err(_) => {
                         return Ok(self.ready(true)?.unwrap_or(SourceEvent::Idle));
@@ -1747,6 +1873,56 @@ impl KafkaSource {
 }
 
 const TRANSACTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+impl KafkaSource {
+    /// Names the stream's commits for a database that keeps the positions (exactly-once
+    /// into PostgreSQL), and lets the source read on once they are committed.
+    pub fn position_names(&self) -> Arc<dyn PositionNames> {
+        Arc::new(KafkaPositions {
+            table: self.table.clone(),
+        })
+    }
+}
+
+struct KafkaPositions {
+    table: Arc<Mutex<Table>>,
+}
+
+impl PositionNames for KafkaPositions {
+    fn named(&self, commits: &[Commit]) -> Result<Vec<(String, i64)>, ConnectorError> {
+        let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+        commits
+            .iter()
+            .map(|commit| {
+                let Position::Offset(last) = commit.position else {
+                    return Err(ConnectorError::fatal("Kafka commits offsets"));
+                };
+                if table.epochs.get(&commit.partition.0) != Some(&commit.epoch) {
+                    return Err(ConnectorError::fatal(format!(
+                        "partition {} was reassigned before its transaction committed",
+                        commit.partition.0
+                    )));
+                }
+                let (topic, partition) = table
+                    .names
+                    .get(commit.partition.0 as usize)
+                    .ok_or_else(|| ConnectorError::fatal("Kafka: a partition without a name"))?;
+                Ok((partition_name(topic, *partition), last + 1))
+            })
+            .collect()
+    }
+
+    fn committed(&self, named: &[(String, i64)]) {
+        let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+        for (name, next) in named {
+            if let Some((topic, partition)) = name.rsplit_once('/')
+                && let Ok(partition) = partition.parse::<i32>()
+            {
+                table.confirm(topic, partition, *next);
+            }
+        }
+    }
+}
 
 /// The brokers settings reach, sorted: two connectors on one cluster have the same.
 pub fn cluster(config: &Value) -> Result<String, ConnectorError> {
@@ -2051,6 +2227,38 @@ mod tests {
         assert_eq!(table.unconfirmed(id), 300);
         table.confirm("orders", 0, 950);
         assert_eq!(table.unconfirmed(id), 0);
+    }
+
+    #[test]
+    fn kept_positions_start_their_partitions_and_others_start_as_before() {
+        struct Kept(std::sync::Mutex<Vec<String>>);
+        impl StartPositions for Kept {
+            fn claim(&self, partitions: &[String]) -> Result<Vec<Option<i64>>, ConnectorError> {
+                self.0.lock().unwrap().extend_from_slice(partitions);
+                Ok(partitions
+                    .iter()
+                    .map(|p| (p == "orders/1").then_some(42))
+                    .collect())
+            }
+        }
+        let kept = Kept(std::sync::Mutex::new(Vec::new()));
+        let mut list = TopicPartitionList::new();
+        list.add_partition("orders", 0);
+        list.add_partition("orders", 1);
+
+        claim_starts(&kept, &mut list).unwrap();
+
+        assert_eq!(*kept.0.lock().unwrap(), vec!["orders/0", "orders/1"]);
+        let offsets: Vec<Offset> = list.elements().iter().map(|e| e.offset()).collect();
+        assert_eq!(offsets, vec![Offset::Invalid, Offset::Offset(42)]);
+
+        struct Short;
+        impl StartPositions for Short {
+            fn claim(&self, _: &[String]) -> Result<Vec<Option<i64>>, ConnectorError> {
+                Ok(vec![])
+            }
+        }
+        assert!(claim_starts(&Short, &mut list).is_err());
     }
 
     #[test]

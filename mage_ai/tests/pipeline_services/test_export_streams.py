@@ -244,9 +244,30 @@ class ExactlyOnceExportTest(StreamExportTestCase):
 
         self.assertNotIn('delivery', pipeline['stream'])
 
-    def test_a_sink_that_is_not_kafka_or_an_unknown_delivery_is_refused(self):
+    def test_a_sink_that_is_not_kafka_or_postgres_is_refused(self):
         self.stream(source=SOURCE + '    delivery: exactly_once\n', sink=PRINT)
-        self.assertIn('is not Kafka', self.problems())
+        self.assertIn('needs every sink, dead letters included, to be Kafka', self.problems())
+
+    def test_kafka_to_postgres_exports_exactly_once(self):
+        self.stream(source=SOURCE + '    delivery: exactly_once\n', sink=self.POSTGRES)
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        [pipeline] = captured.manifest['pipelines']
+        self.assertEqual(pipeline['stream']['delivery'], 'exactly_once')
+        self.assertTrue(any('one PostgreSQL transaction' in note and 'mageml_stream_positions'
+                            in note for note in captured.notes), captured.notes)
+
+    POSTGRES = '''
+connector_type: postgres
+host: db
+port: 5432
+database: shop
+username: writer
+password: "{{ env_var('PG_PASSWORD') }}"
+schema: public
+table: scores
+'''
 
     def test_a_window_exports_exactly_once(self):
         source = self.add('source', 'data_loader', SOURCE + '    delivery: exactly_once\n',
