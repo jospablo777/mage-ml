@@ -82,7 +82,8 @@ class CliContractTest(unittest.TestCase):
             ['init', 'start', 'run', 'clean-cached-variables', 'clean-old-logs',
              'create-spark-cluster', 'contract-draft', 'contract-check', 'contract-compat',
              'run-diff', 'reproduce', 'reproduce-run', 'release-status', 'release-promote',
-             'release-rollback', 'monitor-status', 'monitor-silence', 'verify-fusion',
+             'release-rollback', 'monitor-status', 'monitor-silence', 'partitions',
+             'verify-fusion',
              'project-export', 'project-import', 'r',
              'rust', 'examples', 'export', 'service', 'data', 'workers', 'golden'],
         )
