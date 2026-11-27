@@ -310,6 +310,7 @@ async fn run_blocks(
                     cancel: cancel.clone(),
                     trace,
                     checkpoints: run_dir.join("checkpoints"),
+                    tables: Default::default(),
                 };
                 tasks.spawn(task.run());
             }
@@ -480,6 +481,8 @@ struct BlockTask {
     trace: Option<SpanContext>,
     /// The run's checkpoints folder: blocks keep progress there across their attempts.
     checkpoints: PathBuf,
+    /// The tables a SQL block's last attempt read and wrote, from the worker, for lineage.
+    tables: std::sync::Mutex<Option<Value>>,
 }
 
 /// An attempt's span, with the attributes every block attempt has.
@@ -544,18 +547,18 @@ impl BlockTask {
             }
             span.end();
             if let Some(lineage) = lineage {
+                let tables = self.tables.lock().unwrap_or_else(|p| p.into_inner()).take();
+                let dir = &self.output_dir;
                 match &ran {
                     Ok(Ran::Outputs(records)) => {
-                        lineage.finish(Outcome::Complete, None, records, &self.output_dir)
+                        lineage.finish(Outcome::Complete, None, records, dir, tables.as_ref())
                     }
-                    Ok(Ran::Skipped(_)) => {
-                        lineage.finish(Outcome::Complete, None, &[], &self.output_dir)
-                    }
+                    Ok(Ran::Skipped(_)) => lineage.finish(Outcome::Complete, None, &[], dir, None),
                     Err(_) if self.cancel.is_cancelled() => {
-                        lineage.finish(Outcome::Abort, None, &[], &self.output_dir)
+                        lineage.finish(Outcome::Abort, None, &[], dir, None)
                     }
                     Err(failure) => {
-                        lineage.finish(Outcome::Fail, Some(&failure.message), &[], &self.output_dir)
+                        lineage.finish(Outcome::Fail, Some(&failure.message), &[], dir, None)
                     }
                 }
             }
@@ -780,6 +783,9 @@ impl BlockTask {
             if let Some(reason) = reply.get("skipped").and_then(Value::as_str) {
                 return Ok(Ran::Skipped(reason.to_string()));
             }
+            if let Some(tables) = reply.get("datasets") {
+                *self.tables.lock().unwrap_or_else(|p| p.into_inner()) = Some(tables.clone());
+            }
             return Ok(Ran::Outputs(
                 reply
                     .get("outputs")
@@ -894,6 +900,8 @@ struct ChainBlockResult {
     planned: bool,
     /// Its outputs, when the chain keeps them (MAGE_SERVICE_KEEP_OUTPUTS).
     outputs: Vec<Value>,
+    /// The tables a SQL block read and wrote, for lineage.
+    tables: Option<Value>,
 }
 
 /// Whether a chain writes every block's outputs, for debugging; by default only the last
@@ -1457,7 +1465,8 @@ impl ChainTask {
                             .get(position)
                             .map_or(&[][..], |p| p.outputs.as_slice())
                     };
-                    attempt.finish(Outcome::Complete, None, outputs, &self.output_dir);
+                    let tables = parts.get(position).and_then(|p| p.tables.as_ref());
+                    attempt.finish(Outcome::Complete, None, outputs, &self.output_dir, tables);
                 }
                 Err((failure, block)) => {
                     let failed = block.as_deref() == Some(self.blocks[position].uuid.as_str())
@@ -1468,9 +1477,10 @@ impl ChainTask {
                             Some(&failure.message),
                             &[],
                             &self.output_dir,
+                            None,
                         );
                     } else {
-                        attempt.finish(Outcome::Abort, None, &[], &self.output_dir);
+                        attempt.finish(Outcome::Abort, None, &[], &self.output_dir, None);
                     }
                 }
             }
@@ -1541,6 +1551,7 @@ impl ChainTask {
                                 .and_then(Value::as_array)
                                 .cloned()
                                 .unwrap_or_default(),
+                            tables: b.get("datasets").cloned(),
                         })
                         .collect()
                 })
@@ -1672,6 +1683,8 @@ impl ChainTask {
                             seconds: b.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
                             planned: b.get("planned").and_then(Value::as_bool).unwrap_or(false),
                             outputs,
+                            // Rust blocks name no tables.
+                            tables: None,
                         })
                         .collect()
                 })

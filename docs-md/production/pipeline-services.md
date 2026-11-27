@@ -795,6 +795,11 @@ OPENLINEAGE_URL=http://marquez:5000
 | `<pipeline>`, one run per pipeline run (its run id) | START; COMPLETE, FAIL or ABORT (cancelled) | |
 | `<pipeline>.<block>`, one run per attempt, the pipeline run as its parent | START; COMPLETE, FAIL (with the error) or ABORT | Inputs: the upstream blocks' outputs. Output: the block's own, `<pipeline>.<block>`, with its columns when it is a frame |
 
+A SQL block's COMPLETE also names the database tables it read and wrote, as OpenLineage's
+naming spec does (`postgres://host:port` with `database.schema.table`, and likewise for
+MySQL, ClickHouse, Snowflake, BigQuery and DuckDB), from its query and its io_config
+profile, so a catalog joins the service's lineage with other tools' lineage of those tables.
+
 | Variable | |
 | --- | --- |
 | `OPENLINEAGE_URL` | The backend; events are posted to `OPENLINEAGE_ENDPOINT` under it |

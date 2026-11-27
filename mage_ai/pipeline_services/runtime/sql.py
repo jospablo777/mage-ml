@@ -898,3 +898,26 @@ def _execute_raw_sql_on_db2(loader, query: str, raw_content: str, configuration:
         fetch.append(full_name)
     results = loader.execute_queries(queries, commit=True, fetch_query_at_indexes=fetch)
     return [results[-1]] if results else []
+
+
+def datasets(block: Dict, variables: Dict, repo_path: str) -> Dict:
+    """
+    The tables the block reads and writes, as OpenLineage datasets named from its io_config
+    profile (orchestration/lineage_tables.py), for the engine's lineage events; empty when
+    they cannot be named.
+    """
+    from mage_ai.io.config import ConfigFileLoader
+    from mage_ai.orchestration.lineage_tables import datasets as table_datasets
+
+    configuration = block.get('configuration') or {}
+    try:
+        with open(block['file'], encoding='utf-8') as file:
+            query = file.read()
+        profile = render_strict(configuration.get('data_provider_profile'), variables)
+        loader = ConfigFileLoader(os.path.join(repo_path, 'io_config.yaml'), profile)
+        reads, writes = table_datasets(
+            configuration, loader, query, (block.get('sql') or {}).get('table_name'),
+        )
+    except Exception:
+        return {}
+    return dict(inputs=reads, outputs=writes) if reads or writes else {}

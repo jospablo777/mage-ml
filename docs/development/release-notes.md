@@ -22,7 +22,7 @@
   from the project and the run, and the columns of each block's stored output.
 - SQL blocks' lineage names the database tables they read and write, in OpenLineage's
   naming (PostgreSQL, MySQL, ClickHouse, Snowflake, BigQuery, DuckDB), from the query
-  (sqlglot) and the block's io_config profile.
+  (sqlglot) and the block's io_config profile, in MageML's runs and exported services.
 
 ### Traces
 

@@ -349,29 +349,42 @@ impl Attempt {
         }
     }
 
-    /// The attempt's end: its output's columns when it completed with a frame.
+    /// The attempt's end: its output's columns when it completed with a frame, and the
+    /// database tables a SQL block read and wrote (`tables`, from the worker: `inputs` and
+    /// `outputs` lists of datasets, named by orchestration/lineage_tables.py).
     pub fn finish(
         self,
         outcome: Outcome,
         error: Option<&str>,
         records: &[Value],
         output_dir: &Path,
+        tables: Option<&Value>,
     ) {
         let Some(lineage) = lineage() else {
             return;
         };
         let namespace = &lineage.config.namespace;
         let output = block_dataset(namespace, &self.pipeline, &self.block);
-        let outputs = match outcome {
+        let mut outputs = match outcome {
             Outcome::Complete => vec![with_schema(output, records, output_dir)],
             _ => vec![output],
         };
+        let mut inputs = self.inputs.clone();
+        let listed = |key: &str| {
+            tables
+                .and_then(|t| t.get(key))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        };
+        inputs.extend(listed("inputs"));
+        outputs.extend(listed("outputs"));
         lineage.emit(event(
             namespace,
             &self.job_run(),
             Some(outcome),
             error.map(|message| (message, self.language)),
-            self.inputs.clone(),
+            inputs,
             outputs,
         ));
     }

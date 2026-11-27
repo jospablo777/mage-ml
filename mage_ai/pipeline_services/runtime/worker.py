@@ -685,8 +685,22 @@ def run_block(request: Dict) -> Dict:
         if skipped or request.get('conditions_only'):
             return dict(outputs=[], tests=[], seconds=0, skipped=skipped)
     outputs, tests, seconds = execute_block(request, block, inputs)
-    return dict(outputs=_write_outputs(outputs, output_dir), tests=tests,
-                seconds=round(seconds, 6))
+    result = dict(outputs=_write_outputs(outputs, output_dir), tests=tests,
+                  seconds=round(seconds, 6))
+    found = _lineage_datasets(request, block)
+    if found:
+        result['datasets'] = found
+    return result
+
+
+def _lineage_datasets(request: Dict, block: Dict) -> Dict:
+    """The tables a SQL block read and wrote, for the engine's OpenLineage events."""
+    if block.get('language') != 'sql' or not os.environ.get('OPENLINEAGE_URL'):
+        return {}
+    from mage_ai.pipeline_services.runtime import sql
+
+    variables = {k: v for k, v in _kwargs(request, block).items() if k != 'logger'}
+    return sql.datasets(block, variables, os.environ.get('MAGE_REPO_PATH') or '.')
 
 
 def failed_condition(request: Dict, block: Dict, inputs: List) -> Optional[str]:
@@ -824,6 +838,9 @@ def run_chain(request: Dict) -> Dict:
             raise
         tests.extend(dict(t, name=f"{block['uuid']}: {t['name']}") for t in block_tests)
         timing = dict(block_uuid=block['uuid'], seconds=round(seconds, 6))
+        found = _lineage_datasets(request, block)
+        if found:
+            timing['datasets'] = found
         if request.get('keep_outputs') and position + 1 < len(blocks):
             # Every block's outputs, for debugging (MAGE_SERVICE_KEEP_OUTPUTS=on).
             timing['outputs'] = _write_outputs(

@@ -139,3 +139,60 @@ def test_a_runs_lineage_follows_the_openlineage_spec(mage_project, tmp_path, mon
     # The run's events come first and last.
     assert events[0]['job']['name'] == 'lineage_orders'
     assert events[-1]['job']['name'] == 'lineage_orders'
+
+
+def test_a_sql_blocks_tables_are_named_as_openlineage_names_them(
+    mage_project, tmp_path, monkeypatch,
+):
+    import duckdb
+
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    database = tmp_path / 'shop.duckdb'
+    with duckdb.connect(str(database)) as connection:
+        connection.execute(
+            "CREATE TABLE customers AS SELECT * FROM (VALUES (1, 'north'), (2, 'south')) "
+            't(id, region)'
+        )
+    pipeline = Pipeline.create('lineage_tables', repo_path=mage_project)
+    load = Block.create('lineage_tables_load', 'data_loader', mage_project, language='python')
+    Path(load.file_path).write_text(textwrap.dedent('''
+        import pandas as pd
+
+        @data_loader
+        def load(*args, **kwargs):
+            return pd.DataFrame({'id': [1, 2], 'amount': [10.5, 2.0]})
+    '''))
+    pipeline.add_block(load)
+    regions = Block.create(
+        'lineage_tables_regions', 'transformer', mage_project, language='sql',
+        configuration=dict(data_provider='duckdb', data_provider_profile='duckdb',
+                           data_provider_table='orders_regions'),
+    )
+    Path(regions.file_path).write_text(
+        'SELECT o.id, o.amount, c.region FROM {{ df_1 }} o JOIN customers c ON c.id = o.id')
+    pipeline.add_block(regions, upstream_block_uuids=[load.uuid])
+    backend = Backend()
+    try:
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        monkeypatch.setenv('OPENLINEAGE_URL', backend.url)
+        monkeypatch.setenv('MAGE_TEST_DUCKDB_DATABASE', str(database))
+
+        run_service(directory, pipeline.uuid, tmp_path)
+    finally:
+        pipeline.delete()
+        backend.server.shutdown()
+
+    schemas = registry()
+    events = [event for _, _, event in backend.events]
+    for event in events:
+        validate(event, schemas)
+    [done] = [e for e in events if e['eventType'] == 'COMPLETE'
+              and e['job']['name'] == 'lineage_tables.lineage_tables_regions']
+    namespace = f'duckdb://{database}'
+    assert dict(namespace=namespace, name='main.customers') in done['inputs']
+    assert dict(namespace=namespace, name='main.orders_regions') in done['outputs']
+    # Its upstream block is MageML's dataset, not a table.
+    names = [d['name'] for d in done['inputs']]
+    assert 'lineage_tables.lineage_tables_load' in names

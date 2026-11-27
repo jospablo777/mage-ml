@@ -2,7 +2,8 @@
 The Python worker (pipeline_services/runtime/worker.py) runs blocks in named Python
 workers, whose environments pin their own packages (pandas 2 for Feast, for example).
 It must not load MageML there (I-19): it imports MageML only in the SQL and R runners,
-whose blocks always run in the base environment, and in execute_block for the audit
+whose blocks always run in the base environment (and in _lineage_datasets for a
+SQL block's lineage), and in execute_block for the audit
 context of models.predict, which needs only the standard library.
 """
 import ast
@@ -17,6 +18,8 @@ MODELS = PIPELINE_SERVICES / 'models.py'
 ALLOWED = {
     ('run_sql_block', 'mage_ai.pipeline_services.runtime'),
     ('execute_block', 'mage_ai.pipeline_services'),
+    # The tables a SQL block read and wrote, for lineage: only for SQL blocks.
+    ('_lineage_datasets', 'mage_ai.pipeline_services.runtime'),
 }
 
 

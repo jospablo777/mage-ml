@@ -156,16 +156,31 @@ def sql_datasets(block) -> Tuple[List[Dict], List[Dict]]:
     if str(getattr(block.language, 'value', block.language)) != 'sql':
         return [], []
     configuration = block.configuration or {}
-    provider = configuration.get('data_provider')
-    if provider not in DIALECTS:
+    if configuration.get('data_provider') not in DIALECTS:
         return [], []
     try:
         loader = ConfigFileLoader(
             os.path.join(block.repo_path, 'io_config.yaml'),
             configuration.get('data_provider_profile') or 'default',
         )
-        named = _namespace(provider, loader)
         query = block.content or ''
+        table = block.table_name
+    except Exception:
+        return [], []
+    return datasets(configuration, loader, query, table)
+
+
+def datasets(configuration: Dict, loader, query: str, table: str) -> Tuple[List[Dict], List[Dict]]:
+    """
+    The tables a SQL block with this configuration and query reads and writes, named from
+    its io_config profile (`loader`, a ConfigFileLoader); `table` is the block's output table.
+    Exported services' SQL runner calls it too.
+    """
+    provider = configuration.get('data_provider')
+    if provider not in DIALECTS:
+        return [], []
+    try:
+        named = _namespace(provider, loader)
     except Exception:
         return [], []
     if named is None:
@@ -178,9 +193,9 @@ def sql_datasets(block) -> Tuple[List[Dict], List[Dict]]:
     reads, writes = tables(query, provider)
     if not configuration.get('use_raw_sql'):
         # Mage writes the block's output as its table.
-        writes = [[None, None, block.table_name]]
+        writes = [[None, None, table]]
 
-    def datasets(items):
+    def named_datasets(items):
         found = []
         for parts in items:
             name = _name(provider, parts, defaults)
@@ -188,4 +203,4 @@ def sql_datasets(block) -> Tuple[List[Dict], List[Dict]]:
                 found.append(dict(namespace=namespace, name=name))
         return found
 
-    return datasets(reads), datasets(writes)
+    return named_datasets(reads), named_datasets(writes)

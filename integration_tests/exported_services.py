@@ -39,6 +39,9 @@ def stream_service_binary(release: bool = False) -> Path:
     The engine with every stream connector; release builds for benchmarks and timing tests.
     MAGE_TEST_STREAM_RELEASE=1 (CI) makes every test use the release build, built once.
     """
+    # A given engine build, such as one made with profile-guided optimization, to measure.
+    if os.getenv('MAGE_TEST_SERVICE_BINARY'):
+        return Path(os.environ['MAGE_TEST_SERVICE_BINARY'])
     release = release or os.getenv('MAGE_TEST_STREAM_RELEASE') == '1'
     command = ['cargo', 'build', '-q', '-p', 'mage-service', '--features', STREAM_FEATURES]
     subprocess.run(
