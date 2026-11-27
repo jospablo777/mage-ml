@@ -1680,6 +1680,11 @@ mod tests {
         let admin = plain_client(&Settings::new(&config).unwrap(), "test")
             .await
             .unwrap();
+        let wal_level: String = admin.query_one("SHOW wal_level", &[]).await.unwrap().get(0);
+        if wal_level != "logical" {
+            eprintln!("the test server's wal_level is {wal_level}, not logical: skipped");
+            return;
+        }
         admin
             .batch_execute(&format!(
                 "DROP TABLE IF EXISTS {table}; \
