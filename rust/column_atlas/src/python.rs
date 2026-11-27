@@ -143,6 +143,20 @@ fn compare_profiles(
     json(&result)
 }
 
+/// Two outputs of a block compared (change previews): schema, then rows by key (JSON).
+#[pyfunction]
+fn diff_outputs(
+    py: Python<'_>,
+    baseline: String,
+    candidate: String,
+    request: String,
+) -> PyResult<String> {
+    let result = py
+        .detach(|| crate::diff::diff(&baseline, &candidate, &request))
+        .map_err(to_python)?;
+    json(&result)
+}
+
 /// One rolling baseline record (JSON) from earlier runs' records.
 #[pyfunction]
 fn merge_monitor_records(records: String) -> PyResult<String> {
@@ -379,6 +393,7 @@ fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(contract_compatibility, module)?)?;
     module.add_function(wrap_pyfunction!(profile_columns, module)?)?;
     module.add_function(wrap_pyfunction!(compare_profiles, module)?)?;
+    module.add_function(wrap_pyfunction!(diff_outputs, module)?)?;
     module.add_function(wrap_pyfunction!(merge_monitor_records, module)?)?;
     module.add_function(wrap_pyfunction!(monitor_performance, module)?)?;
     module.add_function(wrap_pyfunction!(mask_table, module)?)?;

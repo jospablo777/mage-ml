@@ -781,6 +781,24 @@
     },
     "type": "object"
    },
+   "ChangePreview": {
+    "properties": {
+     "baseline_partition": {},
+     "baseline_run_id": {},
+     "blocks": {},
+     "changed_files": {},
+     "created_at": {},
+     "created_by": {},
+     "error": {},
+     "finished_at": {},
+     "id": {},
+     "keys": {},
+     "pipeline_uuid": {},
+     "started_at": {},
+     "state": {}
+    },
+    "type": "object"
+   },
    "ClientPage": {
     "properties": {
      "category": {
@@ -7249,6 +7267,112 @@
      "cache_items"
     ]
    }
+  },
+  "/api/change_previews": {
+   "get": {
+    "operationId": "list_change_previews",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "change_previews": {
+           "items": {
+            "$ref": "#/components/schemas/ChangePreview"
+           },
+           "type": "array"
+          },
+          "metadata": {
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "list change_previews",
+    "tags": [
+     "change_previews"
+    ]
+   },
+   "post": {
+    "operationId": "create_change_previews",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "change_preview": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "change_preview": {
+           "$ref": "#/components/schemas/ChangePreview"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create change_previews",
+    "tags": [
+     "change_previews"
+    ]
+   }
+  },
+  "/api/change_previews/{id}": {
+   "get": {
+    "operationId": "detail_change_previews",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "change_preview": {
+           "$ref": "#/components/schemas/ChangePreview"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail change_previews",
+    "tags": [
+     "change_previews"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
   },
   "/api/client_pages": {
    "get": {
@@ -21621,6 +21745,14 @@
    ],
    "schema": "CacheItem"
   },
+  "change_previews": {
+   "operations": [
+    "list",
+    "create",
+    "detail"
+   ],
+   "schema": "ChangePreview"
+  },
   "client_pages": {
    "operations": [
     "list",
@@ -22454,6 +22586,7 @@
   "block_layout_items": "no list or detail reached",
   "block_outputs": "no list or detail reached",
   "cache_items": "no list or detail reached",
+  "change_previews": "get /api/change_previews: error 404: The pipeline does not exist.",
   "clusters": "not called: lists EMR, Kubernetes or ECS clusters",
   "code_executions": "no list or detail reached",
   "column_atlas_queries": "no list or detail reached",

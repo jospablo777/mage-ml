@@ -4,6 +4,7 @@ import {
   CalendarDate,
   Code,
   DocumentIcon,
+  Insights,
   Lightning,
   Logs,
   Monitor,
@@ -40,6 +41,16 @@ export function buildNavigationItems(
       linkProps: {
         as: `/pipelines/${pipelineUUID}/runs`,
         href: '/pipelines/[pipeline]/runs',
+      },
+    },
+    {
+      Icon: Insights,
+      id: PageNameEnum.PREVIEWS,
+      isSelected: () => PageNameEnum.PREVIEWS === pageName,
+      label: () => 'Change previews',
+      linkProps: {
+        as: `/pipelines/${pipelineUUID}/previews`,
+        href: '/pipelines/[pipeline]/previews',
       },
     },
     {

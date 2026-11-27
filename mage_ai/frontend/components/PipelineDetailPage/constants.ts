@@ -8,6 +8,7 @@ export enum PageNameEnum {
   PARTITIONS = 'partitions',
   PIPELINE_LOGS = 'pipeline_logs',
   PIPELINE_RUNS = 'pipeline_runs',
+  PREVIEWS = 'previews',
   RUNS = 'runs',
   SETTINGS = 'settings',
   SYNCS = 'syncs',

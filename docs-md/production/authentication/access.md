@@ -30,6 +30,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `blocks` | Viewer | Viewer | Editor * | Editor * | Editor * |
 | `browser_items` | Viewer | Viewer | Editor * | Editor * | Editor * |
 | `cache_items` | Viewer | Viewer | No one | Viewer | No one |
+| `change_previews` | Viewer | Viewer | Editor | No one | No one |
 | `client_pages` | Viewer | Viewer | Viewer | Viewer | No one |
 | `clusters` | No one | Viewer | No one | Editor | No one |
 | `code_executions` | No one | No one | Editor * | No one | No one |

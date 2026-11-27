@@ -491,6 +491,7 @@
               "guides/pipelines/pipeline-environments",
               "guides/pipelines/python-workers",
               "guides/pipelines/run-records",
+              "guides/pipelines/change-previews",
               "guides/pipelines/experiments",
               "guides/pipelines/model-releases",
               "guides/pipelines/model-inference",

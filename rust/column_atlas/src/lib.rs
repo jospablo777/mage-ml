@@ -3,6 +3,7 @@
 //! sources and hands this crate a local file path.
 
 pub mod contract;
+pub mod diff;
 pub mod engine;
 pub mod error;
 pub mod format;

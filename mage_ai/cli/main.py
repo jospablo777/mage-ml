@@ -885,6 +885,53 @@ def partitions_command(
         typer.echo(f'  {row["partition"]}  {row["state"]}{run_id}' + (f'  ({why})' if why else ''))
 
 
+PREVIEW_KEYS_DEFAULT = typer.Option(
+    [], '--key', help='a block\'s key columns, as block=column,column; repeatable.',
+)
+
+
+@app.command('preview')
+def preview_change(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    run_id: Union[int, None] = typer.Option(
+        None, '--run', help='the completed run to compare with; the latest by default.',
+    ),
+    key: List[str] = PREVIEW_KEYS_DEFAULT,
+    as_json: bool = typer.Option(False, '--json', help='print the preview as JSON.'),
+):
+    """
+    Preview what the pipeline's current code does to its data: the blocks that changed
+    since a completed run, and those after them, run again on that run's stored inputs, and
+    their outputs are compared with the run's (rows added, removed and changed by key).
+    Exporters, sensors and SQL blocks never run, so nothing reaches a destination.
+    """
+    from mage_ai.orchestration import previews
+
+    project_path = os.path.abspath(project_path)
+    pipeline = _run_records_setup(project_path, pipeline_uuid)
+    keys = {}
+    for text in key:
+        block, _, columns = text.partition('=')
+        if not block or not columns:
+            print(f'[red]--key {text}: use block=column,column.[/red]')
+            raise typer.Exit(code=2)
+        keys[block] = [c.strip() for c in columns.split(',') if c.strip()]
+    baseline = _pipeline_run(pipeline, run_id) if run_id is not None else None
+    try:
+        created = previews.create(pipeline, baseline, keys)
+    except previews.PreviewError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    result = previews.run(pipeline, created['id'], log=lambda line: typer.echo(line, err=True))
+    if as_json:
+        typer.echo(json.dumps(result, indent=2, default=str))
+    else:
+        typer.echo(previews.format_preview(result))
+    if result['state'] != 'done' or any(b['status'] == 'failed' for b in result['blocks']):
+        raise typer.Exit(code=1)
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the MageML project.'),

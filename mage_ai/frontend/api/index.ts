@@ -61,6 +61,7 @@ export const DATA_CONTRACTS: 'data_contracts' = 'data_contracts';
 export const FUSION_VERIFICATIONS: 'fusion_verifications' = 'fusion_verifications';
 export const PIPELINE_COMPILATIONS: 'pipeline_compilations' = 'pipeline_compilations';
 export const PIPELINE_PARTITIONS: 'pipeline_partitions' = 'pipeline_partitions';
+export const CHANGE_PREVIEWS: 'change_previews' = 'change_previews';
 export const PIPELINE_DOCUMENTATIONS: 'pipeline_documentations' = 'pipeline_documentations';
 export const PIPELINE_DEPENDENCIES: 'pipeline_dependencies' = 'pipeline_dependencies';
 export const AUDIT_EVENTS: 'audit_events' = 'audit_events';
@@ -190,6 +191,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [FUSION_VERIFICATIONS],
   [PIPELINE_COMPILATIONS],
   [PIPELINE_PARTITIONS],
+  [CHANGE_PREVIEWS],
   [PIPELINE_DOCUMENTATIONS],
   [PIPELINE_DEPENDENCIES],
   [AUDIT_EVENTS],
