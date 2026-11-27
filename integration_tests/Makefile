@@ -221,7 +221,12 @@ test-duckdb:
 WARM_TESTS ?= \
 	'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' \
 	'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'
+# WARM_PROJECTS: projects whose Rust blocks are built first, every one of them (mage rust
+# build), so a test of one never compiles it within its time limit (I-561).
 warm-rust:
+	cd .. && for project in $(WARM_PROJECTS); do \
+		$(PYTHON) -m mage_ai.cli.main rust build $$project || exit 1; \
+	done
 	cd .. && $(PYTHON) -m pytest -p no:cacheprovider -q $(WARM_TESTS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.

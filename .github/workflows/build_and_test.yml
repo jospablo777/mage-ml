@@ -325,7 +325,10 @@ jobs:
             # warmed here so the SQL group finds it built. The playground's Rust pipelines
             # build against its own Cargo.lock, so they are warmed too: built inside their
             # tests, two of them at once ran past the 900 s limit (I-538, I-543).
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[rust_session_scores]' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[rust_postgres_margins]' 'integration_tests/playground/test_golden.py::test_the_pipeline_matches_its_golden_run[shape_diamond_store_scorecard]'"
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks'"
+            # Every Rust block of the playground, built once: its golden tests built them
+            # inside the tests and ran past 900 s, one pipeline after another (I-543, I-561).
+            warm_projects: playground/shop_lab
           - id: study
             name: "MageML: pipeline shape study"
             # PostgreSQL only for the Rust warm-up's exported-service build.
@@ -563,7 +566,7 @@ jobs:
           restore-keys: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-
       - name: Build Polars and the Rust block SDK
         if: matrix.warm != ''
-        run: make -C integration_tests warm-rust WARM_TESTS="${{ matrix.warm }}"
+        run: make -C integration_tests warm-rust WARM_TESTS="${{ matrix.warm }}" WARM_PROJECTS="${{ matrix.warm_projects }}"
       # The groups warm the same builds; one of them saves the shared cache.
       - name: Save the Rust blocks' build directory
         if: matrix.id == 'pipelines' && steps.rust-blocks.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
