@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation } from 'react-query';
 import styled from 'styled-components';
 
@@ -87,6 +87,9 @@ type RunRecordType = {
   code?: { digest: string; files: number; truncated: boolean };
   code_changed_between_starts?: boolean;
   comparison?: ComparisonType;
+  // A failed run: the latest run of the pipeline (of the same partition) that completed
+  // before it, which the panel compares with first.
+  last_completed?: number;
   comparison_error?: string;
   experiments?: {
     [blockUUID: string]: { runs: MlflowRunType[]; tracking_uri?: string };
@@ -236,6 +239,13 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
   );
   const record: RunRecordType = data?.run_record;
   const reproduction = record?.reproduction;
+  // A failed run is compared with the last run that completed: what changed since it worked.
+  useEffect(() => {
+    if (record?.last_completed && compareWith === null && !compareInput) {
+      setCompareInput(String(record.last_completed));
+      setCompareWith(String(record.last_completed));
+    }
+  }, [compareInput, compareWith, record?.last_completed]);
   const running = reproduction?.status === 'running';
 
   const [approved, setApproved] = useState<{ [key: string]: string }>({});
@@ -443,6 +453,13 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
           )}
 
           <Spacing mt={2}>
+            {record.last_completed && compareWith === String(record.last_completed) && (
+              <Spacing mb={1}>
+                <Text bold>
+                  What changed since run {record.last_completed}, the last that completed
+                </Text>
+              </Spacing>
+            )}
             <FlexContainer alignItems="center">
               <TextInput
                 compact

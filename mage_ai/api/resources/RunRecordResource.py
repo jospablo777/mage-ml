@@ -101,6 +101,22 @@ def _reproduction(reproduction: Optional[_Reproduction]) -> Optional[Dict]:
     )
 
 
+def _last_completed(run) -> Optional[int]:
+    """The id of the pipeline's latest run that completed before this one, of the same
+    partition for a partition's run; None when none did."""
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+    query = PipelineRun.query.with_entities(PipelineRun.id).filter(
+        PipelineRun.pipeline_uuid == run.pipeline_uuid,
+        PipelineRun.status == PipelineRun.PipelineRunStatus.COMPLETED,
+        PipelineRun.id < run.id,
+    )
+    if getattr(run, 'partition', None):
+        query = query.filter(PipelineRun.partition == run.partition)
+    found = query.order_by(PipelineRun.id.desc()).first()
+    return found.id if found else None
+
+
 class RunRecordResource(GenericResource):
     """
     The run record of a pipeline run (orchestration/run_records.py):
@@ -168,6 +184,9 @@ class RunRecordResource(GenericResource):
                 git=latest.get('git'),
                 variables=latest['variables']['names'],
             )
+        if str(run.status) in ('failed', 'cancelled'):
+            # What changed since it last worked: the page compares with this run first.
+            model['last_completed'] = _last_completed(run)
         query = kwargs.get('query') or {}
         compare_with = query.get('compare_with')
         if isinstance(compare_with, list):

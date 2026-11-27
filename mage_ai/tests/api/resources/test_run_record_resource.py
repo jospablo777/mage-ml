@@ -126,3 +126,31 @@ class RunRecordResourceTest(AsyncDBTestCase):
 
         self.assertFalse(Path(first.directory).exists())
         self.assertTrue(Path(second.directory, 'report.json').exists())
+
+
+class LastCompletedTest(AsyncDBTestCase):
+    """A failed run is compared with the last run that completed before it."""
+
+    def test_the_latest_completed_run_before_it_of_its_partition(self):
+        from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+        Status = PipelineRun.PipelineRunStatus
+        pipeline = Pipeline.create('last_completed_p', repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+
+        def run(status, partition=None):
+            return PipelineRun.create(pipeline_uuid=pipeline.uuid, status=status,
+                                      partition=partition)
+
+        first = run(Status.COMPLETED)
+        run(Status.FAILED)
+        eu = run(Status.COMPLETED, partition='eu')
+        failed = run(Status.FAILED)
+        run(Status.COMPLETED)  # after it: not what it is compared with
+        failed_eu = run(Status.FAILED, partition='eu')
+        failed_us = run(Status.FAILED, partition='us')
+
+        self.assertEqual(resource_module._last_completed(failed), eu.id)
+        self.assertEqual(resource_module._last_completed(failed_eu), eu.id)
+        self.assertIsNone(resource_module._last_completed(failed_us))
+        self.assertEqual(resource_module._last_completed(first), None)
