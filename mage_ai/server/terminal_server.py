@@ -1,7 +1,11 @@
 import asyncio
+import codecs
 import json
 import os
 import re
+import struct
+import sys
+from collections import deque
 
 import terminado
 from tornado.websocket import WebSocketClosedError
@@ -32,6 +36,83 @@ class AsyncSpawnMixin:
         return term
 
 
+# Run by a new interpreter on the pty: it makes the pty its controlling terminal (job
+# control, Ctrl-C) and becomes the shell.
+_SHELL_START = '''
+import fcntl, os, sys, termios
+try:
+    if sys.argv[1]:
+        os.chdir(sys.argv[1])
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    os.execvpe(sys.argv[2], sys.argv[2:], os.environ)
+except OSError as error:
+    print(f'The terminal could not start {sys.argv[2]}: {error}', file=sys.stderr)
+    sys.exit(127)
+'''
+
+
+def spawn_pty(argv, env=None, cwd=None, dimensions=(24, 80)):
+    """
+    Starts a shell on a new pty without forking the server. ptyprocess forks it and runs
+    Python in the copy, which on Python 3.14 clears the other threads' objects there: on
+    macOS, finalizing a thread's SQLite statements in the copy crashed it (I-555). Here
+    the server opens the pty and posix_spawn starts a new interpreter on it, which runs
+    no code of the server's and becomes the shell.
+    """
+    import fcntl
+    import termios
+
+    from ptyprocess import PtyProcessUnicode
+
+    master, replica = os.openpty()
+    try:
+        rows, cols = dimensions
+        fcntl.ioctl(replica, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+        pid = os.posix_spawn(
+            sys.executable,
+            [sys.executable, '-I', '-S', '-c', _SHELL_START, cwd or '', *argv],
+            dict(env or os.environ),
+            file_actions=[(os.POSIX_SPAWN_DUP2, replica, fd) for fd in (0, 1, 2)],
+            setsid=True,
+        )
+    except BaseException:
+        os.close(master)
+        raise
+    finally:
+        os.close(replica)
+    process = PtyProcessUnicode(pid, master)
+    process.argv = argv
+    process.env = env
+    process.launch_dir = cwd
+    return process
+
+
+class SpawnedPty(terminado.management.PtyWithClients):
+    """terminado's terminal, with its shell started by spawn_pty."""
+
+    def __init__(self, argv, env=None, cwd=None):
+        self.clients = []
+        self.read_buffer = deque([], maxlen=1000)
+        self.ptyproc = spawn_pty(argv, env, cwd)
+        # The output might not be strict UTF-8, as terminado allows.
+        self.ptyproc.decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+
+
+class SpawnedShellMixin:
+    """Terminals whose shells start with spawn_pty."""
+
+    def new_terminal(self, **kwargs):
+        if not hasattr(os, 'posix_spawn'):
+            # Windows: terminado starts the shell with pywinpty, which does not fork.
+            return super().new_terminal(**kwargs)
+        options = self.term_settings.copy()
+        options['shell_command'] = self.shell_command
+        options.update(kwargs)
+        return SpawnedPty(
+            options['shell_command'], self.make_term_env(**options), options.get('cwd'),
+        )
+
+
 def _alive(term) -> bool:
     """Whether a terminal's shell still runs and its pty is open."""
     process = getattr(term, 'ptyproc', None)
@@ -43,7 +124,7 @@ def _alive(term) -> bool:
         return False
 
 
-class MageTermManager(AsyncSpawnMixin, terminado.NamedTermManager):
+class MageTermManager(SpawnedShellMixin, AsyncSpawnMixin, terminado.NamedTermManager):
     def _live(self, term_name: str):
         """The named terminal while its shell runs; a dead one is dropped, so the next
         connection gets a new shell instead of a pty that refuses every write."""
@@ -90,7 +171,7 @@ class MageTermManager(AsyncSpawnMixin, terminado.NamedTermManager):
         return term
 
 
-class MageUniqueTermManager(AsyncSpawnMixin, terminado.UniqueTermManager):
+class MageUniqueTermManager(SpawnedShellMixin, AsyncSpawnMixin, terminado.UniqueTermManager):
     async def get_terminal_async(self, term_name: str = None, **kwargs):
         if self.max_terminals and len(self.ptys_by_fd) >= self.max_terminals:
             raise terminado.management.MaxTerminalsReached(self.max_terminals)

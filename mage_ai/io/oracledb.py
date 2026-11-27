@@ -244,7 +244,7 @@ FETCH FIRST {limit} ROWS ONLY
 
             # Remove extraneous surrounding double quotes
             # that get added while performing conversion to string.
-            df_[col] = df_[col].apply(lambda x: x.strip('"') if x and isinstance(x, str) else x)
+            df_[col] = df_[col].apply(lambda x: x.strip('"') if isinstance(x, str) and x else x)
         # Missing values bind as NULL. fillna('') raised in float and Int64 columns under
         # pandas 3.
         values = list(missing_as_none(df_).itertuples(index=False, name=None))

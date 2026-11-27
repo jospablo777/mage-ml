@@ -14,9 +14,15 @@ class WorkloadManagerTests(TestCase):
         self.mock_core_client = MagicMock()
         self.mock_apps_client = MagicMock()
         self.mock_networking_client = MagicMock()
-        client.CoreV1Api = MagicMock(return_value=self.mock_core_client)
-        client.AppsV1Api = MagicMock(return_value=self.mock_apps_client)
-        client.NetworkingV1Api = MagicMock(return_value=self.mock_networking_client)
+        # Patched for each test: set on the module, the mocks stayed for every later test.
+        for name, mock in (
+            ('CoreV1Api', self.mock_core_client),
+            ('AppsV1Api', self.mock_apps_client),
+            ('NetworkingV1Api', self.mock_networking_client),
+        ):
+            patcher = patch.object(client, name, MagicMock(return_value=mock))
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
         self.workload_manager = WorkloadManager()
 
@@ -125,7 +131,6 @@ def wrong_function_name(config):
         mock_ingress.spec.rules[0].http.paths = [mock_path]
         self.mock_networking_client.read_namespaced_ingress.return_value = mock_ingress
 
-        client.NetworkingV1Api = MagicMock(return_value=self.mock_networking_client)
         mock_workload_manager = WorkloadManager()
 
         # Call the function
@@ -145,23 +150,26 @@ def wrong_function_name(config):
         ingress_name = 'example-ingress'
         name = 'example'
 
-        # Create a mock Ingress object
-        mock_ingress = MagicMock()
-        mock_path1 = MagicMock()
-        mock_path1.backend.service.name = f'{name}-service'
-        mock_path1.path = '/example-name'
-        mock_path2 = MagicMock()
-        mock_path2.backend.service.name = 'other-service'
-        mock_path2.path = '/other'
-        mock_ingress.spec.rules = [
-            MagicMock(
-                host="example-host", http=MagicMock(paths=[mock_path1, mock_path2])
+        # The ingress as the API returns it: kubernetes 37 models validate their fields, so
+        # paths are real paths, not mocks.
+        def path(service, url):
+            return client.V1HTTPIngressPath(
+                path=url,
+                path_type='Prefix',
+                backend=client.V1IngressBackend(service=client.V1IngressServiceBackend(
+                    name=service, port=client.V1ServiceBackendPort(number=6789),
+                )),
             )
-        ]
+
+        mock_ingress = client.V1Ingress(spec=client.V1IngressSpec(rules=[client.V1IngressRule(
+            host='example-host',
+            http=client.V1HTTPIngressRuleValue(paths=[
+                path(f'{name}-service', '/example-name'), path('other-service', '/other'),
+            ]),
+        )]))
 
         self.mock_networking_client.read_namespaced_ingress.return_value = mock_ingress
 
-        client.NetworkingV1Api = MagicMock(return_value=self.mock_networking_client)
         mock_workload_manager = WorkloadManager()
 
         # Call the function

@@ -9,7 +9,8 @@ from mage_ai.tests.data_cleaner.transformer_actions.shared import TEST_ACTION
 
 def build_df():
     return pd.DataFrame([
-        [2, False, 5.0],
+        # Every row has its index: pandas 3.1 deprecates padding a short one.
+        [2, False, 5.0, 0],
         ['$3', False, '$6.0', 1],
         ['$4,000', None, '$7,000', 200],
         ['$3', False, '$4.0', 3],

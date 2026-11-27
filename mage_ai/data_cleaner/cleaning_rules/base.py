@@ -15,15 +15,12 @@ class BaseRule:
         self.custom_config = custom_config
 
     def _filter_numeric_types(self):
-        numeric_columns = []
-        numeric_df = self.df.copy()
-        for column in self.df_columns:
-            if self.column_types[column] in NUMBER_TYPES:
-                numeric_df.loc[:, column] = numeric_df.loc[:, column].astype(float)
-                numeric_columns.append(column)
-            else:
-                numeric_df.drop(column, axis=1, inplace=True)
-        numeric_df = numeric_df.dropna(axis=0)
+        numeric_columns = [
+            column for column in self.df_columns if self.column_types[column] in NUMBER_TYPES
+        ]
+        # One selection, not a copy with columns dropped in place: pandas 3.1 deprecates
+        # inplace.
+        numeric_df = self.df[numeric_columns].astype(float).dropna(axis=0)
         return numeric_df, numeric_columns
 
     def config(self, name):

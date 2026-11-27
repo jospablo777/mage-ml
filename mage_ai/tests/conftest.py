@@ -3,9 +3,16 @@ import re
 import shutil
 import tempfile
 
+import freezegun
 import pytest
 
 os.environ['ENV'] = 'test_mage'
+
+# kubernetes 37 imports its models when an attribute of kubernetes.client is first read,
+# and freezegun reads every module's attributes when it starts: the models were built with
+# freezegun's datetime, pydantic refused it, and the clock stayed frozen for every later
+# test (I-553). freezegun leaves the modules it ignores as they are.
+freezegun.configure(extend_ignore_list=['kubernetes'])
 
 # With no tracking URI, MLflow writes sqlite:///mlflow.db in the working directory, the
 # checkout in a test run. Tests that need MLflow point it at their own store and come back

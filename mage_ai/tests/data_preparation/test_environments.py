@@ -1023,11 +1023,13 @@ class WorkersCommandTest(unittest.TestCase):
         self.assertEqual(environments.format_bytes(int(1.5 * 2 ** 30)), '1.5 GiB')
 
     def test_a_worker_runs_on_the_python_its_requires_python_allows(self):
-        own = f'{sys.version_info.major}.{sys.version_info.minor}'
+        minor = sys.version_info.minor
+        own, newer, older = f'3.{minor}', f'3.{minor + 1}', f'3.{minor - 1}'
         # uv sync gave requires-python >= 3.13 the newest Python while the worker said 3.12.
+        # The cases follow the Python the tests run on.
         cases = {
-            None: own, f'>={own}': own, '>=3.13': '3.13', '==3.11.*': '3.11',
-            '<3.12': '3.11', '~=3.13.1': '3.13', 'not a specifier': own,
+            None: own, f'>={own}': own, f'>={newer}': newer, f'=={older}.*': older,
+            f'<{own}': older, f'~={newer}.1': newer, 'not a specifier': own,
         }
         for requires, python in cases.items():
             self.assertEqual(environments._worker_python(requires), python, requires)
@@ -1036,9 +1038,9 @@ class WorkersCommandTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, project, True)
         folder = project / environments.WORKERS_DIR / 'newer'
         folder.mkdir(parents=True)
-        (folder / 'pyproject.toml').write_text('[project]\nrequires-python = ">=3.13"\n')
+        (folder / 'pyproject.toml').write_text(f'[project]\nrequires-python = ">={newer}"\n')
         worker = environments.named_workers(str(project))['newer']
-        self.assertEqual(worker.python, '3.13')
+        self.assertEqual(worker.python, newer)
         (folder / '.python-version').write_text('3.14\n')
         worker = environments.named_workers(str(project))['newer']
         self.assertEqual(worker.python, '3.14')

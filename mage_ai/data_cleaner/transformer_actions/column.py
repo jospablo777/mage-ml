@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -93,6 +94,36 @@ def fix_syntax_errors(df, action, **kwargs):
     return df
 
 
+def _holds(series: pd.Series, value) -> bool:
+    """Whether a column's dtype holds a fill value as it is."""
+    if series.dtype == object:
+        return True
+    if isinstance(value, (bool, np.bool_)):
+        return pd.api.types.is_bool_dtype(series)
+    if isinstance(value, (int, float, np.number)):
+        return (pd.api.types.is_numeric_dtype(series)
+                and not pd.api.types.is_bool_dtype(series))
+    if isinstance(value, str):
+        return pd.api.types.is_string_dtype(series)
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return pd.api.types.is_datetime64_any_dtype(series)
+    return False
+
+
+def _fill(df, columns, values) -> None:
+    """
+    Fills each column's missing values with its value (`values` by column, or one for all).
+    A column whose dtype does not hold its value becomes an object column first, as pandas
+    did on its own before 3.1, which deprecates it.
+    """
+    for column in columns:
+        value = values[column] if isinstance(values, (dict, pd.Series)) else values
+        series = df[column]
+        if not _holds(series, value):
+            series = series.astype(object)
+        df[column] = series.fillna(value)
+
+
 def impute(df, action, **kwargs):
     action_variables = action['action_variables']
     columns = action['action_arguments']
@@ -114,7 +145,7 @@ def impute(df, action, **kwargs):
         if value is None:
             value = pd.Series([CONSTANT_IMPUTATION_DEFAULTS[dtype] for dtype in ctypes])
             value.index = pd.Index(columns)
-        df[columns] = df[columns].fillna(value)
+        _fill(df, columns, value)
     elif strategy == ImputationStrategy.MEDIAN:
         df[columns] = df[columns].fillna(df[columns].astype(float).median(axis=0))
     elif strategy == ImputationStrategy.MODE:
@@ -154,7 +185,7 @@ def impute(df, action, **kwargs):
             else:
                 df.loc[invalid_idx, column] = sample
     elif value is not None:
-        df[columns] = df[columns].fillna(value)
+        _fill(df, columns, value)
     else:
         raise Exception('Require a valid strategy or value')
 
@@ -257,13 +288,10 @@ def remove_column(df, action, **kwargs):
 
 def remove_outliers(df, action, **kwargs):
     cols = set(action['action_arguments'])
-    numeric_df = df[list(cols)].copy()
-    for column in numeric_df.columns:
-        dtype = action['action_variables'][column]['feature']['column_type']
-        if dtype in NUMBER_TYPES:
-            numeric_df[column] = numeric_df[column].astype(float)
-        else:
-            numeric_df.drop(column, axis=1, inplace=True)
+    numeric_df = df[[
+        column for column in cols
+        if action['action_variables'][column]['feature']['column_type'] in NUMBER_TYPES
+    ]].astype(float)
     outlier_mask = numeric_df.notna().all(axis=1)
     numeric_df = numeric_df.dropna(axis=0)
     if numeric_df.size == 0:

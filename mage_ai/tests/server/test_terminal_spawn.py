@@ -1,11 +1,13 @@
 """A terminal's shell starts in a thread: forking the server held its event loop ~1 s."""
 import asyncio
+import os
+import tempfile
 import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from mage_ai.server.terminal_server import MageTermManager
+from mage_ai.server.terminal_server import MageTermManager, spawn_pty
 
 
 class TerminalSpawnTest(unittest.TestCase):
@@ -62,3 +64,48 @@ class TerminalSpawnTest(unittest.TestCase):
         with patch.object(manager, 'new_terminal') as new_terminal:
             self.assertIs(manager.get_terminal('tty'), fresh)
         new_terminal.assert_not_called()
+
+
+@unittest.skipUnless(hasattr(os, 'posix_spawn'), 'POSIX terminals')
+class SpawnedShellTest(unittest.TestCase):
+    """The shell starts on its pty from a new interpreter, not a fork of the server (I-555)."""
+
+    def output(self, process) -> str:
+        text = ''
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                text += process.read(4096)
+            except EOFError:
+                break
+        process.close()
+        return text
+
+    def test_the_shell_owns_its_terminal_in_its_folder_with_its_environment(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(os.rmdir, folder)
+        script = (
+            'echo "tty=$(test -t 0 && echo yes)"; '
+            'echo "foreground=$(ps -o tpgid= -p $$ | tr -d " ") pid=$$"; '
+            'echo "cwd=$(pwd -P)"; echo "marker=$MAGE_TERMINAL_TEST"; '
+            'echo "size=$(stty size)"'
+        )
+        process = spawn_pty(
+            ['bash', '-c', script], dict(os.environ, MAGE_TERMINAL_TEST='set'), folder,
+            dimensions=(30, 100),
+        )
+        text = self.output(process)
+        values = dict(
+            line.strip().split('=', 1) for line in text.splitlines() if '=' in line
+        )
+        self.assertEqual(values['tty'], 'yes', text)
+        # The shell's process group is the terminal's foreground: Ctrl-C reaches it.
+        foreground, pid = values['foreground'].split(' pid=')
+        self.assertEqual(foreground, pid, text)
+        self.assertEqual(values['cwd'], os.path.realpath(folder), text)
+        self.assertEqual(values['marker'], 'set', text)
+        self.assertEqual(values['size'], '30 100', text)
+
+    def test_a_shell_that_is_not_there_says_so(self):
+        process = spawn_pty(['no-such-shell-mageml'], dict(os.environ))
+        self.assertIn('could not start no-such-shell-mageml', self.output(process))
