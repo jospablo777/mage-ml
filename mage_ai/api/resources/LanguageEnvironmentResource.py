@@ -1,9 +1,18 @@
 import asyncio
-from typing import Dict
+from typing import Dict, List
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.settings.repo import get_repo_path
+
+
+def _packages(value) -> List[str]:
+    """Packages as a list, or as text: one per line, or separated by commas or spaces."""
+    from mage_ai.data_preparation import environment_packages
+
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return environment_packages.split(value or '')
 
 
 class LanguageEnvironmentResource(GenericResource):
@@ -12,10 +21,11 @@ class LanguageEnvironmentResource(GenericResource):
     language's default and its named ones, by id (`r`, `rust`, `r.<name>`, `rust.<name>`).
     GET /api/language_environments lists them from their files; GET .../<id> also asks the
     tools and says what stops blocks; POST with language, name, start_from (default or
-    minimal) and, for R, r_version creates a named one; PUT with manifest_text saves
-    rproject.toml or Cargo.toml once it resolves in a copy, with sync (R) installs the
-    packages, and with init (Rust) creates the default environment; DELETE removes a named
-    one no block uses.
+    minimal or file with manifest_text), packages, for R r_version and snapshot (a CRAN
+    snapshot date), and for Rust toolchain creates a named one; PUT with manifest_text saves
+    rproject.toml or Cargo.toml once it resolves in a copy, with packages (and snapshot or
+    toolchain) adds them the same way, with sync (R) installs the packages, and with init
+    (Rust) creates the default environment; DELETE removes a named one no block uses.
     """
 
     @classmethod
@@ -49,6 +59,10 @@ class LanguageEnvironmentResource(GenericResource):
                 payload.get('name'),
                 start_from=payload.get('start_from') or 'default',
                 r_version=payload.get('r_version') or None,
+                packages=_packages(payload.get('packages')),
+                snapshot=payload.get('snapshot') or None,
+                toolchain=payload.get('toolchain') or None,
+                manifest_text=payload.get('manifest_text') or None,
             )
         except language_environments.LanguageEnvironmentError as error:
             raise ApiError(dict(code=400, message=str(error)))
@@ -79,6 +93,12 @@ class LanguageEnvironmentResource(GenericResource):
                     )
                 row = await asyncio.to_thread(language_environments.sync_r, repo_path,
                                               environment)
+            elif payload.get('packages') or payload.get('snapshot') or payload.get('toolchain'):
+                row = await asyncio.to_thread(
+                    language_environments.add_packages, repo_path, self.model['id'],
+                    _packages(payload.get('packages')), payload.get('snapshot') or None,
+                    payload.get('toolchain') or None,
+                )
             elif 'manifest_text' in payload:
                 row = await asyncio.to_thread(
                     language_environments.save_manifest, repo_path, self.model['id'],

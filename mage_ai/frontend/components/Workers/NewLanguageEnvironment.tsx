@@ -9,6 +9,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
+import TextArea from '@oracle/elements/Inputs/TextArea';
 import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import { CardStyle, FieldLabel } from './shared';
@@ -25,14 +26,21 @@ const FieldsStyle = styled.div`
 // block_environments.normalized: what a name may be, said before the server refuses it.
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-// A named R or Rust environment (ADR-0040): a name, where its packages start from, and for R
-// the R version. Creating writes files only; R packages install with Sync on its page.
+// A named R or Rust environment (ADR-0040): a name, where its packages start from (the
+// default's, the minimum, or an rproject.toml or Cargo.toml pasted), the packages or crates
+// to add, and the R version and CRAN snapshot, or the Rust toolchain. Creating writes files
+// only; R packages install with Sync on its page, crates compile at the first build.
 function NewLanguageEnvironment({ onCancel }: { onCancel: () => void }) {
   const router = useRouter();
   const [language, setLanguage] = useState<'r' | 'rust'>('r');
   const [name, setName] = useState('');
-  const [startFrom, setStartFrom] = useState<'default' | 'minimal'>('default');
+  const [startFrom, setStartFrom] = useState<'default' | 'minimal' | 'file'>('default');
   const [rVersion, setRVersion] = useState('');
+  const [packages, setPackages] = useState('');
+  const [snapshot, setSnapshot] = useState('');
+  const [toolchain, setToolchain] = useState('');
+  const [manifest, setManifest] = useState('');
+  const manifestName = language === 'r' ? 'rproject.toml' : 'Cargo.toml';
   const [error, setError] = useState<string>(null);
   const normal = name.trim().toLowerCase();
   const invalid = !!normal && (!NAME.test(normal) || normal === 'default');
@@ -90,6 +98,7 @@ function NewLanguageEnvironment({ onCancel }: { onCancel: () => void }) {
               The default environment&apos;s {language === 'r' ? 'packages' : 'crates'}
             </option>
             <option value="minimal">Only what blocks need</option>
+            <option value="file">An {manifestName} I paste</option>
           </Select>
         </div>
         {language === 'r' && (
@@ -103,7 +112,69 @@ function NewLanguageEnvironment({ onCancel }: { onCancel: () => void }) {
             />
           </div>
         )}
+        {language === 'r' ? (
+          <div>
+            <FieldLabel>CRAN snapshot date</FieldLabel>
+            <TextInput
+              aria-label="CRAN snapshot date"
+              onChange={e => setSnapshot(e.target.value)}
+              placeholder="2026-10-12, or newest"
+              value={snapshot}
+            />
+          </div>
+        ) : (
+          <div>
+            <FieldLabel>Rust toolchain</FieldLabel>
+            <TextInput
+              aria-label="Rust toolchain"
+              onChange={e => setToolchain(e.target.value)}
+              placeholder="1.98.0, or stable"
+              value={toolchain}
+            />
+          </div>
+        )}
       </FieldsStyle>
+      <Spacing mt={2}>
+        <FieldLabel>{language === 'r' ? 'Packages to add' : 'Crates to add'}</FieldLabel>
+        <TextArea
+          aria-label={language === 'r' ? 'Packages to add' : 'Crates to add'}
+          fullWidth
+          monospace
+          onChange={e => setPackages(e.target.value)}
+          placeholder={language === 'r'
+            ? 'xgboost, ranger\ntidyverse/dplyr@v1.1.4'
+            : 'ndarray@0.16\npolars@0.55[lazy,sql]\nregex'}
+          rows={3}
+          value={packages}
+        />
+        <Text muted xsmall>
+          {language === 'r'
+            ? 'CRAN names, or GitHub repositories (owner/repo, @tag to pin). rv pins versions '
+              + 'with the snapshot date: the packages as CRAN had them that day.'
+            : 'name, name@version, name@version[features]. Without a version, the newest on '
+              + 'crates.io.'}
+        </Text>
+      </Spacing>
+      {startFrom === 'file' && (
+        <Spacing mt={2}>
+          <FieldLabel>{manifestName}</FieldLabel>
+          <TextArea
+            aria-label={manifestName}
+            fullWidth
+            monospace
+            onChange={e => setManifest(e.target.value)}
+            rows={10}
+            value={manifest}
+          />
+          <Text muted xsmall>
+            {language === 'r'
+              ? 'The packages R blocks exchange data with (arrow, bit64, jsonlite, tibble) are '
+                + 'added when it does not list them.'
+              : 'MageML\'s block crate (mage-block) and the block members are added when it '
+                + 'does not list them.'}
+          </Text>
+        </Spacing>
+      )}
       <Spacing mt={1.5}>
         <Text muted xsmall>
           {language === 'r'
@@ -117,7 +188,7 @@ function NewLanguageEnvironment({ onCancel }: { onCancel: () => void }) {
       <Spacing mt={2}>
         <FlexContainer alignItems="center">
           <Button
-            disabled={!normal || invalid}
+            disabled={!normal || invalid || (startFrom === 'file' && !manifest.trim())}
             loading={isLoading}
             onClick={() => {
               setError(null);
@@ -125,9 +196,13 @@ function NewLanguageEnvironment({ onCancel }: { onCancel: () => void }) {
               create({
                 language_environment: {
                   language,
+                  manifest_text: startFrom === 'file' ? manifest : null,
                   name: normal,
+                  packages,
                   r_version: language === 'r' ? rVersion.trim() || null : null,
+                  snapshot: language === 'r' ? snapshot.trim() || null : null,
                   start_from: startFrom,
+                  toolchain: language === 'rust' ? toolchain.trim() || null : null,
                 },
               });
             }}

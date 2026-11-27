@@ -1117,6 +1117,55 @@ def r_init(
     print(f'Created the R environment in {_e(directory)}. Add packages with `rv add` there.')
 
 
+R_ADD_PACKAGES = typer.Argument(
+    ..., help='R packages: CRAN names such as xgboost, or GitHub repositories such as '
+    'tidyverse/dplyr@v1.1.4.')
+CRATES_HELP = ('regex, regex@1.11 or polars@0.55\\[lazy,sql]; without a version, the newest '
+               'on crates.io.')
+RUST_INIT_CRATES = typer.Option(
+    None, '--crate', '-c',
+    help=f'a crate every Rust block can use: {CRATES_HELP} Repeat for more.')
+RUST_ADD_CRATES = typer.Argument(..., help=f'crates: {CRATES_HELP}')
+
+
+@r_app.command('add')
+def r_add(
+    packages: List[str] = R_ADD_PACKAGES,
+    project_path: str = typer.Option('.', '--project', help='path of the MageML project.'),
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
+    snapshot: Optional[str] = typer.Option(
+        None, '--snapshot', metavar='DATE',
+        help='CRAN as on this date (Posit Package Manager), such as 2026-10-12: rv pins '
+        'versions by snapshot.'),
+    sync: bool = typer.Option(True, '--sync/--no-sync', help='install them now (rv sync).'),
+):
+    """Add R packages to an R environment, once its rproject.toml resolves, and install them."""
+    _add_packages(project_path, 'r', environment, packages, snapshot=snapshot, sync=sync)
+
+
+def _add_packages(project_path: str, language: str, environment: Optional[str],
+                  packages: List[str], snapshot: Optional[str] = None,
+                  toolchain: Optional[str] = None, sync: bool = False) -> None:
+    from mage_ai.data_preparation import block_environments
+    from mage_ai.data_preparation import language_environments as le
+
+    repo_path = os.path.abspath(project_path)
+    try:
+        name = block_environments.normalized(environment)
+        pk = le.environment_id(language, name)
+        before = {p['name'] for p in le.detail(repo_path, pk).get('packages') or []}
+        row = le.add_packages(repo_path, pk, packages, snapshot=snapshot, toolchain=toolchain)
+        if sync and language == 'r':
+            print('Installing them (rv sync).')
+            row = le.sync_r(repo_path, name)
+    except (block_environments.EnvironmentNameError, le.LanguageEnvironmentError) as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    added = sorted({p['name'] for p in row.get('packages') or []} - before)
+    print(f'{_e(row["label"])}: ' + (f'added {_e(", ".join(added))}.' if added
+                                     else 'every package was listed already.'))
+
+
 @r_app.command('sync')
 def r_sync(
     project_path: str = R_PROJECT_PATH_DEFAULT,
@@ -1171,23 +1220,46 @@ RUST_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the MageML project
 def rust_init(
     project_path: str = RUST_PROJECT_PATH_DEFAULT,
     environment: Optional[str] = ENVIRONMENT_DEFAULT,
+    crates: List[str] = RUST_INIT_CRATES,
+    toolchain: Optional[str] = typer.Option(
+        None, '--toolchain', help='the Rust version blocks build with, such as 1.98.0.'),
 ):
     """
     Create a Rust environment, the crates Rust blocks use: the project's default in
     <project>/rust, or a named one in <project>/rust_environments/<name> with --environment.
     """
     from mage_ai.data_preparation import block_environments
+    from mage_ai.data_preparation import environment_packages as ep
     from mage_ai.data_preparation.models.block.rust import workspace
 
     try:
         created = workspace.init(os.path.abspath(project_path), environment)
-    except block_environments.EnvironmentNameError as error:
+        if crates:
+            text, _ = ep.add_crates(created.cargo_toml.read_text(encoding='utf-8'), crates)
+            created.cargo_toml.write_text(text, encoding='utf-8')
+        if toolchain:
+            created.toolchain_toml.write_text(
+                ep.with_toolchain(created.toolchain_toml.read_text(encoding='utf-8'), toolchain),
+                encoding='utf-8')
+    except (block_environments.EnvironmentNameError, ep.PackageError) as error:
         print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=1)
     print(
         f'The Rust environment is in {_e(created.root)}. Add crates under '
         f'\\[workspace.dependencies] in {_e(created.cargo_toml)}.'
     )
+
+
+@rust_app.command('add')
+def rust_add(
+    crates: List[str] = RUST_ADD_CRATES,
+    project_path: str = typer.Option('.', '--project', help='path of the MageML project.'),
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
+    toolchain: Optional[str] = typer.Option(
+        None, '--toolchain', help='also set the Rust version blocks build with.'),
+):
+    """Add crates to a Rust environment, once its Cargo.toml resolves (cargo metadata)."""
+    _add_packages(project_path, 'rust', environment, crates, toolchain=toolchain)
 
 
 @rust_app.command('build')

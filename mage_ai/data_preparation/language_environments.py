@@ -550,7 +550,63 @@ def sync_r(repo_path: str, environment: str = DEFAULT) -> Dict:
     return detail(repo_path, environment_id('r', environment))
 
 
-START_FROM = ('default', 'minimal')
+START_FROM = ('default', 'minimal', 'file')
+
+
+def _edited(repo_path: str, language: str, environment: str, packages: List[str],
+            snapshot: Optional[str]) -> Optional[str]:
+    """The environment's manifest text with the packages and the R snapshot; None when
+    nothing changes."""
+    from mage_ai.data_preparation import environment_packages as ep
+
+    if not packages and not snapshot:
+        return None
+    try:
+        if language == 'r':
+            path = _r_config(repo_path, environment).project_dir / 'rproject.toml'
+            text, _ = ep.add_r_packages(path.read_text(encoding='utf-8'), packages)
+            if snapshot:
+                text = ep.with_r_snapshot(text, snapshot)
+        else:
+            if snapshot:
+                raise ep.PackageError('A snapshot date is for R; Rust crates take versions.')
+            path = _rust_workspace(repo_path, environment).cargo_toml
+            text, _ = ep.add_crates(path.read_text(encoding='utf-8'), packages)
+    except ep.PackageError as error:
+        raise LanguageEnvironmentError(str(error)) from error
+    return text
+
+
+def _set_toolchain(repo_path: str, environment: str, toolchain: str) -> None:
+    from mage_ai.data_preparation import environment_packages as ep
+
+    path = _rust_workspace(repo_path, environment).toolchain_toml
+    try:
+        text = ep.with_toolchain(path.read_text(encoding='utf-8') if path.exists() else '',
+                                 toolchain)
+    except ep.PackageError as error:
+        raise LanguageEnvironmentError(str(error)) from error
+    path.write_text(text, encoding='utf-8')
+
+
+def add_packages(repo_path: str, pk: str, packages: List[str],
+                 snapshot: Optional[str] = None, toolchain: Optional[str] = None) -> Dict:
+    """
+    Adds R packages or Rust crates to an environment (environment_packages.py), and sets an R
+    environment's snapshot date or a Rust environment's toolchain. The manifest is saved as
+    save_manifest saves one: once it resolves in a copy. R packages install with the next
+    sync; crates compile at the next build.
+    """
+    language, environment = parse_id(pk)
+    _require(repo_path, language, environment)
+    if toolchain and language != 'rust':
+        raise LanguageEnvironmentError('A toolchain is for Rust; R environments take r_version.')
+    text = _edited(repo_path, language, environment, packages or [], snapshot)
+    if text is not None:
+        save_manifest(repo_path, pk, text)
+    if toolchain:
+        _set_toolchain(repo_path, environment, toolchain)
+    return detail(repo_path, pk)
 
 
 def create(
@@ -559,8 +615,16 @@ def create(
     name: str,
     start_from: str = 'default',
     r_version: Optional[str] = None,
+    packages: Optional[List[str]] = None,
+    snapshot: Optional[str] = None,
+    toolchain: Optional[str] = None,
+    manifest_text: Optional[str] = None,
 ) -> Dict:
     """
+    `packages`: R packages or Rust crates to add (environment_packages.py); `snapshot`: an R
+    environment's CRAN snapshot date; `toolchain`: a Rust environment's Rust version.
+    `start_from='file'` starts from `manifest_text`, an rproject.toml or Cargo.toml people
+    bring, with what MageML's blocks need added.
     A new named environment. `start_from`: `default` copies the default environment's
     manifest, lock and (Rust) toolchain, so its versions hold until changed; `minimal` has
     only what blocks need (R: the packages MageML exchanges data with; Rust: MageML's
@@ -578,7 +642,14 @@ def create(
             'default is the project\'s own environment: give the new one another name.',
         )
     if start_from not in START_FROM:
-        raise LanguageEnvironmentError('Start from default or minimal.')
+        raise LanguageEnvironmentError('Start from default, minimal or a file.')
+    if start_from == 'file' and not (manifest_text or '').strip():
+        raise LanguageEnvironmentError(
+            'Paste the ' + ('rproject.toml' if language == 'r' else 'Cargo.toml')
+            + ' to start from.',
+        )
+    if toolchain and language != 'rust':
+        raise LanguageEnvironmentError('A toolchain is for Rust; R environments take r_version.')
     folder = block_environments.folder(repo_path, language, name)
     if folder.exists():
         raise LanguageEnvironmentError(
@@ -586,13 +657,26 @@ def create(
             'the folder.',
         )
     if language == 'r':
-        _create_r(repo_path, folder, start_from, r_version)
+        _create_r(repo_path, folder, start_from, r_version, manifest_text)
     else:
-        _create_rust(repo_path, name, start_from)
+        _create_rust(repo_path, name, start_from, manifest_text)
+    try:
+        text = _edited(repo_path, language, name, packages or [], snapshot)
+        if text is not None:
+            manifest = folder / ('rproject.toml' if language == 'r' else 'Cargo.toml')
+            manifest.write_text(text, encoding='utf-8')
+        if toolchain:
+            _set_toolchain(repo_path, name, toolchain)
+    except LanguageEnvironmentError:
+        # A package that is not one leaves no environment behind.
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
     return detail(repo_path, environment_id(language, name))
 
 
-def _create_r(repo_path: str, folder: Path, start_from: str, r_version: Optional[str]) -> None:
+def _create_r(repo_path: str, folder: Path, start_from: str, r_version: Optional[str],
+              manifest_text: Optional[str] = None) -> None:
+    from mage_ai.data_preparation import environment_packages as ep
     from mage_ai.data_preparation.models.block.r import runtime
 
     source = _r_project_dir(repo_path) if start_from == 'default' else None
@@ -601,7 +685,15 @@ def _create_r(repo_path: str, folder: Path, start_from: str, r_version: Optional
             'The project has no default R environment to start from: start from minimal, '
             'or create the default with `mage r init`.',
         )
-    if source is not None:
+    if start_from == 'file':
+        try:
+            # What R blocks exchange data with, whatever the file lists.
+            manifest, _ = ep.add_r_packages(manifest_text, runtime.EXCHANGE_PACKAGES)
+        except Exception as error:
+            raise LanguageEnvironmentError(f'rproject.toml: {error}') from error
+        if r_version:
+            manifest = _with_r_version(manifest, r_version)
+    elif source is not None:
         manifest = (source / 'rproject.toml').read_text(encoding='utf-8')
         if r_version:
             manifest = _with_r_version(manifest, r_version)
@@ -648,11 +740,20 @@ def _with_r_version(manifest: str, version: str) -> str:
     return manifest.replace('[project]\n', f'[project]\nr_version = "{version.strip()}"\n', 1)
 
 
-def _create_rust(repo_path: str, name: str, start_from: str) -> None:
+def _create_rust(repo_path: str, name: str, start_from: str,
+                 manifest_text: Optional[str] = None) -> None:
+    from mage_ai.data_preparation import environment_packages as ep
     from mage_ai.data_preparation.models.block.rust import workspace as ws
 
     target = ws.of_environment(repo_path, name)
-    if start_from == 'default':
+    if start_from == 'file':
+        try:
+            text = ep.with_rust_essentials(manifest_text)
+        except Exception as error:
+            raise LanguageEnvironmentError(f'Cargo.toml: {error}') from error
+        target.root.mkdir(parents=True)
+        target.cargo_toml.write_text(text, encoding='utf-8')
+    elif start_from == 'default':
         source = _rust_workspace(repo_path)
         if not source.cargo_toml.exists():
             raise LanguageEnvironmentError(

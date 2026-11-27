@@ -261,6 +261,63 @@ class NamedEnvironmentsTest(DBTestCase):
         self.assertNotIn('itoa', [p['name'] for p in fresh['packages']])
         self.assertIn('mage-block', [p['name'] for p in fresh['packages']])
 
+    def test_an_environment_is_made_with_its_packages_version_and_toolchain(self):
+        from unittest.mock import patch
+
+        rust = le.create(self.repo_path, 'rust', 'ml', start_from='minimal',
+                         packages=['ort@2[download-binaries]', 'ndarray@0.16'],
+                         toolchain='1.99.0')
+        names = [p['name'] for p in rust['packages']]
+        self.assertIn('ort', names)
+        self.assertIn('ndarray', names)
+        root = Path(self.repo_path, 'rust_environments', 'ml')
+        self.assertIn('channel = "1.99.0"', (root / 'rust-toolchain.toml').read_text())
+
+        r = le.create(self.repo_path, 'r', 'models', start_from='minimal', r_version='4.5',
+                      packages=['xgboost', 'tidyverse/dplyr@v1.1.4'], snapshot='2026-10-12')
+        self.assertEqual(r['version'], '4.5')
+        manifest = Path(self.repo_path, 'r_environments', 'models', 'rproject.toml').read_text()
+        self.assertIn('"xgboost"', manifest)
+        self.assertIn('git = "https://github.com/tidyverse/dplyr"', manifest)
+        self.assertIn('packagemanager.posit.co/cran/2026-10-12', manifest)
+
+        # A crate that is not one leaves no environment behind.
+        with patch('mage_ai.data_preparation.environment_packages.newest_crate_version',
+                   side_effect=le_package_error('crates.io has no crate nope.')):
+            with self.assertRaisesRegex(le.LanguageEnvironmentError, 'no crate nope'):
+                le.create(self.repo_path, 'rust', 'broken', start_from='minimal',
+                          packages=['nope'])
+        self.assertFalse(Path(self.repo_path, 'rust_environments', 'broken').exists())
+        with self.assertRaisesRegex(le.LanguageEnvironmentError, 'toolchain is for Rust'):
+            le.create(self.repo_path, 'r', 'tool', start_from='minimal', toolchain='stable')
+
+    def test_an_environment_starts_from_a_file_people_bring(self):
+        rust = le.create(self.repo_path, 'rust', 'mine', start_from='file',
+                         manifest_text='[workspace.dependencies]\nrand = "0.9"\n')
+        self.assertLessEqual({'rand', 'mage-block'}, {p['name'] for p in rust['packages']})
+        r = le.create(self.repo_path, 'r', 'theirs', start_from='file', manifest_text=(
+            '[project]\nname = "theirs"\nr_version = "4.6"\nrepositories = []\n'
+            'dependencies = ["data.table"]\n'))
+        # What R blocks exchange data with is added to what the file lists.
+        self.assertEqual([p['name'] for p in r['packages']],
+                         ['data.table', 'arrow', 'bit64', 'jsonlite', 'tibble'])
+        with self.assertRaisesRegex(le.LanguageEnvironmentError, 'Paste the Cargo.toml'):
+            le.create(self.repo_path, 'rust', 'empty', start_from='file')
+
+    def test_packages_are_added_to_an_environment_once_its_manifest_resolves(self):
+        from unittest.mock import patch
+
+        ws.init(self.repo_path)
+        le.create(self.repo_path, 'rust', 'fmt', start_from='minimal')
+        with patch.object(le, '_check_cargo_toml') as check:
+            row = le.add_packages(self.repo_path, 'rust.fmt', ['itoa@1'], toolchain='stable')
+        check.assert_called_once()
+        self.assertIn('itoa', [p['name'] for p in row['packages']])
+        toolchain = Path(self.repo_path, 'rust_environments', 'fmt', 'rust-toolchain.toml')
+        self.assertIn('channel = "stable"', toolchain.read_text())
+        with self.assertRaisesRegex(le.LanguageEnvironmentError, 'snapshot date is for R'):
+            le.add_packages(self.repo_path, 'rust.fmt', ['itoa@1'], snapshot='2026-10-12')
+
     def test_names_that_exist_or_are_not_names_are_refused(self):
         ws.init(self.repo_path)
         le.create(self.repo_path, 'rust', 'fmt')
@@ -335,3 +392,9 @@ class NamedEnvironmentsTest(DBTestCase):
         self.assertNotIn('error', call(editor, OperationType.DELETE, 'rust.fmt'))
         self.assertEqual([r['id'] for r in call(viewer, OperationType.LIST)[
             'language_environments']], ['r', 'rust'])
+
+
+def le_package_error(message):
+    from mage_ai.data_preparation.environment_packages import PackageError
+
+    return PackageError(message)

@@ -19,6 +19,8 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 });
 
 test.afterAll(async () => {
+  // Removed by its test; a failed run leaves it, and other tests list every environment.
+  await api.call('DELETE', 'language_environments/rust.e2e_crates').catch(() => null);
   if (original !== null) {
     await api.call('PUT', 'language_environments/rust', {
       language_environment: { manifest_text: original },
@@ -159,4 +161,34 @@ test('a named Rust environment is created, chosen in a block header and removed'
   await page.getByRole('button', { name: 'Yes, remove it' }).click();
   await expect(page).toHaveURL(/\/workers$/, { timeout: 60_000 });
   await expect(table.getByRole('link', { name: 'Open Rust e2e_named' })).toHaveCount(0);
+});
+
+test('an environment is made with its crates and toolchain, and crates added on its page', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await api.call('DELETE', 'language_environments/rust.e2e_crates').catch(() => null);
+  await page.goto('/workers');
+  await page.getByRole('button', { name: 'New environment' }).click();
+  await page.getByLabel('Language').selectOption('rust');
+  await page.getByLabel('Name').fill('e2e_crates');
+  await page.getByLabel('Start from').selectOption('minimal');
+  await page.getByLabel('Rust toolchain').fill('1.98.0');
+  await page.getByLabel('Crates to add').fill('itoa@1');
+  await page.getByRole('button', { name: 'Create environment' }).click();
+
+  await expect(page).toHaveURL(/\/workers\/languages\/rust\.e2e_crates$/, { timeout: 60_000 });
+  const crates = page.getByRole('table', { name: 'Packages' });
+  await expect(crates.getByText('itoa', { exact: true })).toBeVisible({ timeout: 60_000 });
+  const detail = await api.call('GET', 'language_environments/rust.e2e_crates');
+  expect(detail.language_environment.version).toBe('1.98.0');
+
+  await page.getByLabel('Crates to add').fill('ryu@1');
+  await page.getByRole('button', { name: 'Add crates' }).click();
+  await expect(page.getByText('Added.')).toBeVisible({ timeout: 120_000 });
+  await expect(crates.getByText('ryu', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Remove environment' }).click();
+  await page.getByRole('button', { name: 'Yes, remove it' }).click();
+  await expect(page).toHaveURL(/\/workers$/, { timeout: 60_000 });
 });

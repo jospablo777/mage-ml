@@ -208,9 +208,19 @@ target directory as the default, so crates compiled once serve both.
 
 ### Create one
 
-On **Workers**, **New environment** asks for the language, a name, and where its packages
-start from: the default environment's packages (with their locked versions) or only what
-blocks need. For R, an R version too. Creating writes the files only:
+On **Workers**, **New environment** asks for:
+
+| Field | R (rv) | Rust (Cargo) |
+| --- | --- | --- |
+| Start from | The default environment's packages (with their locked versions), only what blocks need, or an `rproject.toml` you paste | The default's crates, only what blocks need, or a `Cargo.toml` you paste |
+| Version | R version, such as `4.5` | Rust toolchain, such as `1.98.0` or `stable` (`rust-toolchain.toml`) |
+| Pin versions | CRAN snapshot date, such as `2026-10-12`: the packages as CRAN had them that day (Posit Package Manager) | Each crate's version |
+| Packages to add | `xgboost`, `tidyverse/dplyr@v1.1.4` (GitHub, at a tag) | `regex` (the newest on crates.io), `ndarray@0.16`, `polars@0.55[lazy,sql]` |
+
+A pasted file keeps what it lists; what MageML's blocks need is added when it is missing (the
+packages R blocks exchange data with; the `mage-block` crate and the block members). A
+package or crate that is not one leaves no environment behind. Creating writes the files
+only:
 
 - R: `r_environments/<name>/rproject.toml` (and `rv.lock` when copied). **Sync the
   packages** on its page installs them; another R version is installed with
@@ -222,7 +232,9 @@ From a terminal, which also installs the R packages:
 
 ```bash
 mage r init path/to/project --environment models --r-version 4.5
-mage rust init path/to/project --environment onnx
+mage r add xgboost tidyverse/dplyr@v1.1.4 --project path/to/project -e models --snapshot 2026-10-12
+mage rust init path/to/project --environment onnx --crate ort@2 --toolchain 1.98.0
+mage rust add ndarray@0.16 "polars@0.55[lazy,sql]" --project path/to/project -e onnx
 mage r sync path/to/project --environment models
 mage r status path/to/project --environment models
 mage rust status path/to/project --environment onnx
@@ -257,7 +269,9 @@ in another environment starts its own, and the Compile panel says where.
 - the tools and their versions (Rscript, rv and rig; cargo and rustc);
 - what stops its blocks and how to fix it, such as an R library that is not synced with
   `rv.lock`, with a **Sync the packages** button;
-- the packages or crates, each with its locked version;
+- the packages or crates, each with its locked version, and **Add packages** (or **Add
+  crates**) with the snapshot date or toolchain to set: they are added to the file once it
+  resolves with them, keeping its comments;
 - `rproject.toml` or `Cargo.toml` to edit. **Check and save** resolves it with rv or cargo
   in a copy first: a package or crate that does not exist, or a version that cannot fit, is
   refused with the tool's reason and the file stays as it was;

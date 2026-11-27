@@ -1,6 +1,6 @@
 import NextLink from 'next/link';
 import styled from 'styled-components';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation } from 'react-query';
 import { useRouter } from 'next/router';
 
@@ -13,6 +13,7 @@ import Link from '@oracle/elements/Link';
 import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
 import Text from '@oracle/elements/Text';
+import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { BORDER_RADIUS_SMALL } from '@oracle/styles/units/borders';
@@ -202,8 +203,14 @@ function LanguageEnvironment({ language }: { language: string }) {
   const [error, setError] = useState<string>(null);
   const [saved, setSaved] = useState<boolean>(false);
   const [synced, setSynced] = useState<boolean>(false);
-  // The action the running update is: the result's message depends on it.
-  const [action, setAction] = useState<'init' | 'save' | 'sync'>(null);
+  // The action the running update is: the result's message depends on it. A ref too: the
+  // update's callback was made with the render before the click, which held the action before.
+  const [action, setAction] = useState<'add' | 'init' | 'save' | 'sync'>(null);
+  const actionRef = useRef<'add' | 'init' | 'save' | 'sync'>(null);
+  // Packages or crates to add, and the R snapshot date or Rust toolchain to set.
+  const [adding, setAdding] = useState('');
+  const [pin, setPin] = useState('');
+  const [added, setAdded] = useState<boolean>(false);
   useEffect(() => {
     if (environment && text === null) {
       setText(environment.manifest_text || '');
@@ -216,8 +223,14 @@ function LanguageEnvironment({ language }: { language: string }) {
       onSuccess: (response: any) => onSuccess(response, {
         callback: ({ language_environment: result }) => {
           setError(null);
-          setSaved(action === 'save');
-          setSynced(action === 'sync');
+          const done = actionRef.current;
+          setSaved(done === 'save');
+          setSynced(done === 'sync');
+          setAdded(done === 'add');
+          if (done === 'add') {
+            setAdding('');
+            setPin('');
+          }
           setText(result.manifest_text || '');
           mutate();
         },
@@ -247,9 +260,17 @@ function LanguageEnvironment({ language }: { language: string }) {
   const state = languageState(environment);
   const dirty = text !== null && text !== (environment.manifest_text || '');
   const commands = (environment.commands || []).join('\n');
-  const run = (next: 'init' | 'save' | 'sync') => {
+  const run = (next: 'add' | 'init' | 'save' | 'sync') => {
     setAction(next);
-    const payload = { init: { init: true }, save: { manifest_text: text }, sync: { sync: true } };
+    actionRef.current = next;
+    const pinned = environment.language === 'r' ? { snapshot: pin.trim() || null }
+      : { toolchain: pin.trim() || null };
+    const payload = {
+      add: { packages: adding, ...pinned },
+      init: { init: true },
+      save: { manifest_text: text },
+      sync: { sync: true },
+    };
     // @ts-ignore
     update({ language_environment: payload[next] });
   };
@@ -422,6 +443,49 @@ function LanguageEnvironment({ language }: { language: string }) {
                   ))}
                 </tbody>
               </TableStyle>
+            </Spacing>
+            <Spacing mt={2}>
+              <FlexContainer alignItems="center" flexWrap="wrap">
+                <TextInput
+                  aria-label={environment.language === 'r' ? 'Packages to add' : 'Crates to add'}
+                  monospace
+                  onChange={e => setAdding(e.target.value)}
+                  placeholder={environment.language === 'r'
+                    ? 'xgboost, tidyverse/dplyr@v1.1.4'
+                    : 'ndarray@0.16, polars@0.55[lazy,sql]'}
+                  value={adding}
+                />
+                <Spacing ml={1} />
+                <TextInput
+                  aria-label={environment.language === 'r' ? 'CRAN snapshot date'
+                    : 'Rust toolchain'}
+                  monospace
+                  onChange={e => setPin(e.target.value)}
+                  placeholder={environment.language === 'r' ? 'Snapshot: 2026-10-12'
+                    : 'Toolchain: 1.98.0'}
+                  value={pin}
+                />
+                <Spacing ml={1} />
+                <Button
+                  disabled={!adding.trim() && !pin.trim()}
+                  loading={isLoading && action === 'add'}
+                  onClick={() => run('add')}
+                >
+                  {environment.language === 'r' ? 'Add packages' : 'Add crates'}
+                </Button>
+              </FlexContainer>
+              <Text muted xsmall>
+                {environment.language === 'r'
+                  ? 'Added once rproject.toml resolves with them; Sync installs them.'
+                  : 'Added once Cargo.toml resolves with them; without a version, the newest on '
+                    + 'crates.io. They compile at the next build.'}
+              </Text>
+              {added && (
+                <Text small success>
+                  {environment.language === 'r' ? 'Added: Sync the packages to install them.'
+                    : 'Added.'}
+                </Text>
+              )}
             </Spacing>
           </CardStyle>
         </Spacing>

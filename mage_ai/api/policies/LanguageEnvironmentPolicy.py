@@ -36,14 +36,15 @@ LanguageEnvironmentPolicy.allow_read(
 )
 
 LanguageEnvironmentPolicy.allow_write(
-    ['init', 'manifest_text', 'sync'],
+    ['init', 'manifest_text', 'packages', 'snapshot', 'sync', 'toolchain'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.UPDATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
 )
 
 LanguageEnvironmentPolicy.allow_write(
-    ['language', 'name', 'r_version', 'start_from'],
+    ['language', 'manifest_text', 'name', 'packages', 'r_version', 'snapshot', 'start_from',
+     'toolchain'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

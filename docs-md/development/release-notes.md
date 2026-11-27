@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### R and Rust environments
+
+- A new environment takes the packages or crates to add, the R version and a CRAN snapshot
+  date (R), or the Rust toolchain, or starts from an `rproject.toml` or `Cargo.toml` you paste.
+  Its page adds packages or crates the same way, keeping the file's comments; `mage r add`
+  and `mage rust add` do from a terminal, and `mage rust init` takes `--crate` and
+  `--toolchain`.
+
 ### SQL stream blocks
 
 - A stream's SQL transformer runs a query on each batch: the batch is the table `messages`,
