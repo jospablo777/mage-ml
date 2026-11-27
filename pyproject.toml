@@ -242,6 +242,8 @@ streaming = [
   "stomp.py>=8.1,<9",
   # kafka-python reads and writes Zstandard-compressed topics with it.
   "zstandard>=0.23",
+  # And LZ4-compressed ones, which exported services' Kafka sinks write.
+  "lz4>=4.3",
 ]
 # R blocks need no Python packages beyond Mage's own: R, rv and rig are installed
 # outside Python. `mage r setup` checks them and prints the commands that install them.
