@@ -9,21 +9,23 @@ The project declares what there is, in its metadata.yaml:
         warehouse: 4     # at most 4 block runs that use the warehouse at a time
         gpu_host: 1
       memory: 48GiB      # for the block runs of one scheduler; 80% of its RAM by default
+      cpus: 16           # for the block runs of one scheduler; its CPU count by default
       gpus: [0, 1]       # devices block runs get one by one (or a count: 2)
 
 and a block, in its configuration (block settings):
 
     resources:
       memory: 8GiB
-      cpu: 2             # thread pools of NumPy, BLAS, Polars and Rayon get 2 threads
+      cpu: 2             # 2 of the scheduler's CPUs; NumPy, BLAS, Polars, Rayon get 2 threads
       gpu: 1             # CUDA_VISIBLE_DEVICES holds one device of its own
       uses: [warehouse]
 
 What block runs hold is recorded with them (block_run.metrics['resources']) when they are
 queued, so the accounting is the queued and running block runs in the database: a block
 run that ends, fails, is cancelled or reset by crash detection stops holding without a
-release, and a scheduler restart loses nothing. Memory and GPUs are per scheduler process
-(they are the host's); shared limits count every scheduler of the project. A block run
+release, and a scheduler restart loses nothing. Memory, CPUs and GPUs are per scheduler
+process (they are the host's); shared limits count every scheduler of the project. Only
+blocks that declare `cpu` hold CPUs. A block run
 that waits records why (block_run.metrics['waiting']).
 
 A block that declares no memory but used much in its last runs (block_run.metrics
@@ -50,7 +52,7 @@ _UNITS = {
 }
 _KEY = re.compile(r'^[A-Za-z0-9][\w.\-]{0,99}$')
 _REQUEST_KEYS = {'memory', 'cpu', 'gpu', 'uses'}
-_POLICY_KEYS = {'learn_memory', 'limits', 'memory', 'gpus'}
+_POLICY_KEYS = {'cpus', 'learn_memory', 'limits', 'memory', 'gpus'}
 # A learned reservation: the largest peak of the block's last runs, with a margin, for
 # blocks that used at least LEARNED_MIN_BYTES (lighter ones start as before).
 LEARNED_RUNS = 3
@@ -107,6 +109,10 @@ class Policy:
     memory: int = 0
     gpus: List[str] = field(default_factory=list)
     learn_memory: bool = True
+    # CPUs for block runs that declare cpu; 0 admits them without counting.
+    cpus: int = 0
+    # cpus is the host's count, not the project's: a larger request runs alone.
+    cpus_from_host: bool = False
 
 
 def request_of(block) -> Request:
@@ -147,6 +153,14 @@ def _host_memory() -> int:
         return 0
 
 
+def _host_cpus() -> int:
+    # The CPUs this process may run on (a container's or a cgroup's set on Linux).
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 0
+
+
 def policy_of(repo_config) -> Policy:
     """The resources the project declares, from its metadata.yaml."""
     config = (repo_config or {}).get('resources') if isinstance(repo_config, dict) else (
@@ -178,7 +192,17 @@ def policy_of(repo_config) -> Policy:
     learn = config.get('learn_memory', True)
     if not isinstance(learn, bool):
         raise ResourceError('learn_memory in the resources of the project must be true or false.')
-    return Policy(limits=limits, memory=memory, gpus=[str(g) for g in gpus], learn_memory=learn)
+    cpus = config.get('cpus')
+    if cpus is not None and (isinstance(cpus, bool) or not isinstance(cpus, int) or cpus < 1):
+        raise ResourceError('The cpus of the project must be a whole number, 1 or more.')
+    return Policy(
+        limits=limits,
+        memory=memory,
+        gpus=[str(g) for g in gpus],
+        learn_memory=learn,
+        cpus=cpus or _host_cpus(),
+        cpus_from_host=cpus is None,
+    )
 
 
 @dataclass
@@ -234,6 +258,21 @@ def decide(
                 f'{format_bytes(max(policy.memory - used, 0))} of '
                 f'{format_bytes(policy.memory)} free'
             ))
+    cpu = request.cpu
+    if cpu and policy.cpus:
+        if cpu > policy.cpus:
+            if not policy.cpus_from_host:
+                return Decision(False, (
+                    f'it needs {cpu} CPUs and the scheduler has {policy.cpus} for block runs'
+                ), impossible=True)
+            # More than the host has runs alone, with a thread per CPU.
+            cpu = policy.cpus
+        used = sum(int(h.get('cpu') or 0) for h in local)
+        if used + cpu > policy.cpus:
+            return Decision(False, (
+                f'waiting for CPUs: needs {cpu}, {max(policy.cpus - used, 0)} of '
+                f'{policy.cpus} free'
+            ))
     gpus: List[str] = []
     if request.gpu:
         if request.gpu > len(policy.gpus):
@@ -251,7 +290,7 @@ def decide(
         project=project,
         launched_by=launcher,
         memory=request.memory,
-        cpu=request.cpu,
+        cpu=cpu,
         gpus=gpus,
         uses=list(request.uses),
     )

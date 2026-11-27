@@ -1,6 +1,6 @@
 """
-Resource-aware scheduling: block runs start only when the shared limits, memory and GPUs
-their blocks declare are free; waiting block runs say why, impossible requests fail, and
+Resource-aware scheduling: block runs start only when the shared limits, memory, CPUs and
+GPUs their blocks declare are free; waiting block runs say why, impossible requests fail, and
 a block run's thread pools and GPUs follow what it holds.
 """
 import os
@@ -64,6 +64,38 @@ class DecisionTest(TestCase):
             decision = resources.decide(request, policy, [], 'p', 'me')
             self.assertTrue(decision.impossible)
             self.assertIn(reason, decision.reason)
+
+    def test_cpus_are_counted_from_what_this_schedulers_runs_hold(self):
+        policy = resources.Policy(cpus=8)
+        held = [
+            dict(project='p', launched_by='me', cpu=6),
+            dict(project='p', launched_by='other', cpu=8),
+            dict(project='p', launched_by='me', memory=GiB),
+        ]
+        fits = resources.decide(resources.Request(cpu=2), policy, held, 'p', 'me')
+        self.assertEqual(fits.held['cpu'], 2)
+        waits = resources.decide(resources.Request(cpu=4), policy, held, 'p', 'me')
+        self.assertEqual(waits.reason, 'waiting for CPUs: needs 4, 2 of 8 free')
+
+        # Above what the project declares fails; above the host's count runs alone.
+        declared = resources.decide(resources.Request(cpu=12), policy, [], 'p', 'me')
+        self.assertTrue(declared.impossible)
+        self.assertIn('needs 12 CPUs and the scheduler has 8', declared.reason)
+        host = resources.Policy(cpus=8, cpus_from_host=True)
+        alone = resources.decide(resources.Request(cpu=12), host, [], 'p', 'me')
+        self.assertEqual(alone.held['cpu'], 8)
+        self.assertFalse(resources.decide(resources.Request(cpu=12), host, held, 'p', 'me')
+                         .admitted)
+
+    def test_the_project_declares_its_cpus_or_gets_the_hosts(self):
+        declared = resources.policy_of(dict(resources=dict(cpus=3)))
+        self.assertEqual((declared.cpus, declared.cpus_from_host), (3, False))
+        host = resources.policy_of({})
+        self.assertGreaterEqual(host.cpus, 1)
+        self.assertTrue(host.cpus_from_host)
+        for value in (0, 1.5, True, 'four'):
+            with self.assertRaisesRegex(resources.ResourceError, 'whole number'):
+                resources.policy_of(dict(resources=dict(cpus=value)))
 
     def test_a_block_run_gets_its_threads_and_devices(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -188,6 +220,21 @@ class AdmissionTest(DBTestCase):
         unknown = self.schedule(self.pipeline(dict(uses=['lake'])))
         self.assertEqual(unknown.status, BlockRun.BlockRunStatus.FAILED)
         self.assertIn('lake is not declared', unknown.metrics['error']['message'])
+
+    def test_block_runs_wait_for_cpus_this_scheduler_holds(self):
+        config = yaml.safe_load(self.metadata.read_text())
+        config['resources']['cpus'] = 3
+        self.metadata.write_text(yaml.safe_dump(config))
+        first = self.schedule(self.pipeline(dict(cpu=2)))
+        self.assertEqual(first.metrics['resources']['cpu'], 2)
+        second = self.schedule(self.pipeline(dict(cpu=2)))
+        self.assertEqual(second.status, BlockRun.BlockRunStatus.INITIAL)
+        self.assertEqual(second.metrics['waiting'], 'waiting for CPUs: needs 2, 1 of 3 free')
+        too_big = self.schedule(self.pipeline(dict(cpu=4)))
+        self.assertEqual(too_big.status, BlockRun.BlockRunStatus.FAILED)
+
+        first.update(status=BlockRun.BlockRunStatus.COMPLETED)
+        self.assertEqual(self.reschedule(second).status, BlockRun.BlockRunStatus.QUEUED)
 
     def test_blocks_that_declare_resources_run_alone(self):
         pipeline = self.pipeline(dict(memory='1GiB'))

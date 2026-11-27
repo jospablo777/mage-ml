@@ -47,9 +47,9 @@ function Resources({ onChange, value }: ResourcesProps) {
       <Headline level={5}>Resources</Headline>
       <Spacing mt={1}>
         <Text muted small>
-          In triggered runs the block starts only when what it needs is free. Memory and
-          GPUs are counted per scheduler; shared limits (declared under resources in the
-          project&apos;s metadata.yaml) across every pipeline. CPUs set the size of the
+          In triggered runs the block starts only when what it needs is free. Memory, CPUs
+          and GPUs are counted per scheduler; shared limits (declared under resources in the
+          project&apos;s metadata.yaml) across every pipeline. CPUs also set the size of the
           block&apos;s thread pools. Leave them empty to start the block as soon as it is ready.
         </Text>
       </Spacing>

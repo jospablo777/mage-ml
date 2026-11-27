@@ -22,6 +22,7 @@ resources:
     warehouse: 4       # at most 4 block runs that use the warehouse at a time
     gpu_host: 1
   memory: 48GiB        # memory for block runs per scheduler (default: 80% of its RAM)
+  cpus: 16             # CPUs for block runs per scheduler (default: the CPUs it may use)
   gpus: [0, 1]         # GPU devices block runs get one by one (or a count: gpus: 2)
 ```
 
@@ -41,7 +42,7 @@ configuration:
 | Setting | Effect |
 | --- | --- |
 | `memory` | The block run starts when this much of the scheduler's memory budget is free. |
-| `cpu` | The block run's thread pools (OpenMP, OpenBLAS, MKL, NumExpr, Polars, Rayon) get this many threads, unless their environment variables are already set. |
+| `cpu` | The block run starts when this many of the scheduler's CPUs are free. Its thread pools (OpenMP, OpenBLAS, MKL, NumExpr, Polars, Rayon) get this many threads, unless their environment variables are already set. |
 | `gpu` | The block run gets that many of the project's GPU devices for itself, through `CUDA_VISIBLE_DEVICES`. |
 | `uses` | The block run starts when each named shared limit has room. |
 
@@ -66,12 +67,15 @@ resources:
 
 A block run that waits stays **initial**. The pipeline run's page lists it under
 **Waiting** with the reason, such as `waiting for warehouse: 4 of 4 in use` or
-`waiting for memory: needs 8.0 GiB, 3.2 GiB of 48.0 GiB free`. It starts on the first
+`waiting for memory: needs 8.0 GiB, 3.2 GiB of 48.0 GiB free` or
+`waiting for CPUs: needs 4, 2 of 16 free`. It starts on the first
 scheduler tick after the resource frees.
 
 A request that can never fit fails the block run at once, with the reason:
 
 - more memory than the scheduler's budget;
+- more CPUs than the project's `cpus` (without `cpus`, a block that asks for more than
+  the host has runs alone, with one thread per CPU);
 - more GPUs than the project declares;
 - a shared limit the project doesn't declare.
 
@@ -80,8 +84,9 @@ A request that can never fit fails the block run at once, with the reason:
 - What a block run holds is recorded with it when it's queued. The counts are the
   queued and running block runs, so a block run that ends, fails, is cancelled or is
   reset after a crash stops counting, and a scheduler restart loses nothing.
-- Shared limits count every scheduler and replica of the project. Memory and GPUs count
-  the block runs of one scheduler, since they belong to its host.
+- Shared limits count every scheduler and replica of the project. Memory, CPUs and GPUs
+  count the block runs of one scheduler, since they belong to its host.
+- Only blocks that declare `cpu` hold CPUs; blocks that declare none start as before.
 - Blocks that declare resources don't run in a block fusion stage; each waits for its own
   resources.
 - Declared amounts are what the scheduler counts. They aren't enforced limits on the
