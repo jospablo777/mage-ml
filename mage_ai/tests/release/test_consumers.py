@@ -33,6 +33,8 @@ BUILD = Path(tempfile.gettempdir()) / 'mageml-release-consumers'
 REPORT = BUILD / 'consumer-validation.json'
 INDEX_SCRIPT = ROOT / 'scripts/release/release_index.py'
 VERSION = '99.0.0+fixture.1'
+# The fixtures and consumer projects allow the Pythons MageML does.
+REQUIRES_PYTHON = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['requires-python']
 PROJECTS = ('mage-ml', 'column-atlas-native', 'mage-integrations', 'singer-python')
 COMMANDS: list[dict] = []
 
@@ -48,7 +50,7 @@ def write_wheel(directory: Path, name: str, requirements: tuple[str, ...]) -> Pa
         'Metadata-Version: 2.1',
         f'Name: {name}',
         f'Version: {VERSION}',
-        'Requires-Python: >=3.11,<3.14',
+        f'Requires-Python: {REQUIRES_PYTHON}',
         'Summary: Synthetic dependency routing fixture',
     ]
     if name == 'mage-ml':
@@ -210,7 +212,7 @@ class ConsumerTests(unittest.TestCase):
         root.mkdir()
         (root / 'pyproject.toml').write_text(
             '[project]\nname = "consumer-fixture"\nversion = "0.0.0"\n'
-            'requires-python = ">=3.11,<3.14"\ndependencies = []\n\n'
+            f'requires-python = "{REQUIRES_PYTHON}"\ndependencies = []\n\n'
             '[tool.uv]\npackage = false\n\n[tool.uv.workspace]\nmembers = []\n',
             encoding='utf-8',
         )
