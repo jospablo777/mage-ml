@@ -495,6 +495,65 @@ class EventTimeExportTest(StreamExportTestCase):
         self.assertEqual(stream['time'], dict(format='epoch_ms', on_late='pass', lateness_ms=0))
 
 
+class LookupExportTest(StreamExportTestCase):
+    LOOKUP = '''
+        lookup:
+          connection:
+            host: db
+            database: shop
+            username: reader
+            password: "{{ env_var('PG_PASSWORD') }}"
+          query: SELECT id, name FROM products WHERE id::text = ANY($1)
+          key: product_id
+          match: id
+          into: product
+          missing: drop
+    '''
+
+    def looked_up(self, lookup_yaml, dead_letter=False):
+        source = self.add('source', 'data_loader', SOURCE, language='yaml')
+        lookup = self.add('enrich', 'transformer', lookup_yaml, upstream=[source],
+                          language='yaml')
+        self.add('out', 'data_exporter', SINK, upstream=[lookup], language='yaml')
+        if dead_letter:
+            self.add('dead', 'data_exporter', textwrap.dedent(SINK) + 'dead_letter: true\n',
+                     upstream=[lookup], language='yaml')
+        return lookup
+
+    def test_a_yaml_transformer_with_lookup_becomes_a_lookup_block(self):
+        lookup = self.looked_up(self.LOOKUP)
+
+        pipeline = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines'][0]
+
+        [entry] = [b for b in pipeline['blocks'] if b['uuid'] == lookup.uuid]
+        self.assertEqual((entry['language'], entry['upstream']), ('lookup', []))
+        self.assertEqual(entry['lookup']['key'], 'product_id')
+        self.assertEqual(entry['lookup']['missing'], 'drop')
+        # The password stays a reference the engine fills in.
+        self.assertEqual(entry['lookup']['connection']['password'],
+                         {'$parts': [{'env': 'PG_PASSWORD'}]})
+
+    def test_settings_that_cannot_run_are_explained(self):
+        self.looked_up(self.LOOKUP
+                       .replace('"{{ env_var(\'PG_PASSWORD\') }}"', 'secret')
+                       .replace('= ANY($1)', '= 5')
+                       .replace('missing: drop', 'missing: later\n          ttl: 5'))
+        problems = self.problems()
+        for expected in ('password is written in the file', 'reads the keys as $1',
+                         'unknown lookup settings ttl', 'missing is one of keep, drop'):
+            self.assertIn(expected, problems)
+
+    def test_dead_letters_need_a_dead_letter_sink(self):
+        self.looked_up(self.LOOKUP.replace('missing: drop', 'missing: dead_letter'))
+        self.assertIn('the stream has no dead-letter sink', self.problems())
+
+    def test_dead_letters_go_to_the_dead_letter_sink(self):
+        self.looked_up(self.LOOKUP.replace('missing: drop', 'missing: dead_letter'),
+                       dead_letter=True)
+        [pipeline] = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines']
+        self.assertIsNotNone(pipeline['stream']['errors'].get('dead_letter'))
+
+
 class WindowExportTest(StreamExportTestCase):
     WINDOW = '''
         window:

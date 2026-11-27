@@ -528,6 +528,9 @@ pub enum Language {
     Sql,
     /// A stream's window block: aggregates over event time, computed by the engine.
     Window,
+    /// A stream's lookup block: each message enriched with a table's matching row, looked
+    /// up in batches and cached by the engine.
+    Lookup,
 }
 
 impl Language {
@@ -538,6 +541,7 @@ impl Language {
             Language::R => "r",
             Language::Sql => "sql",
             Language::Window => "window",
+            Language::Lookup => "lookup",
         }
     }
 }
@@ -588,6 +592,9 @@ pub struct Block {
     /// A window block's windows and aggregates (mage_stream_core::window::WindowSpec).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<Value>,
+    /// A lookup block's connection, query and cache (service/src/stream_lookup.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookup: Option<Value>,
     /// The Python worker (an alias of the manifest's `python_workers`) a Python block runs
     /// in; None for the image's own Python.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -906,18 +913,20 @@ impl Manifest {
             }
             problems.extend(pipeline.validate(project_dir));
             for block in &pipeline.blocks {
-                if block.language != Language::Window {
-                    continue;
-                }
+                let (kind, settings) = match block.language {
+                    Language::Window => ("window", block.window.is_some()),
+                    Language::Lookup => ("lookup", block.lookup.is_some()),
+                    _ => continue,
+                };
                 if pipeline.stream.is_none() {
                     problems.push(format!(
-                        "Pipeline {}: block {} is a window, which runs in a stream.",
+                        "Pipeline {}: block {} is a {kind}, which runs in a stream.",
                         pipeline.uuid, block.uuid
                     ));
                 }
-                if block.window.is_none() {
+                if !settings {
                     problems.push(format!(
-                        "Pipeline {}: window block {} has no window settings.",
+                        "Pipeline {}: {kind} block {} has no {kind} settings.",
                         pipeline.uuid, block.uuid
                     ));
                 }
@@ -1053,11 +1062,15 @@ impl Pipeline {
             }
             if !matches!(
                 block.language,
-                Language::Python | Language::Rust | Language::R | Language::Window
+                Language::Python
+                    | Language::Rust
+                    | Language::R
+                    | Language::Window
+                    | Language::Lookup
             ) {
                 problems.push(format!(
                     "Pipeline {name}: block {} is in {:?}; stream blocks run in Python, Rust or R, \
-                     or are windows.",
+                     or are windows or lookups.",
                     block.uuid, block.language
                 ));
             }

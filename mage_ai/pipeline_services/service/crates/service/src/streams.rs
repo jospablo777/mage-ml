@@ -768,11 +768,12 @@ fn transform_session(
     if let Some(block) = order.iter().find(|b| {
         !matches!(
             b.language,
-            Language::Python | Language::Rust | Language::R | Language::Window
+            Language::Python | Language::Rust | Language::R | Language::Window | Language::Lookup
         )
     }) {
         return Err(format!(
-            "stream block {} is in {:?}; stream blocks run in Python, Rust, R or are windows",
+            "stream block {} is in {:?}; stream blocks run in Python, Rust, R or are windows \
+             or lookups",
             block.uuid, block.language
         ));
     }
@@ -787,21 +788,7 @@ fn transform_session(
     };
     let dead_letters = stream.errors.dead_letter.is_some();
     let source_shape = source_shape(&stream.source);
-    let mut regions: Vec<Vec<Block>> = Vec::new();
-    for block in order.iter().cloned() {
-        match regions.last_mut() {
-            // Each window block is a session of its own, and Python blocks split where their
-            // Python worker changes (each worker is a pool of its own interpreter).
-            Some(region)
-                if region[0].language == block.language
-                    && block.language != Language::Window
-                    && region[0].python_worker == block.python_worker =>
-            {
-                region.push(block)
-            }
-            _ => regions.push(vec![block]),
-        }
-    }
+    let regions = regions(&order);
     let session = |blocks: &[Block], outputs: Vec<String>, first: bool, log: RunLog| {
         region_session(
             service,
@@ -858,6 +845,28 @@ fn transform_session(
     Ok(Some(Box::new(crate::stream_chain::ChainedSession::new(
         chained, wanted,
     ))))
+}
+
+/// The stream's blocks in runs of one session each: each window and lookup block is a
+/// session of its own, Python blocks split where their Python worker changes (each worker is a pool of its
+/// own interpreter), and R and Rust blocks where their environment does (each environment
+/// is a program of its own).
+fn regions(order: &[Block]) -> Vec<Vec<Block>> {
+    let mut regions: Vec<Vec<Block>> = Vec::new();
+    for block in order.iter().cloned() {
+        match regions.last_mut() {
+            Some(region)
+                if region[0].language == block.language
+                    && !matches!(block.language, Language::Window | Language::Lookup)
+                    && region[0].python_worker == block.python_worker
+                    && region[0].language_environment() == block.language_environment() =>
+            {
+                region.push(block)
+            }
+            _ => regions.push(vec![block]),
+        }
+    }
+    regions
 }
 
 /// How the source's messages reach the first blocks, as Mage hands them over.
@@ -922,6 +931,33 @@ fn region_session(
             )
             .map_err(|e| format!("window block {}: {e}", block.uuid))?
             .exactly_once(crate::stream_python::exactly_once(pipeline)),
+        ));
+    }
+    if blocks[0].language == Language::Lookup {
+        let block = &blocks[0];
+        let named = |e: String| format!("lookup block {}: {e}", block.uuid);
+        let mut spec: crate::stream_lookup::LookupSpec =
+            serde_json::from_value(block.lookup.clone().unwrap_or(Value::Null))
+                .map_err(|e| named(e.to_string()))?;
+        // The connection's env_var references, filled in as a connector's are.
+        let lookup = |name: &str| {
+            service
+                .extra_env
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+                .or_else(|| std::env::var(name).ok())
+        };
+        spec.connection = io_config::render(&spec.connection, &lookup);
+        let fetch = mage_connector_postgres::lookup::PgLookup::new(
+            &spec.connection,
+            &spec.query,
+            &spec.match_column,
+        )
+        .map_err(|e| named(e.message))?;
+        return Ok(Box::new(
+            crate::stream_lookup::LookupSession::new(&block.uuid, spec, Box::new(fetch), Some(log))
+                .map_err(named)?,
         ));
     }
     let register = |views: Vec<(String, String, crate::keyed_state::StateView)>| {
@@ -1058,6 +1094,29 @@ mod tests {
             after: None,
             config: config.as_object().cloned().unwrap_or_default(),
         }
+    }
+
+    #[test]
+    fn stream_blocks_split_into_sessions_by_language_worker_and_environment() {
+        let block = |uuid: &str, language: &str, configuration: Value| -> Block {
+            serde_json::from_value(serde_json::json!({
+                "uuid": uuid, "type": "transformer", "language": language,
+                "file": format!("{uuid}.x"), "sha256": "0", "configuration": configuration,
+            }))
+            .unwrap()
+        };
+        let order = vec![
+            block("a", "r", serde_json::json!({})),
+            block("b", "r", serde_json::json!({"r_environment": "default"})),
+            block("c", "r", serde_json::json!({"r_environment": "models"})),
+            block("d", "r", serde_json::json!({"r_environment": "models"})),
+            block("e", "python", serde_json::json!({})),
+        ];
+        let uuids: Vec<Vec<String>> = regions(&order)
+            .iter()
+            .map(|r| r.iter().map(|b| b.uuid.clone()).collect())
+            .collect();
+        assert_eq!(uuids, vec![vec!["a", "b"], vec!["c", "d"], vec!["e"]]);
     }
 
     #[test]

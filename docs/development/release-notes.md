@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Lookups in streams
+
+- A YAML transformer with `lookup:` adds to each message the row of a PostgreSQL table that
+  matches one of its fields: one query per batch for the keys not cached, rows cached for
+  `cache_seconds`, values with every digit, and `missing: keep`, `drop` or `dead_letter`. A
+  database that cannot be reached is retried as sinks are, so messages never go to dead
+  letters for it.
+- Stream blocks in R or Rust that choose different named environments run as separate
+  programs, each in its environment.
+- A server test that limited the owner user's creation to 3 seconds failed on loaded CI
+  runners (I-546); it now checks that nothing sleeps.
+
 ### Bounded Kafka streams
 
 - `stop_at: end` (or a time in milliseconds) on a Kafka source reads every partition up to

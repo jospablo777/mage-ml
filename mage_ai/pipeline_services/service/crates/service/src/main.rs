@@ -41,6 +41,7 @@ mod shadow;
 mod state_files;
 mod stream;
 mod stream_chain;
+mod stream_lookup;
 mod stream_python;
 mod stream_rust;
 mod stream_time;
@@ -447,6 +448,7 @@ fn info(common: &Common) -> Result<(), String> {
                 Language::R => "r",
                 Language::Sql => "sql",
                 Language::Window => "window",
+                Language::Lookup => "lookup",
             };
             let upstream = if block.upstream.is_empty() {
                 String::new()

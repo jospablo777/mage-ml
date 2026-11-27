@@ -1864,7 +1864,10 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     for block in transformers:
         language = str(getattr(block.language, 'value', block.language))
         if language == 'yaml':
-            entry = _window_entry(pipeline, block, project, prefix, capture_, problems)
+            if _is_lookup(pipeline, block):
+                entry = _lookup_entry(pipeline, block, project, prefix, capture_, problems)
+            else:
+                entry = _window_entry(pipeline, block, project, prefix, capture_, problems)
             if entry is not None:
                 entry['upstream'] = [u for u in entry['upstream'] if u != source_block.uuid]
                 blocks.append(entry)
@@ -1889,6 +1892,8 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         blocks.append(entry)
     sink_entries = []
     dead_letters = []
+    dead_letter_lookups = [b['uuid'] for b in blocks if b.get('language') == 'lookup'
+                           and (b.get('lookup') or {}).get('missing') == 'dead_letter']
     for block in sinks:
         sink = _stream_connector(block, STREAM_SINKS, 'sink', pipeline, capture_, problems)
         if sink is None:
@@ -1916,6 +1921,12 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         sink.pop('batch_size', None)
         sink.pop('timeout_ms', None)
         sink_entries.append(sink)
+    if dead_letter_lookups and not dead_letters:
+        problems.append(
+            f'{prefix}: lookup {", ".join(dead_letter_lookups)} sends messages without a row '
+            'to dead letters (missing: dead_letter), and the stream has no dead-letter sink: '
+            'add one (dead_letter: true on a sink), or set missing to keep or drop.'
+        )
     if source is None:
         return None
     batch = dict(
@@ -2163,6 +2174,112 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
 
 WINDOW_TYPES = ('tumbling', 'hopping', 'session')
 WINDOW_FUNCTIONS = ('sum', 'min', 'max', 'avg', 'distinct')
+
+
+def _is_lookup(pipeline, block) -> bool:
+    try:
+        config = compile_stream_config(Path(block.file_path).read_text(),
+                                       getattr(pipeline, 'variables', None))
+    except (OSError, ValueError):
+        return False
+    return isinstance(config, dict) and 'lookup' in config
+
+
+LOOKUP_SETTINGS = {
+    'connection', 'query', 'key', 'match', 'into', 'cache_seconds', 'cache_rows', 'missing',
+}
+LOOKUP_CONNECTION_SETTINGS = {
+    'host', 'port', 'database', 'username', 'user', 'password', 'sslmode', 'sslrootcert',
+    'connect_timeout',
+}
+LOOKUP_MISSING = ('keep', 'drop', 'dead_letter')
+
+
+def _lookup_entry(pipeline, block, project: Path, prefix: str, capture_: Capture,
+                  problems: List[str]) -> Optional[Dict]:
+    """
+    A YAML transformer with `lookup:`, which the engine runs (service/src/stream_lookup.rs):
+    each message gets the row of a PostgreSQL query that matches its key, asked once per
+    batch for the keys its cache does not hold.
+
+        lookup:
+          connection:
+            host: "{{ env_var('PG_HOST') }}"
+            database: shop
+            username: reader
+            password: "{{ env_var('PG_PASSWORD') }}"
+          query: SELECT id, name, category FROM products WHERE id::text = ANY($1)
+          key: product_id
+          match: id
+          into: product            # optional: without it the row's columns merge
+          cache_seconds: 300
+          missing: keep            # keep, drop or dead_letter
+    """
+    where = f'{prefix}, block {block.uuid}'
+    path = Path(block.file_path).resolve()
+    try:
+        config = compile_stream_config(path.read_text(), getattr(pipeline, 'variables', None))
+    except (OSError, ValueError) as error:
+        problems.append(f'{where}: {error}')
+        return None
+    lookup = config.get('lookup')
+    if not isinstance(lookup, dict):
+        problems.append(f'{where}: lookup is a mapping of its connection, query and key.')
+        return None
+    found = len(problems)
+    unknown = sorted(set(lookup) - LOOKUP_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown lookup settings {", ".join(unknown)}.')
+    connection = lookup.get('connection')
+    if not isinstance(connection, dict):
+        problems.append(f'{where}: lookup needs connection, the PostgreSQL host, database, '
+                        'username and password.')
+        connection = {}
+    unknown = sorted(set(connection) - LOOKUP_CONNECTION_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown lookup connection settings {", ".join(unknown)}.')
+    for key in ('host', 'database'):
+        if not connection.get(key):
+            problems.append(f'{where}: the lookup connection needs {key}.')
+    if not (connection.get('username') or connection.get('user')):
+        problems.append(f'{where}: the lookup connection needs username.')
+    if _literal(connection.get('password')):
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    query = lookup.get('query')
+    if not isinstance(query, str) or '$1' not in query:
+        problems.append(f'{where}: the lookup query reads the keys as $1, a text array, such as '
+                        'SELECT id, name FROM products WHERE id::text = ANY($1).')
+    for key in ('key', 'match'):
+        if not isinstance(lookup.get(key), str) or not lookup.get(key):
+            problems.append(f'{where}: lookup needs {key}: the '
+                            + ('message field whose value is looked up.' if key == 'key'
+                               else 'column of the query\'s rows that holds the key.'))
+    if lookup.get('into') is not None and not isinstance(lookup.get('into'), str):
+        problems.append(f'{where}: lookup into is the field the row goes into.')
+    seconds = lookup.get('cache_seconds', 300)
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds < 0:
+        problems.append(f'{where}: lookup cache_seconds is a number of seconds, 0 or more.')
+    rows = lookup.get('cache_rows', 100000)
+    if isinstance(rows, bool) or not isinstance(rows, int) or rows < 1:
+        problems.append(f'{where}: lookup cache_rows is a number of keys, 1 or more.')
+    missing = lookup.get('missing', 'keep')
+    if missing not in LOOKUP_MISSING:
+        problems.append(f'{where}: lookup missing is one of {", ".join(LOOKUP_MISSING)}.')
+    if len(problems) > found:
+        return None
+    capture_.files.add(path)
+    return dict(
+        uuid=block.uuid,
+        type='transformer',
+        language='lookup',
+        file=str(path.relative_to(project)),
+        sha256=_digest(path),
+        upstream=list(block.upstream_block_uuids or []),
+        lookup={k: v for k, v in lookup.items() if k in LOOKUP_SETTINGS},
+    )
 
 
 def _window_entry(pipeline, block, project: Path, prefix: str, capture_: Capture,

@@ -391,8 +391,8 @@ fn chain_kind(block: &Block) -> Option<ChainKind> {
         Language::Rust if block.entry.is_some() => Some(ChainKind::Rust),
         Language::Rust => None,
         Language::Python | Language::R | Language::Sql => Some(ChainKind::Worker),
-        // Window blocks are stream blocks; the manifest check keeps them out of runs.
-        Language::Window => None,
+        // Window and lookup blocks are stream blocks; the manifest check keeps them out of runs.
+        Language::Window | Language::Lookup => None,
     }
 }
 
@@ -451,7 +451,7 @@ fn service_facts(block: &Block) -> mage_service_core::plan::BlockFacts {
             Language::R => PlanLanguage::R,
             Language::Rust => PlanLanguage::Rust,
             Language::Sql => PlanLanguage::Sql,
-            Language::Window => PlanLanguage::Other,
+            Language::Window | Language::Lookup => PlanLanguage::Other,
         }),
         upstream: block.upstream.clone(),
         worker: block.python_worker.clone(),
@@ -723,9 +723,10 @@ impl BlockTask {
                 self.run_python(pool()?, timeout, false, traceparent.as_deref())
                     .await
             }
-            Language::Window => Err(BlockFailure::fatal(
-                "a window block runs in a stream, not in a pipeline run",
-            )),
+            Language::Window | Language::Lookup => Err(BlockFailure::fatal(format!(
+                "a {} block runs in a stream, not in a pipeline run",
+                self.block.language.as_str()
+            ))),
             Language::Rust => {
                 if !self.block.conditions.is_empty()
                     && let Ran::Skipped(reason) = self

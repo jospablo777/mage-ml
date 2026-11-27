@@ -252,6 +252,51 @@ that gets a partition reads its state. Credentials come from the environment as 
 object storage sink (`AWS_ENDPOINT_URL` for MinIO and other S3-compatible stores). Windows
 run on the engine, in exported services and in the Run tab, not in MageML's own streaming.
 
+## Lookups
+
+A transformer written in YAML with `lookup:` adds to each message the row of a PostgreSQL
+table that matches one of its fields, without code: products to orders, customers to
+events. The engine asks once per batch for the keys its cache does not hold, and keeps the
+rows for `cache_seconds`.
+
+```yaml
+lookup:
+  connection:
+    host: "{{ env_var('PG_HOST') }}"
+    database: shop
+    username: reader
+    password: "{{ env_var('PG_PASSWORD') }}"
+  query: SELECT id, name, category, price FROM products WHERE id::text = ANY($1)
+  key: product_id         # the message field whose value is looked up
+  match: id               # the column of the query's rows that holds the key
+  into: product           # optional: the field the row goes into
+  cache_seconds: 300      # how long a row, or its absence, is kept; 0 asks every batch
+  cache_rows: 100000      # the most keys kept
+  missing: keep           # keep (into is null), drop, or dead_letter
+```
+
+```json
+{"order": 7, "product_id": 1, "product": {"id": 1, "name": "tea", "category": "drinks",
+ "price": 12345678901234567890.0123456789}}
+```
+
+- `$1` is the batch's keys as a text array: compare with `column::text = ANY($1)`, or cast
+  it, `id = ANY($1::bigint[])`, so PostgreSQL can use an index.
+- Rows keep PostgreSQL's values: numbers with every digit, timestamps as ISO text, JSON as
+  it is. The message's own fields keep theirs too.
+- Without `into`, the row's columns are added to the message; a field the message has keeps
+  its value.
+- A key the table has no row for is cached as well, so it is not asked for again until it
+  expires.
+- When the database cannot be reached, the batch waits and the query is retried (from half
+  a second up to 30 seconds apart, each attempt in the log), as sinks are retried: messages
+  never go to dead letters because the database is down. A query PostgreSQL refuses, such as
+  one with a column that does not exist, fails the batch as a block error.
+- `missing: dead_letter` needs a dead-letter sink, and the export says so when the stream
+  has none.
+
+Lookups run on the engine, in exported services and in the Run tab, as windows do.
+
 ## Keyed state
 
 A stream block in Python, Rust or R can keep a value per key between batches: a count per

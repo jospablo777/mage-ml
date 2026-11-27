@@ -221,12 +221,20 @@ class ServerTests(AsyncDBTestCase):
         self.assertIsNotNone(owner_user)
 
     def test_making_the_owner_user_does_not_wait(self):
-        # It slept 5 seconds on the event loop, in case the tables did not exist yet.
-        from time import monotonic
+        # It slept 5 seconds on the event loop, in case the tables did not exist yet. A
+        # time limit failed on loaded CI runners, where hashing the password takes seconds;
+        # no sleep is the check.
+        import time
 
-        start = monotonic()
-        initialize_user_authentication(ProjectType.STANDALONE)
-        self.assertLess(monotonic() - start, 3)
+        slept = []
+        real_sleep = time.sleep
+        record = lambda s, *a, **k: slept.append(s) or real_sleep(0)  # noqa: E731
+        # The sleep was `from time import sleep` in the server module.
+        with patch('time.sleep', side_effect=record), \
+                patch('asyncio.sleep', side_effect=lambda s, *a, **k: slept.append(s)), \
+                patch.object(server_module, 'sleep', side_effect=record, create=True):
+            initialize_user_authentication(ProjectType.STANDALONE)
+        self.assertEqual([s for s in slept if s >= 1], [])
 
 
 class StartServerTest(unittest.TestCase):

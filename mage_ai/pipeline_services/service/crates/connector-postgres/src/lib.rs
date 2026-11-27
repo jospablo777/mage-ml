@@ -21,6 +21,7 @@
 //! (a file, PEM, or base64 PEM), `connect_timeout`.
 
 pub mod cdc;
+pub mod lookup;
 mod replication;
 pub mod transaction;
 
