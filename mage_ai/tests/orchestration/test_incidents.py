@@ -5,7 +5,10 @@ from mage_ai.orchestration import incidents
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.shared.utils import clean_name
 from mage_ai.tests.base_test import DBTestCase
-from mage_ai.tests.factory import create_pipeline_run_with_schedule, create_pipeline_with_blocks
+from mage_ai.tests.factory import (
+    create_pipeline_run_with_schedule,
+    create_pipeline_with_blocks,
+)
 
 START = datetime(2026, 11, 20, 8, 0, tzinfo=timezone.utc)
 TRACEBACK = '''Traceback (most recent call last):
