@@ -16,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Table,
@@ -826,6 +827,13 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
     metrics = Column(JSON)
     backfill_id = Column(Integer, ForeignKey('backfill.id'), index=True)
     executor_type = Column(Enum(ExecutorType), default=ExecutorType.LOCAL_PYTHON)
+    # The partition the run is of (orchestration/partitions.py); None for other runs.
+    partition = Column(String(255), default=None)
+
+    __table_args__ = (
+        # The state of every partition of a pipeline: its latest run, by id.
+        Index('ix_pipeline_run_pipeline_uuid_partition', 'pipeline_uuid', 'partition', 'id'),
+    )
 
     pipeline_schedule = relationship(PipelineSchedule, back_populates='pipeline_runs')
     block_runs = relationship('BlockRun', back_populates='pipeline_run')

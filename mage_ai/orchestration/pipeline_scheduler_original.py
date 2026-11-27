@@ -1980,11 +1980,17 @@ def configure_pipeline_run_payload(
     elif not isinstance(execution_date, datetime):
         payload['execution_date'] = datetime.fromisoformat(execution_date)
 
-    # Set execution_partition in variables
-    payload['variables']['execution_partition'] = os.sep.join([
-        str(pipeline_schedule.id),
-        payload['execution_date'].strftime(format='%Y%m%dT%H%M%S_%f'),
-    ])
+    # Set execution_partition in variables; a partition's run has its partition's folder,
+    # whichever trigger runs it (orchestration/partitions.py).
+    if payload.get('partition'):
+        from mage_ai.orchestration.partitions import folder
+
+        payload['variables']['execution_partition'] = folder(payload['partition'])
+    else:
+        payload['variables']['execution_partition'] = os.sep.join([
+            str(pipeline_schedule.id),
+            payload['execution_date'].strftime(format='%Y%m%dT%H%M%S_%f'),
+        ])
 
     is_integration = PipelineType.INTEGRATION == pipeline_type
     if is_integration:

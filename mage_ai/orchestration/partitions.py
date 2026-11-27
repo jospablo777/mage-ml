@@ -236,16 +236,24 @@ def expected(declaration: Declaration, now: Optional[datetime] = None) -> List[s
     return values
 
 
+def folder(value: str) -> str:
+    """A partition's execution partition: one output folder whichever trigger runs it."""
+    return f'partitions/{value}'
+
+
 def run_variables(declaration: Declaration, value: str) -> Dict[str, Any]:
-    """The variables of a partition's run: its key, its execution_date (the partition's start,
-    in UTC) and its output folder, the same whichever trigger runs it."""
+    """The variables of a partition's run: its key and its output folder."""
     if declaration.kind == 'values':
         if value not in declaration.values:
             raise PartitionError(f'{value!r} is not one of the values of {declaration.key}: '
                                  f'{", ".join(declaration.values)}.')
-        variables = {declaration.key: value}
     else:
-        start = begin(declaration, value).astimezone(timezone.utc)
-        variables = {declaration.key: value, 'execution_date': start}
-    variables['execution_partition'] = f'partitions/{value}'
-    return variables
+        begin(declaration, value)
+    return {declaration.key: value, 'execution_partition': folder(value)}
+
+
+def run_start(declaration: Declaration, value: str) -> Optional[datetime]:
+    """A partition run's execution_date: its partition's start in UTC; None for values."""
+    if declaration.kind == 'values':
+        return None
+    return begin(declaration, value).astimezone(timezone.utc)

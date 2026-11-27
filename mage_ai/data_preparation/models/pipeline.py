@@ -153,6 +153,8 @@ class Pipeline:
 
         self.repo_path = repo_path or get_repo_path()
         self.retry_config = {}
+        # The pipeline's partitions declaration (orchestration/partitions.py), as written.
+        self.partitions = None
         self.run_pipeline_in_one_process = RUN_PIPELINE_IN_ONE_PROCESS
         self.schedules = []
         self.settings = {}
@@ -995,6 +997,7 @@ class Pipeline:
         self.executor_type = config.get('executor_type')
         self.notification_config = config.get('notification_config') or {}
         self.retry_config = config.get('retry_config') or {}
+        self.partitions = config.get('partitions') or None
         self.run_pipeline_in_one_process = config.get(
             'run_pipeline_in_one_process',
             RUN_PIPELINE_IN_ONE_PROCESS,
@@ -1150,6 +1153,13 @@ class Pipeline:
 
         return blocks_by_uuid
 
+    @property
+    def partition_declaration(self):
+        """The parsed partitions declaration, or None; raises PartitionError when invalid."""
+        from mage_ai.orchestration.partitions import parse
+
+        return parse(self.partitions)
+
     def to_dict_base(
         self, exclude_data_integration=False, include_execution_framework: Optional[bool] = None
     ) -> Dict:
@@ -1180,6 +1190,8 @@ class Pipeline:
             base['keep_block_outputs'] = True
         if self.environment:
             base['environment'] = self.environment
+        if self.partitions:
+            base['partitions'] = self.partitions
 
         if (
             include_execution_framework
@@ -1451,6 +1463,7 @@ class Pipeline:
             'environment',
             'keep_block_outputs',
             'concurrency_config',
+            'partitions',
             'data_integration',
             'executor_type',
             'retry_config',

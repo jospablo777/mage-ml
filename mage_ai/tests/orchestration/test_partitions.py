@@ -76,11 +76,10 @@ class ValuesTest(TestCase):
         self.assertEqual(end - start, timedelta(hours=25))
         self.assertEqual(partitions.value_of(
             declaration, datetime(2026, 11, 2, 3, 30, tzinfo=UTC)), '2026-11-01')
-        variables = partitions.run_variables(declaration, '2026-11-02')
-        self.assertEqual(variables['execution_date'],
+        self.assertEqual(partitions.run_start(declaration, '2026-11-02'),
                          datetime(2026, 11, 2, 5, 0, tzinfo=UTC))
-        self.assertEqual(variables['day'], '2026-11-02')
-        self.assertEqual(variables['execution_partition'], 'partitions/2026-11-02')
+        self.assertEqual(partitions.run_variables(declaration, '2026-11-02'),
+                         dict(day='2026-11-02', execution_partition='partitions/2026-11-02'))
 
     def test_hours_are_utc_so_none_repeats_or_is_missing(self):
         declaration = partitions.parse(dict(key='hour', hourly=dict(
@@ -111,6 +110,7 @@ class ValuesTest(TestCase):
         self.assertEqual(partitions.expected(declaration), ['eu', 'us'])
         self.assertEqual(partitions.run_variables(declaration, 'eu'),
                          dict(region='eu', execution_partition='partitions/eu'))
+        self.assertIsNone(partitions.run_start(declaration, 'eu'))
         with self.assertRaisesRegex(PartitionError, "'apac' is not one of the values"):
             partitions.run_variables(declaration, 'apac')
 
