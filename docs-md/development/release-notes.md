@@ -14,6 +14,9 @@
 
 ### SQL stream blocks
 
+- A SQL query that groups by a window of event time (`GROUP BY card_id,
+  TUMBLE(INTERVAL '1 minute')`, `HOP`, `SESSION`) runs as the engine's window, with
+  `count`, `count(DISTINCT)`, `sum`, `min`, `max` and `avg`; YAML windows take `key_as`.
 - A stream's SQL transformer runs a query on each batch: the batch is the table `messages`,
   the stream's broadcast values the table `broadcast`. Services run it in the engine on Polars
   SQL, without Python (about 0.4 ms for a 500-message batch); the editor runs the same query

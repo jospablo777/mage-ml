@@ -45,12 +45,20 @@ pub struct WindowSpec {
     /// windows for all events.
     #[serde(default)]
     pub key: Option<String>,
+    /// The result's field for the key: `key` unless named (a SQL window's group column).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_as: Option<String>,
     pub kind: WindowKind,
     /// Output field and its aggregate, in order.
     pub aggregates: Vec<(String, Aggregate)>,
 }
 
 impl WindowSpec {
+    /// The result's field that holds the key.
+    pub fn key_field(&self) -> &str {
+        self.key_as.as_deref().unwrap_or("key")
+    }
+
     pub fn check(&self) -> Result<(), String> {
         match self.kind {
             WindowKind::Tumbling { size_ms } if size_ms <= 0 => {
@@ -74,7 +82,7 @@ impl WindowSpec {
         if names.len() != self.aggregates.len() {
             return Err("two aggregates have the same name".into());
         }
-        for reserved in ["key", "window_start", "window_end"] {
+        for reserved in [self.key_field(), "window_start", "window_end"] {
             if names.contains(reserved) {
                 return Err(format!("{reserved} is a field of every window's result"));
             }
@@ -329,6 +337,7 @@ mod tests {
     fn spec(kind: WindowKind) -> WindowSpec {
         WindowSpec {
             key: Some("card".into()),
+            key_as: None,
             kind,
             aggregates: vec![
                 ("n".into(), Aggregate::Count),
@@ -440,6 +449,7 @@ mod tests {
         fn tumbling_counts_add_up(times in proptest::collection::vec(0i64..100_000, 0..300)) {
             let spec = WindowSpec {
                 key: None,
+                key_as: None,
                 kind: WindowKind::Tumbling { size_ms: 1_000 },
                 aggregates: vec![("n".into(), Aggregate::Count)],
             };
@@ -463,6 +473,7 @@ mod tests {
             let gap = 100;
             let spec = WindowSpec {
                 key: None,
+                key_as: None,
                 kind: WindowKind::Session { gap_ms: gap },
                 aggregates: vec![("n".into(), Aggregate::Count)],
             };

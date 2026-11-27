@@ -581,6 +581,24 @@ class StreamSqlExportTest(StreamExportTestCase):
         # Batch SQL runs in the Python worker; a stream's runs in the engine.
         self.assertFalse(capture_.needs_python)
 
+    def test_a_query_grouped_by_a_window_becomes_the_engines_window_block(self):
+        pick = self.picked("""
+            SELECT card_id, count(*) AS payments, sum(amount) AS total
+            FROM {{ df_1 }}
+            GROUP BY card_id, TUMBLE(INTERVAL '1 minute')
+        """)
+
+        capture_ = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        [entry] = [b for b in capture_.manifest['pipelines'][0]['blocks']
+                   if b['uuid'] == pick.uuid]
+        self.assertEqual(entry['language'], 'window')
+        self.assertEqual(entry['window'], dict(
+            key='card_id', key_as='card_id', kind=dict(type='tumbling', size_ms=60000),
+            aggregates=[['payments', 'count'], ['total', {'sum': 'amount'}]],
+        ))
+        self.assertNotIn('sql', capture_.engine_features, 'windows need no SQL engine')
+
     def test_other_references_are_explained(self):
         self.picked('SELECT * FROM {{ df_2 }} JOIN {{ variables("x") }}')
         problems = self.problems()

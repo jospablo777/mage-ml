@@ -77,3 +77,57 @@ class StreamSqlTest(unittest.TestCase):
                 '"user":"{\\"a\\":\\"x\\",\\"b\\":1}","big":1.8446744073709552e+19}',
             ],
         )
+
+
+class WindowedSqlTest(unittest.TestCase):
+    """A query grouped by a window of event time is a window block (export._window_spec)."""
+
+    def test_tumbling_hopping_and_session_windows_with_their_aggregates(self):
+        self.assertEqual(
+            sql.window_of(
+                'SELECT card_id, window_start, count(*) AS payments, sum(amount) AS total, '
+                'min(amount) AS smallest, max(amount) AS largest, avg(amount) AS mean, '
+                'count(DISTINCT shop_id) AS shops FROM {{ df_1 }} '
+                "GROUP BY card_id, HOP(INTERVAL '1 minute', INTERVAL '10 seconds')"
+            ),
+            dict(key='card_id', key_as='card_id', type='hopping', size_seconds=60.0,
+                 slide_seconds=10.0, aggregate=dict(
+                     payments='count', total=dict(sum='amount'), smallest=dict(min='amount'),
+                     largest=dict(max='amount'), mean=dict(avg='amount'),
+                     shops=dict(distinct='shop_id'))),
+        )
+        self.assertEqual(
+            sql.window_of("SELECT user.id AS uid, max(x) AS m FROM messages "
+                          "GROUP BY user.id, session(INTERVAL '5 minutes')"),
+            dict(key='user.id', key_as='uid', type='session', gap_seconds=300.0,
+                 aggregate=dict(m=dict(max='x'))),
+        )
+        self.assertEqual(
+            sql.window_of("SELECT count(*) AS n FROM messages GROUP BY TUMBLE(INTERVAL '2 hours')"),
+            dict(key=None, type='tumbling', size_seconds=7200.0, aggregate=dict(n='count')),
+        )
+        # Without a window, a query is not one.
+        self.assertIsNone(sql.window_of('SELECT a, count(*) AS n FROM messages GROUP BY a'))
+
+    def test_what_a_window_cannot_do_is_explained(self):
+        for query, message in (
+            ("SELECT count(*) AS n FROM messages WHERE x > 1 GROUP BY TUMBLE(INTERVAL '1 minute')",
+             'no WHERE'),
+            ("SELECT count(*) FROM messages GROUP BY TUMBLE(INTERVAL '1 minute')", 'with AS'),
+            ('SELECT count(*) AS n FROM messages GROUP BY TUMBLE(5)', 'not a window length'),
+            ("SELECT a, count(*) AS n FROM messages GROUP BY TUMBLE(INTERVAL '1 minute')",
+             'neither the window'),
+            ("SELECT a, b, count(*) AS n FROM messages GROUP BY a, b, "
+             "TUMBLE(INTERVAL '1 minute')", 'at most one field'),
+            ("SELECT median(a) AS m FROM messages GROUP BY TUMBLE(INTERVAL '1 minute')",
+             'not a window aggregate'),
+            ("SELECT count(*) AS n FROM messages GROUP BY TUMBLE(INTERVAL '1 minute'",
+             'does not parse'),
+        ):
+            with self.subTest(query=query):
+                with self.assertRaisesRegex(sql.StreamSqlError, message):
+                    sql.window_of(query)
+        # The editor's own streaming does not run windows; it says where they run.
+        with self.assertRaisesRegex(sql.StreamSqlError, 'Run tab'):
+            sql.run("SELECT count(*) AS n FROM messages GROUP BY TUMBLE(INTERVAL '1 minute')",
+                    [dict(a=1)])

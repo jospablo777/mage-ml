@@ -223,6 +223,7 @@ window:
   size_seconds: 60      # tumbling and hopping
   slide_seconds: 10     # hopping: a new window every 10 seconds
   gap_seconds: 300      # session: a key's events closer than this are one window
+  key_as: card_id       # optional: the result's field for the key (key by default)
   aggregate:
     payments: count
     total: {sum: amount}
@@ -274,7 +275,36 @@ Polars, reading the batch the same way.
 | --- | --- |
 | `SELECT`, `WHERE`, expressions and functions, `CASE`, `GROUP BY` within a batch, `ORDER BY`, `UNION`, `CROSS JOIN broadcast` | Scalar subqueries in comparisons (`> (SELECT ...)`): use `CROSS JOIN broadcast` |
 | One upstream block (`messages`) | Other tables and `{{ df_2 }}`: enrich with a [lookup](#lookups) first |
-| Each batch on its own | State across batches: use [windows](#windows) or [keyed state](#keyed-state) |
+| Each batch on its own, or [a window](#windowed-sql) | Other state across batches: use [keyed state](#keyed-state) |
+
+### Windowed SQL
+
+A query that groups by a window of event time is a [window](#windows): the engine keeps its
+windows across batches and emits one message per key and window when the watermark passes
+its end, as a YAML window does.
+
+```sql
+SELECT card_id, count(*) AS payments, sum(amount) AS total, count(DISTINCT shop_id) AS shops
+FROM messages
+GROUP BY card_id, TUMBLE(INTERVAL '1 minute')
+```
+
+```json
+{"card_id": "c-17", "window_start": "2026-10-21T10:00:00.000Z",
+ "window_end": "2026-10-21T10:01:00.000Z", "payments": 3, "total": 61.5, "shops": 2}
+```
+
+| In the query | Means |
+| --- | --- |
+| `TUMBLE(INTERVAL '1 minute')` | Windows of a minute, one after another |
+| `HOP(INTERVAL '1 minute', INTERVAL '10 seconds')` | Windows of a minute, a new one every 10 seconds |
+| `SESSION(INTERVAL '5 minutes')` | A key's messages closer than 5 minutes are one window |
+| One more `GROUP BY` field | Windows per value of it; its name (or alias) is the result's field |
+| `count(*)`, `count(DISTINCT f)`, `sum`, `min`, `max`, `avg` of a field | The aggregates, each named with `AS` |
+
+A window aggregates every message that reaches it: a windowed query has no `WHERE` or join;
+filter in a SQL block before it. Windowed queries run where windows run, in exported
+services and the Run tab.
 
 Columns follow the batch, in the order fields first appear: a field that no message of a
 batch has is not a column of that batch, and a query that names it fails the batch. A column

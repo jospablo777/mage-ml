@@ -2225,6 +2225,7 @@ def _stream_sql_entry(pipeline, block, project: Path, prefix: str, capture_: Cap
 
     try:
         stream_sql.query_of(text)
+        window = stream_sql.window_of(text)
     except stream_sql.StreamSqlError as error:
         problems.append(f'{where}: {error}.')
         return None
@@ -2232,6 +2233,21 @@ def _stream_sql_entry(pipeline, block, project: Path, prefix: str, capture_: Cap
         problems.append(f'{where} reads {len(block.upstream_block_uuids)} blocks; a stream '
                         'block reads one.')
         return None
+    if window is not None:
+        # Grouped by a window: the engine's window block, which keeps its windows.
+        spec = _window_spec(window, where, problems)
+        if spec is None:
+            return None
+        capture_.files.add(path)
+        return dict(
+            uuid=block.uuid,
+            type='transformer',
+            language='window',
+            file=str(path.relative_to(project)),
+            sha256=_digest(path),
+            upstream=list(block.upstream_block_uuids or []),
+            window=spec,
+        )
     capture_.files.add(path)
     capture_.has_stream_sql = True
     return dict(
@@ -2380,6 +2396,24 @@ def _window_entry(pipeline, block, project: Path, prefix: str, capture_: Capture
         problems.append(f'{where} is a YAML transformer without window:; YAML transformers in '
                         'a stream are windows, and the others are written in Python, Rust or R.')
         return None
+    spec = _window_spec(window, where, problems)
+    if spec is None:
+        return None
+    capture_.files.add(path)
+    return dict(
+        uuid=block.uuid,
+        type='transformer',
+        language='window',
+        file=str(path.relative_to(project)),
+        sha256=_digest(path),
+        upstream=list(block.upstream_block_uuids or []),
+        window=spec,
+    )
+
+
+def _window_spec(window: Dict, where: str, problems: List[str]) -> Optional[Dict]:
+    """The engine's window spec of a YAML window: or of a SQL query grouped by a window
+    (streaming/sql.py window_of); None with the problems said."""
     kind = window.get('type', 'tumbling')
     if kind not in WINDOW_TYPES:
         problems.append(f'{where}: window type is one of {", ".join(WINDOW_TYPES)}.')
@@ -2402,9 +2436,15 @@ def _window_entry(pipeline, block, project: Path, prefix: str, capture_: Capture
             problems.append(f'{where}: a hopping window\'s size is a whole number of slides.')
     else:
         spec_kind = dict(type=kind, gap_ms=millis('gap_seconds'))
+    key_as = window.get('key_as')
+    if key_as is not None and (not isinstance(key_as, str) or not key_as
+                               or key_as in ('window_start', 'window_end')):
+        problems.append(f'{where}: key_as names the result\'s field for the key, other than '
+                        'window_start and window_end.')
+        return None
     aggregates = []
     for name, function in (window.get('aggregate') or {}).items():
-        if name in ('key', 'window_start', 'window_end'):
+        if name in (key_as or 'key', 'window_start', 'window_end'):
             problems.append(f'{where}: {name} is a field of every window result; name the '
                             'aggregate otherwise.')
         elif function == 'count':
@@ -2422,16 +2462,10 @@ def _window_entry(pipeline, block, project: Path, prefix: str, capture_: Capture
         problems.append(f'{where}: a window needs aggregate, such as {{payments: count}}.')
     if None in spec_kind.values() or not aggregates:
         return None
-    capture_.files.add(path)
-    return dict(
-        uuid=block.uuid,
-        type='transformer',
-        language='window',
-        file=str(path.relative_to(project)),
-        sha256=_digest(path),
-        upstream=list(block.upstream_block_uuids or []),
-        window=dict(key=window.get('key'), kind=spec_kind, aggregates=aggregates),
-    )
+    spec = dict(key=window.get('key'), kind=spec_kind, aggregates=aggregates)
+    if key_as:
+        spec['key_as'] = key_as
+    return spec
 
 
 def _conditional_entry(conditional, project: Path, prefix: str,

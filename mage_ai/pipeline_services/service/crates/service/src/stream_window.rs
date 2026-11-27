@@ -223,7 +223,7 @@ impl WindowSession {
             for closed in state.windows.close(&spec, latest - lateness) {
                 let mut value = Map::new();
                 if spec.key.is_some() {
-                    value.insert("key".into(), Value::String(closed.key.clone()));
+                    value.insert(spec.key_field().into(), Value::String(closed.key.clone()));
                 }
                 value.insert("window_start".into(), Value::String(iso(closed.start)));
                 value.insert("window_end".into(), Value::String(iso(closed.end)));
@@ -343,6 +343,7 @@ mod tests {
             "per_card",
             WindowSpec {
                 key: Some("card".into()),
+                key_as: None,
                 kind: WindowKind::Tumbling { size_ms: 60_000 },
                 aggregates: vec![
                     ("n".into(), Aggregate::Count),
@@ -429,6 +430,44 @@ mod tests {
             ]
         );
         assert_eq!(restarted.open_windows(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_key_field_takes_the_name_a_sql_window_gives_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = WindowSpec {
+            key: Some("card".into()),
+            key_as: Some("card_id".into()),
+            kind: WindowKind::Tumbling { size_ms: 60_000 },
+            aggregates: vec![("n".into(), Aggregate::Count)],
+        };
+        let mut windows = WindowSession::new(
+            "per_card",
+            spec.clone(),
+            Some(EventTime {
+                field: Some("at".into()),
+                format: TimeFormat::EpochS,
+                lateness_ms: 0,
+                on_late: LatePolicy::Pass,
+            }),
+            dir.path().to_path_buf(),
+            true,
+        )
+        .unwrap();
+        let output = windows
+            .transform(batch(&[(0, 0, "a", 1.0), (1, 61, "a", 2.0)]))
+            .await
+            .unwrap();
+        assert_eq!(
+            results(&output),
+            [
+                json!({"card_id": "a", "window_start": "1970-01-01T00:00:00.000Z",
+                    "window_end": "1970-01-01T00:01:00.000Z", "n": 1})
+            ]
+        );
+        // The key's field cannot also be an aggregate's.
+        spec.aggregates = vec![("card_id".into(), Aggregate::Count)];
+        assert!(spec.check().unwrap_err().contains("card_id"));
     }
 
     #[tokio::test]
