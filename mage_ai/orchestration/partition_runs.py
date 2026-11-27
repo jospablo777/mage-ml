@@ -59,3 +59,17 @@ def run_partition(pipeline, value: str) -> Tuple[PipelineRun, bool]:
         run.update(status=PipelineRun.PipelineRunStatus.CANCELLED)
         return active[0], False
     return run, True
+
+
+def run_selected(pipeline, choice, now=None) -> dict:
+    """
+    Runs the partitions `choice` names ('missing', 'stale', 'failed', or a list): a queued run
+    for each, or its active run when it has one. Returns the run ids, new and already active.
+    """
+    from mage_ai.orchestration.partition_state import select
+
+    created, active = [], []
+    for value in select(pipeline, choice, now):
+        run, new = run_partition(pipeline, value)
+        (created if new else active).append(dict(partition=value, run_id=run.id))
+    return dict(created=created, active=active)

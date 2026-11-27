@@ -85,3 +85,29 @@ class PartitionRunsTest(DBTestCase):
         output = Path(pipeline.variable_manager.pipeline_path(pipeline.uuid), '.variables',
                       'partitions', '2026-11-02', f'{self._testMethodName}_load', 'output_0')
         self.assertTrue(output.is_dir(), output)
+
+    def test_a_code_change_makes_a_done_partition_stale(self):
+        from mage_ai.orchestration import partition_state
+
+        pipeline = self.pipeline()
+        run, _ = run_partition(pipeline, '2026-11-02')
+        scheduler = PipelineScheduler(run)
+        scheduler.start(should_schedule=False)
+        PipelineExecutor(pipeline, execution_partition=run.execution_partition).execute(
+            pipeline_run_id=run.id, global_vars=run.get_variables(),
+        )
+        scheduler.schedule()
+        now = datetime(2026, 11, 4, 12, tzinfo=timezone.utc)
+
+        def state():
+            partition_state._codes.clear()
+            rows = partition_state.states(pipeline, now)['partitions']
+            return {r['partition']: r['state'] for r in rows}['2026-11-02']
+
+        self.assertEqual(state(), 'done')
+        block = pipeline.get_block(f'{self._testMethodName}_load')
+        Path(block.file_path).write_text(Path(block.file_path).read_text() + '\n# changed\n')
+        self.assertEqual(state(), 'stale')
+        partition_state.accept_code(pipeline, ['2026-11-02'])
+        self.assertEqual(state(), 'done')
+
