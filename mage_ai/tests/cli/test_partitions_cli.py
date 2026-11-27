@@ -34,8 +34,11 @@ class PartitionsCliTest(unittest.TestCase):
         '''))
 
         def mage(*args):
+            # In the test's folder: with ENV=test_mage the CLI keeps its runs in test.db of
+            # its working directory, and the checkout's lasted from one run to the next.
             result = subprocess.run(cli + ['partitions', str(project), 'regions', *args],
-                                    env=env, capture_output=True, text=True, timeout=300)
+                                    cwd=directory, env=env, capture_output=True, text=True,
+                                    timeout=300)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return result.stdout
 
