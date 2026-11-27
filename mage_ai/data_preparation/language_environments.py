@@ -1,11 +1,16 @@
 """
-The R and Rust environments of a project, for the Workers page: one per language, which every
-block of that language runs with (Python blocks choose among named workers instead).
+The R and Rust environments of a project, for the Workers page. Each language has its
+`default` environment and any named ones (ADR-0040, block_environments.py); a block selects
+one as Python blocks select workers.
 
-- R: the rv project in <project>/r (rproject.toml, rv.lock and its library;
-  models/block/r/runtime.py).
-- Rust: the Cargo workspace in <project>/rust (Cargo.toml, Cargo.lock and the toolchain;
-  models/block/rust/workspace.py).
+- R: an rv project (rproject.toml, rv.lock and its library; models/block/r/runtime.py), the
+  default in <project>/r, named ones in r_environments/<name>.
+- Rust: a Cargo workspace (Cargo.toml, Cargo.lock and the toolchain;
+  models/block/rust/workspace.py), the default in <project>/rust, named ones in
+  rust_environments/<name>.
+
+Ids: `r` and `rust` for the defaults, `r.<name>` and `rust.<name>` for named ones (a name has
+no dot).
 
 summary() reads files only, for the list. detail() also asks the tools (Rscript, rv, cargo)
 and says what stops blocks from running. save_manifest() checks a new rproject.toml or
@@ -20,8 +25,11 @@ import subprocess
 import tempfile
 import tomllib
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+from mage_ai.data_preparation import block_environments
+
+DEFAULT = block_environments.DEFAULT
 LANGUAGES = ('r', 'rust')
 BLOCK_FOLDERS = ('custom', 'data_exporters', 'data_loaders', 'transformers')
 CHECK_TIMEOUT = 300
@@ -43,6 +51,27 @@ def _language(language: str) -> str:
     return language
 
 
+def environment_id(language: str, environment: str) -> str:
+    return language if environment == DEFAULT else f'{language}.{environment}'
+
+
+def parse_id(pk: str) -> Tuple[str, str]:
+    """(language, environment) of an id: `r`, `rust`, `r.<name>` or `rust.<name>`."""
+    language, _, name = (pk or '').partition('.')
+    language = _language(language)
+    try:
+        return language, block_environments.normalized(name or None)
+    except block_environments.EnvironmentNameError as error:
+        raise LanguageEnvironmentError(str(error)) from error
+
+
+def _require(repo_path: str, language: str, environment: str) -> None:
+    try:
+        block_environments.require(repo_path, language, environment)
+    except block_environments.EnvironmentNameError as error:
+        raise LanguageEnvironmentError(str(error)) from error
+
+
 def _relative(repo_path: str, path: Optional[Path]) -> Optional[str]:
     if path is None:
         return None
@@ -50,6 +79,30 @@ def _relative(repo_path: str, path: Optional[Path]) -> Optional[str]:
         return str(Path(path).resolve().relative_to(Path(repo_path).resolve()))
     except ValueError:
         return str(path)
+
+
+def _blocks_in(repo_path: str, language: str, environment: str, suffixes) -> List[str]:
+    """The block files that run in the environment: those its pipelines' blocks select, and
+    for `default` also the files no pipeline runs in another environment."""
+    used = block_environments.of_block_files(repo_path, language)
+    files = []
+    for path in _block_files(repo_path, suffixes):
+        uuid = Path(*Path(path).parts[1:]).with_suffix('').as_posix()
+        environments = used.get(uuid) or [DEFAULT]
+        if environment in environments:
+            files.append(path)
+    return files
+
+
+def _base(repo_path: str, language: str, environment: str, usage: Dict) -> Dict:
+    label = block_environments.LABELS[language]
+    return dict(
+        id=environment_id(language, environment),
+        language=language,
+        environment=environment,
+        label=label if environment == DEFAULT else f'{label} {environment}',
+        pipelines=usage.get(environment) or [],
+    )
 
 
 def _block_files(repo_path: str, suffixes) -> List[str]:
@@ -103,19 +156,22 @@ def _tool_version(command: List[str], cwd: Optional[Path] = None) -> Optional[st
 # R
 
 
-def _r_config(repo_path: str):
+def _r_config(repo_path: str, environment: str = DEFAULT):
     from mage_ai.data_preparation.models.block.r import runtime
 
     try:
-        return runtime.r_config(repo_path)
+        return runtime.r_config(repo_path, environment)
     except runtime.REnvironmentError as error:
         raise LanguageEnvironmentError(str(error)) from error
 
 
-def _r_project_dir(repo_path: str) -> Optional[Path]:
+def _r_project_dir(repo_path: str, environment: str = DEFAULT) -> Optional[Path]:
     """Where r_config finds the rv project, from files only (r_config also asks rig)."""
     from mage_ai.data_preparation.models.block.r import runtime
 
+    if environment != DEFAULT:
+        folder = block_environments.folder(repo_path, 'r', environment)
+        return folder.resolve() if (folder / 'rproject.toml').exists() else None
     configured = os.getenv('MAGE_R_PROJECT_DIR')
     if configured:
         path = Path(configured)
@@ -142,11 +198,13 @@ def _r_packages(project_dir: Path) -> List[Dict]:
     return packages
 
 
-def _r_summary(repo_path: str) -> Dict:
-    blocks = _block_files(repo_path, {'.r', '.R'})
-    project_dir = _r_project_dir(repo_path)
+def _r_summary(repo_path: str, environment: str = DEFAULT, usage: Optional[Dict] = None) -> Dict:
+    if usage is None:
+        usage = block_environments.usage(repo_path, 'r')
+    blocks = _blocks_in(repo_path, 'r', environment, {'.r', '.R'})
+    project_dir = _r_project_dir(repo_path, environment)
     summary = dict(
-        language='r', label='R', blocks=blocks, block_count=len(blocks),
+        _base(repo_path, 'r', environment, usage), blocks=blocks, block_count=len(blocks),
         exists=project_dir is not None, definition=_relative(repo_path, project_dir),
         manifest='rproject.toml',
     )
@@ -163,11 +221,11 @@ def _r_summary(repo_path: str) -> Dict:
     )
 
 
-def _r_detail(repo_path: str) -> Dict:
+def _r_detail(repo_path: str, environment: str = DEFAULT) -> Dict:
     from mage_ai.data_preparation.models.block.r import runtime
 
-    summary = _r_summary(repo_path)
-    config = _r_config(repo_path)
+    summary = _r_summary(repo_path, environment)
+    config = _r_config(repo_path, environment)
     tools = dict(
         rscript=_tool_version([config.rscript, '--version']),
         rv=_tool_version([config.rv, '--version']),
@@ -177,10 +235,13 @@ def _r_detail(repo_path: str) -> Dict:
         problems = runtime.status(config)['problems']
         manifest_text = (config.project_dir / 'rproject.toml').read_text(encoding='utf-8')
         # With the project's paths: the terminal may be anywhere.
+        sync = f'mage r sync {shlex.quote(str(repo_path))}'
+        if environment != DEFAULT:
+            sync += f' --environment {environment}'
         commands = [
             f'cd {shlex.quote(str(config.project_dir))}',
             'rv add <package>',
-            f'mage r sync {shlex.quote(str(repo_path))}',
+            sync,
         ]
     else:
         problems = [] if not summary['blocks'] else [
@@ -255,10 +316,10 @@ def _check_rproject(config, text: str) -> None:
 # Rust
 
 
-def _rust_workspace(repo_path: str):
+def _rust_workspace(repo_path: str, environment: str = DEFAULT):
     from mage_ai.data_preparation.models.block.rust import workspace as ws
 
-    return ws.Workspace(ws.workspace_root(repo_path))
+    return ws.of_environment(repo_path, environment)
 
 
 def _requirement(spec) -> str:
@@ -289,12 +350,17 @@ def _rust_packages(root: Path) -> List[Dict]:
     return packages
 
 
-def _rust_summary(repo_path: str) -> Dict:
-    workspace = _rust_workspace(repo_path)
-    blocks = _block_files(repo_path, {'.rs'})
+def _rust_summary(
+    repo_path: str, environment: str = DEFAULT, usage: Optional[Dict] = None,
+) -> Dict:
+    if usage is None:
+        usage = block_environments.usage(repo_path, 'rust')
+    workspace = _rust_workspace(repo_path, environment)
+    blocks = _blocks_in(repo_path, 'rust', environment, {'.rs'})
     exists = workspace.cargo_toml.exists()
     summary = dict(
-        language='rust', label='Rust', blocks=blocks, block_count=len(blocks), exists=exists,
+        _base(repo_path, 'rust', environment, usage), blocks=blocks, block_count=len(blocks),
+        exists=exists,
         definition=_relative(repo_path, workspace.root) if exists else None,
         manifest='Cargo.toml',
     )
@@ -310,12 +376,12 @@ def _rust_summary(repo_path: str) -> Dict:
     )
 
 
-def _rust_detail(repo_path: str) -> Dict:
+def _rust_detail(repo_path: str, environment: str = DEFAULT) -> Dict:
     from mage_ai.data_preparation.models.block.rust import project
 
-    summary = _rust_summary(repo_path)
-    workspace = _rust_workspace(repo_path)
-    status = project.status(repo_path)
+    summary = _rust_summary(repo_path, environment)
+    workspace = _rust_workspace(repo_path, environment)
+    status = project.status(repo_path, environment)
     tools = {name: None if status['details'][name] == 'not found' else status['details'][name]
              for name in ('cargo', 'rustc')}
     problems = list(status['problems'])
@@ -399,39 +465,48 @@ def _state(summary: Dict, problems: List[str]) -> str:
 
 
 def summary(repo_path: str) -> List[Dict]:
-    """Both languages, from their files only."""
+    """Every environment of both languages, from their files only: each language's default
+    first, then its named ones."""
     rows = []
-    for read in (_r_summary, _rust_summary):
-        try:
-            rows.append(read(repo_path))
-        except LanguageEnvironmentError as error:
-            language = 'r' if read is _r_summary else 'rust'
-            rows.append(dict(language=language, label='R' if language == 'r' else 'Rust',
-                             state='problems', problems=[str(error)], exists=True,
-                             packages=[], package_count=0, block_count=0, blocks=[]))
+    for language, read in (('r', _r_summary), ('rust', _rust_summary)):
+        usage = block_environments.usage(repo_path, language)
+        for environment in [DEFAULT, *block_environments.named(repo_path, language)]:
+            try:
+                rows.append(read(repo_path, environment, usage))
+            except LanguageEnvironmentError as error:
+                rows.append(dict(
+                    _base(repo_path, language, environment, usage), state='problems',
+                    problems=[str(error)], exists=True, packages=[], package_count=0,
+                    block_count=0, blocks=[],
+                ))
     return rows
 
 
-def detail(repo_path: str, language: str) -> Dict:
-    language = _language(language)
+def detail(repo_path: str, pk: str) -> Dict:
+    language, environment = parse_id(pk)
+    _require(repo_path, language, environment)
     try:
-        return _r_detail(repo_path) if language == 'r' else _rust_detail(repo_path)
+        if language == 'r':
+            return _r_detail(repo_path, environment)
+        return _rust_detail(repo_path, environment)
     except LanguageEnvironmentError as error:
-        row = next(r for r in summary(repo_path) if r['language'] == language)
+        row = next(r for r in summary(repo_path) if r['id'] == environment_id(language,
+                                                                               environment))
         return dict(row, problems=[str(error)], state='problems', tools={}, commands=[])
 
 
-def save_manifest(repo_path: str, language: str, text: str) -> Dict:
+def save_manifest(repo_path: str, pk: str, text: str) -> Dict:
     """
-    Writes the language's rproject.toml or Cargo.toml once it resolves in a copy: refused
+    Writes the environment's rproject.toml or Cargo.toml once it resolves in a copy: refused
     with the tool's reason otherwise, and nothing changes. The locks follow at the next
     sync (rv.lock) or build (Cargo.lock).
     """
-    language = _language(language)
+    language, environment = parse_id(pk)
+    _require(repo_path, language, environment)
     if not isinstance(text, str) or not text.strip():
         raise LanguageEnvironmentError('The file is empty.')
     if language == 'r':
-        config = _r_config(repo_path)
+        config = _r_config(repo_path, environment)
         if not config.uses_rv:
             raise LanguageEnvironmentError(
                 'The project has no R environment to change: create it with `mage r init`.',
@@ -439,7 +514,7 @@ def save_manifest(repo_path: str, language: str, text: str) -> Dict:
         _check_rproject(config, text)
         (config.project_dir / 'rproject.toml').write_text(text, encoding='utf-8')
     else:
-        workspace = _rust_workspace(repo_path)
+        workspace = _rust_workspace(repo_path, environment)
         if not workspace.cargo_toml.exists():
             raise LanguageEnvironmentError(
                 'The project has no Rust environment to change: create it with '
@@ -447,22 +522,23 @@ def save_manifest(repo_path: str, language: str, text: str) -> Dict:
             )
         _check_cargo_toml(workspace.root, text)
         workspace.cargo_toml.write_text(text, encoding='utf-8')
-    return detail(repo_path, language)
+    return detail(repo_path, pk)
 
 
-def init_rust(repo_path: str) -> Dict:
-    """Creates the Rust environment (`mage rust init`); an existing one is kept."""
+def init_rust(repo_path: str, environment: str = DEFAULT) -> Dict:
+    """Creates a Rust environment (`mage rust init`); an existing one is kept."""
     from mage_ai.data_preparation.models.block.rust import workspace as ws
 
-    ws.init(repo_path)
-    return detail(repo_path, 'rust')
+    ws.init(repo_path, environment)
+    return detail(repo_path, environment_id('rust', environment))
 
 
-def sync_r(repo_path: str) -> Dict:
-    """Installs the R environment's packages as rproject.toml asks (rv sync)."""
+def sync_r(repo_path: str, environment: str = DEFAULT) -> Dict:
+    """Installs an R environment's packages as rproject.toml asks (rv sync)."""
     from mage_ai.data_preparation.models.block.r import runtime
 
-    config = _r_config(repo_path)
+    _require(repo_path, 'r', environment)
+    config = _r_config(repo_path, environment)
     if not config.uses_rv:
         raise LanguageEnvironmentError(
             'The project has no R environment to sync: create it with `mage r init`.',
@@ -471,4 +547,140 @@ def sync_r(repo_path: str) -> Dict:
         runtime.sync(config)
     except runtime.REnvironmentError as error:
         raise LanguageEnvironmentError(str(error)) from error
-    return detail(repo_path, 'r')
+    return detail(repo_path, environment_id('r', environment))
+
+
+START_FROM = ('default', 'minimal')
+
+
+def create(
+    repo_path: str,
+    language: str,
+    name: str,
+    start_from: str = 'default',
+    r_version: Optional[str] = None,
+) -> Dict:
+    """
+    A new named environment. `start_from`: `default` copies the default environment's
+    manifest, lock and (Rust) toolchain, so its versions hold until changed; `minimal` has
+    only what blocks need (R: the packages MageML exchanges data with; Rust: MageML's
+    crate and its usual companions). Writes files only: R packages install with Sync, Rust
+    crates compile at the first build. `r_version` sets an R environment's R (default:
+    the default environment's, else MageML's default).
+    """
+    language = _language(language)
+    try:
+        name = block_environments.normalized(name)
+    except block_environments.EnvironmentNameError as error:
+        raise LanguageEnvironmentError(str(error)) from error
+    if name == DEFAULT:
+        raise LanguageEnvironmentError(
+            'default is the project\'s own environment: give the new one another name.',
+        )
+    if start_from not in START_FROM:
+        raise LanguageEnvironmentError('Start from default or minimal.')
+    folder = block_environments.folder(repo_path, language, name)
+    if folder.exists():
+        raise LanguageEnvironmentError(
+            f'{_relative(repo_path, folder)} exists already: choose another name, or remove '
+            'the folder.',
+        )
+    if language == 'r':
+        _create_r(repo_path, folder, start_from, r_version)
+    else:
+        _create_rust(repo_path, name, start_from)
+    return detail(repo_path, environment_id(language, name))
+
+
+def _create_r(repo_path: str, folder: Path, start_from: str, r_version: Optional[str]) -> None:
+    from mage_ai.data_preparation.models.block.r import runtime
+
+    source = _r_project_dir(repo_path) if start_from == 'default' else None
+    if start_from == 'default' and source is None:
+        raise LanguageEnvironmentError(
+            'The project has no default R environment to start from: start from minimal, '
+            'or create the default with `mage r init`.',
+        )
+    if source is not None:
+        manifest = (source / 'rproject.toml').read_text(encoding='utf-8')
+        if r_version:
+            manifest = _with_r_version(manifest, r_version)
+    else:
+        version = r_version or runtime.DEFAULT_R_VERSION
+        dependencies = ',\n'.join(
+            runtime._dependency_line(p) for p in runtime.EXCHANGE_PACKAGES
+        )
+        repositories = ',\n'.join(
+            f'    {{alias = "{r["alias"]}", url = "{r["url"]}"}}'
+            for r in runtime.DEFAULT_REPOSITORIES
+        )
+        manifest = (
+            '[project]\n'
+            f'name = "{folder.name}"\n'
+            f'r_version = "{version}"\n'
+            f'repositories = [\n{repositories},\n]\n'
+            f'dependencies = [\n{dependencies},\n]\n'
+        )
+    try:
+        tomllib.loads(manifest)
+    except tomllib.TOMLDecodeError as error:
+        raise LanguageEnvironmentError(f'rproject.toml is not valid TOML: {error}') from error
+    folder.mkdir(parents=True)
+    try:
+        (folder / 'rproject.toml').write_text(manifest, encoding='utf-8')
+        if source is not None and (source / 'rv.lock').exists() and not r_version:
+            # Another R version resolves its own versions at the first sync.
+            shutil.copy2(source / 'rv.lock', folder / 'rv.lock')
+        (folder / '.gitignore').write_text('rv/library/\nrv/staging/\n', encoding='utf-8')
+    except OSError:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+_R_VERSION_LINE = re.compile(r'^(\s*r_version\s*=\s*)"[^"]*"', re.MULTILINE)
+
+
+def _with_r_version(manifest: str, version: str) -> str:
+    if not re.fullmatch(r'\d+\.\d+(\.\d+)?', version.strip()):
+        raise LanguageEnvironmentError(f'{version!r} is not an R version such as 4.4.')
+    if _R_VERSION_LINE.search(manifest):
+        return _R_VERSION_LINE.sub(lambda m: f'{m.group(1)}"{version.strip()}"', manifest, 1)
+    return manifest.replace('[project]\n', f'[project]\nr_version = "{version.strip()}"\n', 1)
+
+
+def _create_rust(repo_path: str, name: str, start_from: str) -> None:
+    from mage_ai.data_preparation.models.block.rust import workspace as ws
+
+    target = ws.of_environment(repo_path, name)
+    if start_from == 'default':
+        source = _rust_workspace(repo_path)
+        if not source.cargo_toml.exists():
+            raise LanguageEnvironmentError(
+                'The project has no default Rust environment to start from: start from '
+                'minimal, or create the default on this page.',
+            )
+        target.root.mkdir(parents=True)
+        for file in (source.cargo_toml, source.cargo_lock, source.toolchain_toml):
+            if file.exists():
+                shutil.copy2(file, target.root / file.name)
+    ws.init(repo_path, name)
+
+
+def delete(repo_path: str, pk: str) -> Dict:
+    """Removes a named environment's folder (its manifest, lock and library). Refused for
+    `default` and while blocks select it: the refusal names them."""
+    language, environment = parse_id(pk)
+    if environment == DEFAULT:
+        raise LanguageEnvironmentError('The default environment cannot be removed.')
+    _require(repo_path, language, environment)
+    users = block_environments.usage(repo_path, language).get(environment) or []
+    if users:
+        listed = '; '.join(f'{u["pipeline"]}: {", ".join(u["blocks"])}' for u in users[:5])
+        more = f' and {len(users) - 5} more pipelines' if len(users) > 5 else ''
+        raise LanguageEnvironmentError(
+            f'Blocks run in {environment}: {listed}{more}. Move them to another environment '
+            'first.',
+        )
+    folder = block_environments.folder(repo_path, language, environment)
+    shutil.rmtree(folder)
+    return dict(id=pk, language=language, environment=environment, deleted=True)

@@ -3946,6 +3946,9 @@
      "definition": {
       "type": "null"
      },
+     "environment": {
+      "type": "string"
+     },
      "exists": {
       "type": "boolean"
      },
@@ -3971,6 +3974,10 @@
       "type": "integer"
      },
      "packages": {
+      "items": {},
+      "type": "array"
+     },
+     "pipelines": {
       "items": {},
       "type": "array"
      },
@@ -4476,6 +4483,18 @@
      "blocks": {},
      "layout": {},
      "permissions": {}
+    },
+    "type": "object"
+   },
+   "PipelinePartition": {
+    "properties": {
+     "counts": {},
+     "key": {},
+     "kind": {},
+     "partitions": {},
+     "pipeline_uuid": {},
+     "result": {},
+     "total": {}
     },
     "type": "object"
    },
@@ -10812,9 +10831,71 @@
     "tags": [
      "language_environments"
     ]
+   },
+   "post": {
+    "operationId": "create_language_environments",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "language_environment": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "language_environment": {
+           "$ref": "#/components/schemas/LanguageEnvironment"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create language_environments",
+    "tags": [
+     "language_environments"
+    ]
    }
   },
   "/api/language_environments/{id}": {
+   "delete": {
+    "operationId": "delete_language_environments",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "language_environment": {
+           "$ref": "#/components/schemas/LanguageEnvironment"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "delete language_environments",
+    "tags": [
+     "language_environments"
+    ]
+   },
    "get": {
     "operationId": "detail_language_environments",
     "responses": {
@@ -12583,6 +12664,82 @@
      "interactions"
     ]
    }
+  },
+  "/api/pipeline_partitions": {
+   "post": {
+    "operationId": "create_pipeline_partitions",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "pipeline_partition": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "pipeline_partition": {
+           "$ref": "#/components/schemas/PipelinePartition"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create pipeline_partitions",
+    "tags": [
+     "pipeline_partitions"
+    ]
+   }
+  },
+  "/api/pipeline_partitions/{id}": {
+   "get": {
+    "operationId": "detail_pipeline_partitions",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "pipeline_partition": {
+           "$ref": "#/components/schemas/PipelinePartition"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail pipeline_partitions",
+    "tags": [
+     "pipeline_partitions"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
   },
   "/api/pipeline_runs": {
    "get": {
@@ -21675,8 +21832,10 @@
   "language_environments": {
    "operations": [
     "list",
+    "create",
     "detail",
-    "update"
+    "update",
+    "delete"
    ],
    "schema": "LanguageEnvironment"
   },
@@ -21799,6 +21958,13 @@
     "update"
    ],
    "schema": "PipelineInteraction"
+  },
+  "pipeline_partitions": {
+   "operations": [
+    "create",
+    "detail"
+   ],
+   "schema": "PipelinePartition"
   },
   "pipeline_runs": {
    "operations": [
@@ -22273,6 +22439,7 @@
   "pipeline_documentations": "no list or detail reached",
   "pipeline_execution_frameworks": "get /api/pipeline_execution_frameworks: error 404: Pipeline execution framework was not found.",
   "pipeline_interactions": "no list or detail reached",
+  "pipeline_partitions": "no list or detail reached",
   "pipeline_service_exports": "no list or detail reached",
   "pipeline_service_models": "no list or detail reached",
   "pipeline_services": "no list or detail reached",

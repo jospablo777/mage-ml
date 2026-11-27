@@ -22,7 +22,7 @@ LanguageEnvironmentPolicy.allow_actions(
 
 # Changing the packages changes the project's files; syncing installs on the server.
 LanguageEnvironmentPolicy.allow_actions(
-    [constants.UPDATE],
+    [constants.CREATE, constants.DELETE, constants.UPDATE],
     scopes=[OauthScope.CLIENT_PRIVATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
 )
@@ -30,7 +30,8 @@ LanguageEnvironmentPolicy.allow_actions(
 LanguageEnvironmentPolicy.allow_read(
     LanguageEnvironmentPresenter.default_attributes,
     scopes=[OauthScope.CLIENT_PRIVATE],
-    on_action=[constants.DETAIL, constants.LIST, constants.UPDATE],
+    on_action=[constants.CREATE, constants.DELETE, constants.DETAIL, constants.LIST,
+               constants.UPDATE],
     condition=lambda policy: policy.has_at_least_viewer_role(),
 )
 
@@ -38,5 +39,12 @@ LanguageEnvironmentPolicy.allow_write(
     ['init', 'manifest_text', 'sync'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.UPDATE],
+    condition=lambda policy: policy.has_at_least_editor_role(),
+)
+
+LanguageEnvironmentPolicy.allow_write(
+    ['language', 'name', 'r_version', 'start_from'],
+    scopes=[OauthScope.CLIENT_PRIVATE],
+    on_action=[constants.CREATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
 )

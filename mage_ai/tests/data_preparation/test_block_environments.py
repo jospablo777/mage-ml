@@ -207,3 +207,24 @@ class RustEnvironmentRunTest(unittest.TestCase):
         message = str(context.exception)
         self.assertIn('Add itoa there', message)
         self.assertIn('Or run the block in the fmt environment, which lists it.', message)
+
+
+class CliTest(unittest.TestCase):
+    def test_rust_init_and_status_take_an_environment(self):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo, True)
+        runner = CliRunner()
+        created = runner.invoke(app, ['rust', 'init', repo, '--environment', 'fmt'])
+        self.assertEqual(created.exit_code, 0, created.output)
+        self.assertTrue(Path(repo, 'rust_environments', 'fmt', 'Cargo.toml').is_file())
+        self.assertFalse(Path(repo, 'rust').exists())
+        refused = runner.invoke(app, ['rust', 'init', repo, '-e', '../x'])
+        self.assertEqual(refused.exit_code, 1)
+        self.assertIn('not an environment name', refused.output)
+        missing = runner.invoke(app, ['r', 'status', repo, '-e', 'models'])
+        self.assertEqual(missing.exit_code, 1)
+        self.assertIn('There is no R environment named models', missing.output)

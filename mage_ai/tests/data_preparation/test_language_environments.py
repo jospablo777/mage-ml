@@ -207,3 +207,131 @@ class LanguageEnvironmentsTest(DBTestCase):
         sync = call(editor, OperationType.UPDATE, 'rust',
                     dict(language_environment=dict(sync=True)))['error']
         self.assertIn('Rust needs no sync', sync['message'])
+
+
+class NamedEnvironmentsTest(DBTestCase):
+    """Named R and Rust environments next to the defaults (ADR-0040)."""
+
+    write = LanguageEnvironmentsTest.write
+    r_environment = LanguageEnvironmentsTest.r_environment
+
+    def setUp(self):
+        super().setUp()
+        for folder in ('r', 'rust', 'r_environments', 'rust_environments', 'pipelines/churn'):
+            shutil.rmtree(Path(self.repo_path, folder), ignore_errors=True)
+
+    def pipeline(self, blocks, environment=None):
+        import yaml
+
+        self.write('pipelines/churn/metadata.yaml', yaml.safe_dump(dict(
+            name='Churn', environment=environment, blocks=blocks,
+        )))
+
+    def test_an_r_environment_starts_from_the_default_or_from_what_blocks_need(self):
+        self.r_environment()
+        copied = le.create(self.repo_path, 'r', 'models')
+        self.assertEqual((copied['id'], copied['label'], copied['environment']),
+                         ('r.models', 'R models', 'models'))
+        folder = Path(self.repo_path, 'r_environments', 'models')
+        self.assertEqual((folder / 'rproject.toml').read_text(), RPROJECT)
+        self.assertEqual((folder / 'rv.lock').read_text(), RV_LOCK)
+        self.assertEqual([p['name'] for p in copied['packages']],
+                         ['arrow', 'bit64', 'jsonlite', 'tibble', 'glue'])
+
+        older = le.create(self.repo_path, 'r', 'old', r_version='4.3')
+        self.assertEqual(older['version'], '4.3')
+        # Another R resolves its own versions: the default's lock is not copied.
+        self.assertFalse(Path(self.repo_path, 'r_environments', 'old', 'rv.lock').exists())
+
+        minimal = le.create(self.repo_path, 'r', 'small', start_from='minimal')
+        self.assertEqual([p['name'] for p in minimal['packages']],
+                         ['arrow', 'bit64', 'jsonlite', 'tibble'])
+        self.assertEqual([r['id'] for r in le.summary(self.repo_path)],
+                         ['r', 'r.models', 'r.old', 'r.small', 'rust'])
+
+    def test_a_rust_environment_copies_the_default_workspace_or_starts_new(self):
+        ws.init(self.repo_path)
+        default = ws.of_environment(self.repo_path)
+        default.cargo_toml.write_text(default.cargo_toml.read_text().replace(
+            'rayon = "1"\n', 'rayon = "1"\nitoa = "1"\n'))
+        copied = le.create(self.repo_path, 'rust', 'fmt')
+        self.assertIn('itoa', [p['name'] for p in copied['packages']])
+        self.assertTrue(Path(self.repo_path, 'rust_environments', 'fmt', '.mage', 'sdk').is_dir())
+        fresh = le.create(self.repo_path, 'rust', 'torch', start_from='minimal')
+        self.assertNotIn('itoa', [p['name'] for p in fresh['packages']])
+        self.assertIn('mage-block', [p['name'] for p in fresh['packages']])
+
+    def test_names_that_exist_or_are_not_names_are_refused(self):
+        ws.init(self.repo_path)
+        le.create(self.repo_path, 'rust', 'fmt')
+        for name, message in (('fmt', 'exists already'), ('default', 'another name'),
+                              ('../up', 'not an environment name')):
+            with self.assertRaises(le.LanguageEnvironmentError) as context:
+                le.create(self.repo_path, 'rust', name)
+            self.assertIn(message, str(context.exception))
+        with self.assertRaises(le.LanguageEnvironmentError) as context:
+            le.create(self.repo_path, 'r', 'models')
+        self.assertIn('no default R environment to start from', str(context.exception))
+
+    def test_each_environment_lists_the_blocks_and_pipelines_that_select_it(self):
+        ws.init(self.repo_path)
+        le.create(self.repo_path, 'rust', 'fmt')
+        self.write('transformers/plain.rs', 'fn main() {}\n')
+        self.write('transformers/fast.rs', 'fn main() {}\n')
+        self.pipeline([
+            dict(uuid='plain', language='rust'),
+            dict(uuid='fast', language='rust', configuration=dict(rust_environment='fmt')),
+        ])
+        rows = {r['id']: r for r in le.summary(self.repo_path) if r['language'] == 'rust'}
+        self.assertEqual(rows['rust']['blocks'], ['transformers/plain.rs'])
+        self.assertEqual(rows['rust.fmt']['blocks'], ['transformers/fast.rs'])
+        self.assertEqual(rows['rust.fmt']['pipelines'],
+                         [dict(pipeline='churn', name='Churn', blocks=['fast'], default=False)])
+        self.assertEqual(le.detail(self.repo_path, 'rust.fmt')['blocks'],
+                         ['transformers/fast.rs'])
+
+    def test_an_environment_in_use_is_not_removed(self):
+        ws.init(self.repo_path)
+        le.create(self.repo_path, 'rust', 'fmt')
+        self.pipeline([dict(uuid='fast', language='rust')], environment=dict(rust='fmt'))
+        with self.assertRaises(le.LanguageEnvironmentError) as context:
+            le.delete(self.repo_path, 'rust.fmt')
+        self.assertIn('Blocks run in fmt: churn: fast', str(context.exception))
+        self.pipeline([dict(uuid='fast', language='rust')])
+        self.assertTrue(le.delete(self.repo_path, 'rust.fmt')['deleted'])
+        self.assertFalse(Path(self.repo_path, 'rust_environments', 'fmt').exists())
+        for pk, message in (('rust', 'cannot be removed'), ('rust.fmt', 'no Rust environment')):
+            with self.assertRaises(le.LanguageEnvironmentError) as context:
+                le.delete(self.repo_path, pk)
+            self.assertIn(message, str(context.exception))
+
+    def test_the_api_creates_and_removes_them_for_editors(self):
+        import asyncio
+
+        from mage_ai.api.operations.base import BaseOperation
+        from mage_ai.api.operations.constants import OperationType
+        from mage_ai.orchestration.db.models.oauth import Role
+        from mage_ai.tests.factory import create_user
+
+        Role.create_default_roles()
+        editor = create_user(roles_new=[Role.get_role('Editor')])
+        viewer = create_user(roles_new=[Role.get_role('Viewer')])
+
+        def call(user, action, pk=None, payload=None):
+            return asyncio.run(BaseOperation(
+                action=action, pk=pk, payload=payload or {}, query={},
+                resource='language_environments', user=user,
+            ).execute())
+
+        new = dict(language_environment=dict(language='rust', name='fmt',
+                                             start_from='minimal'))
+        self.assertEqual(call(viewer, OperationType.CREATE, payload=new)['error']['code'], 403)
+        created = call(editor, OperationType.CREATE, payload=new)['language_environment']
+        self.assertEqual((created['id'], created['state']), ('rust.fmt', 'ready'))
+        shown = call(viewer, OperationType.DETAIL, 'rust.fmt')['language_environment']
+        self.assertIn('mage-block', shown['manifest_text'])
+        self.assertEqual(call(viewer, OperationType.DETAIL, 'rust.nope')['error']['code'], 404)
+        self.assertEqual(call(viewer, OperationType.DELETE, 'rust.fmt')['error']['code'], 403)
+        self.assertNotIn('error', call(editor, OperationType.DELETE, 'rust.fmt'))
+        self.assertEqual([r['id'] for r in call(viewer, OperationType.LIST)[
+            'language_environments']], ['r', 'rust'])

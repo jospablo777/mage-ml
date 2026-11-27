@@ -1024,13 +1024,20 @@ R_INSTALL_DEFAULT = typer.Option(
     '--install-r',
     help='install the R version with rig (https://github.com/r-lib/rig) when it is missing.',
 )
+ENVIRONMENT_DEFAULT = typer.Option(
+    None,
+    '--environment',
+    '-e',
+    help='a named environment (r_environments/<name> or rust_environments/<name>); the '
+         "project's default environment when left out.",
+)
 
 
-def _r_config(project_path: str):
+def _r_config(project_path: str, environment: Optional[str] = None):
     from mage_ai.data_preparation.models.block.r import runtime
 
     try:
-        config = runtime.r_config(os.path.abspath(project_path))
+        config = runtime.r_config(os.path.abspath(project_path), environment)
     except runtime.REnvironmentError as error:
         print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=1)
@@ -1079,15 +1086,26 @@ def r_init(
     packages: List[str] = R_PACKAGES_DEFAULT,
     r_version: str = R_VERSION_DEFAULT,
     install_r: bool = R_INSTALL_DEFAULT,
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
 ):
     """
-    Create the project's R environment in <project>/r with rv and install its packages.
+    Create an R environment with rv and install its packages: the project's default in
+    <project>/r, or a named one in <project>/r_environments/<name> with --environment.
     """
     from pathlib import Path
 
+    from mage_ai.data_preparation import block_environments
     from mage_ai.data_preparation.models.block.r import runtime
 
-    directory = Path(os.path.abspath(project_path)) / runtime.R_PROJECT_DIRECTORY
+    try:
+        name = block_environments.normalized(environment)
+    except block_environments.EnvironmentNameError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    if name == block_environments.DEFAULT:
+        directory = Path(os.path.abspath(project_path)) / runtime.R_PROJECT_DIRECTORY
+    else:
+        directory = block_environments.folder(os.path.abspath(project_path), 'r', name)
     try:
         if install_r and not runtime.has_r_version(r_version):
             print(f'Installing R {_e(r_version)} with rig.')
@@ -1100,13 +1118,16 @@ def r_init(
 
 
 @r_app.command('sync')
-def r_sync(project_path: str = R_PROJECT_PATH_DEFAULT):
+def r_sync(
+    project_path: str = R_PROJECT_PATH_DEFAULT,
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
+):
     """
-    Install the packages of the project's R environment, as rv.lock pins them.
+    Install the packages of an R environment, as rv.lock pins them.
     """
     from mage_ai.data_preparation.models.block.r import runtime
 
-    config = _r_config(project_path)
+    config = _r_config(project_path, environment)
     try:
         runtime.sync(config)
     except runtime.REnvironmentError as error:
@@ -1116,13 +1137,16 @@ def r_sync(project_path: str = R_PROJECT_PATH_DEFAULT):
 
 
 @r_app.command('status')
-def r_status(project_path: str = R_PROJECT_PATH_DEFAULT):
+def r_status(
+    project_path: str = R_PROJECT_PATH_DEFAULT,
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
+):
     """
     Check that R blocks can run: the R version, the library and the packages MageML needs.
     """
     from mage_ai.data_preparation.models.block.r import runtime
 
-    config = _r_config(project_path)
+    config = _r_config(project_path, environment)
     report = runtime.status(config)
     for key, value in report['details'].items():
         print(f'{_e(key)}: {_e(value)}')
@@ -1144,13 +1168,22 @@ RUST_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the MageML project
 
 
 @rust_app.command('init')
-def rust_init(project_path: str = RUST_PROJECT_PATH_DEFAULT):
+def rust_init(
+    project_path: str = RUST_PROJECT_PATH_DEFAULT,
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
+):
     """
-    Create the project's Rust environment in <project>/rust: the crates Rust blocks use.
+    Create a Rust environment, the crates Rust blocks use: the project's default in
+    <project>/rust, or a named one in <project>/rust_environments/<name> with --environment.
     """
+    from mage_ai.data_preparation import block_environments
     from mage_ai.data_preparation.models.block.rust import workspace
 
-    created = workspace.init(os.path.abspath(project_path))
+    try:
+        created = workspace.init(os.path.abspath(project_path), environment)
+    except block_environments.EnvironmentNameError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
     print(
         f'The Rust environment is in {_e(created.root)}. Add crates under '
         f'\\[workspace.dependencies] in {_e(created.cargo_toml)}.'
@@ -1183,13 +1216,21 @@ def rust_build(project_path: str = RUST_PROJECT_PATH_DEFAULT):
 
 
 @rust_app.command('status')
-def rust_status(project_path: str = RUST_PROJECT_PATH_DEFAULT):
+def rust_status(
+    project_path: str = RUST_PROJECT_PATH_DEFAULT,
+    environment: Optional[str] = ENVIRONMENT_DEFAULT,
+):
     """
     Check that Rust blocks can build: cargo, rustc, the workspace and its crates.
     """
+    from mage_ai.data_preparation import block_environments
     from mage_ai.data_preparation.models.block.rust import project
 
-    report = project.status(os.path.abspath(project_path))
+    try:
+        report = project.status(os.path.abspath(project_path), environment)
+    except block_environments.EnvironmentNameError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
     for key, value in report['details'].items():
         print(f'{_e(key)}: {_e(value)}')
     for problem in report['problems']:

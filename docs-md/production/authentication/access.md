@@ -64,7 +64,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `interactions` | Viewer | Viewer | Editor | Editor | Editor |
 | `kernel_processes` | Viewer | Viewer | No one | No one | Editor * |
 | `kernels` | Viewer | No one | No one | Editor * | No one |
-| `language_environments` | Viewer | Viewer | No one | Editor | No one |
+| `language_environments` | Viewer | Viewer | Editor | Editor | Editor |
 | `language_setups` | No one | Editor | No one | No one | No one |
 | `logs` | Viewer | No one | No one | No one | No one |
 | `model_releases` | No one | Viewer | Editor | No one | No one |
@@ -81,6 +81,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `pipeline_documentations` | No one | Viewer | No one | Editor | No one |
 | `pipeline_execution_frameworks` | Viewer | Viewer | Editor * | Editor * | Editor * |
 | `pipeline_interactions` | No one | Viewer | No one | Editor | No one |
+| `pipeline_partitions` | No one | Viewer | Editor | No one | No one |
 | `pipeline_runs` | Viewer | Viewer | Editor | Editor | Editor |
 | `pipeline_schedules` | Viewer | Viewer | Editor | Editor | Editor |
 | `pipeline_service_builds` | Editor | Editor | Editor | No one | No one |

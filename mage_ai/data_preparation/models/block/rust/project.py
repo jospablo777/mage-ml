@@ -96,8 +96,9 @@ def _version(tool: str, cwd: Optional[Path]) -> Optional[str]:
     return result.stdout.strip() or result.stderr.strip() or None
 
 
-def status(repo_path: str) -> Dict:
-    workspace = ws.Workspace(ws.workspace_root(repo_path))
+def status(repo_path: str, environment: Optional[str] = None) -> Dict:
+    """What Rust blocks need to build in an environment (the default one unless named)."""
+    workspace = ws.of_environment(repo_path, environment)
     cwd = workspace.root if workspace.root.is_dir() else None
     details = {
         'cargo': _version('cargo', cwd) or 'not found',
