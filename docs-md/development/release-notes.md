@@ -40,6 +40,8 @@
 
 ### Failed runs
 
+- **Incidents** lists the pipelines failing lately, still failing first, with what failed
+  and the run that recovered each (`GET /api/incidents?days=7`).
 - A failed or cancelled run's page compares it with the last run that completed before it
   (of the same partition, for a partition's run): what changed since it last worked.
 - It opens on what failed: each failed block's error line, the end of its log, its time

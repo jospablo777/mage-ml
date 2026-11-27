@@ -44,3 +44,21 @@ class FrontendBuildsTest(unittest.TestCase):
                 f'{build} was built from other sources: cd mage_ai/frontend && '
                 'yarn export_prod && yarn export_prod_base_path',
             )
+
+
+class PageRoutesTest(unittest.TestCase):
+    """
+    Every page of the build has a route in the server: a page without one sent people to
+    the pipelines list (the Incidents page, before its route).
+    """
+
+    def test_every_top_level_page_is_served(self):
+        text = (SERVER / 'server.py').read_text()
+        routes = set(re.findall(r"\(r'(/[^'(]*?)(?:/\(\.\*\))?', \w*PageHandler\)", text))
+        pages = sorted(
+            f'/{page.stem}' for page in (SERVER / 'frontend_dist').glob('*.html')
+            if page.stem not in ('index', '404') and '[' not in page.stem
+        )
+        self.assertTrue(pages)
+        missing = [page for page in pages if page not in routes]
+        self.assertEqual(missing, [], 'add them to make_app as MainPageHandler routes')

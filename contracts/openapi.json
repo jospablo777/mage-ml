@@ -3104,6 +3104,19 @@
     },
     "type": "object"
    },
+   "Incident": {
+    "properties": {
+     "blocks": {},
+     "failed_runs": {},
+     "id": {},
+     "latest_at": {},
+     "latest_run_id": {},
+     "partition": {},
+     "pipeline_uuid": {},
+     "recovered_by": {}
+    },
+    "type": "object"
+   },
    "IntegrationDestination": {
     "properties": {
      "docs": {
@@ -10224,6 +10237,38 @@
     "summary": "update global_hooks",
     "tags": [
      "global_hooks"
+    ]
+   }
+  },
+  "/api/incidents": {
+   "get": {
+    "operationId": "list_incidents",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "incidents": {
+           "items": {
+            "$ref": "#/components/schemas/Incident"
+           },
+           "type": "array"
+          },
+          "metadata": {
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "list incidents",
+    "tags": [
+     "incidents"
     ]
    }
   },
@@ -21786,6 +21831,12 @@
    ],
    "schema": "GlobalHook"
   },
+  "incidents": {
+   "operations": [
+    "list"
+   ],
+   "schema": "Incident"
+  },
   "integration_destinations": {
    "operations": [
     "list",
@@ -22425,6 +22476,7 @@
   "git_files": "no list or detail reached",
   "global_data_products": "no list or detail reached",
   "global_hooks": "no list or detail reached",
+  "incidents": "no list or detail reached",
   "integration_source_streams": "no list or detail reached",
   "interactions": "no list or detail reached",
   "kernels": "not called: starts a Jupyter kernel",

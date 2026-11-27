@@ -71,6 +71,22 @@ test.afterAll(async () => {
   await apiContext.dispose();
 });
 
+test('the incidents page lists the pipeline still failing and opens its run', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.goto('/incidents');
+  const table = page.getByRole('table', { name: 'Incidents' });
+  const row = table.getByRole('row').filter({ hasText: `ui_incident_${SUFFIX}` });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  await expect(row.getByText('Still failing')).toBeVisible();
+  await expect(row.getByText(SCORE)).toBeVisible();
+  await expect(row.getByText('KeyError: \'amount\'')).toBeVisible();
+  await row.getByRole('link', { exact: true, name: `Run ${runID}` }).first().click();
+  await expect(page).toHaveURL(new RegExp(`/pipelines/${pipelineUUID}/runs/${runID}$`));
+  await expect(page.getByTestId('incident')).toBeVisible({ timeout: 60_000 });
+});
+
 test('a failed run shows what failed and recovers from the panel', async ({ page }) => {
   test.setTimeout(240_000);
   await page.goto(`/pipelines/${pipelineUUID}/runs/${runID}`);
@@ -92,4 +108,8 @@ test('a failed run shows what failed and recovers from the panel', async ({ page
   ).pipeline_run.status, { intervals: [2000], timeout: 180_000 }).toBe('completed');
   await page.reload();
   await expect(incident).toHaveCount(0);
+
+  // Its only failed run completed: the incidents page lists it no more.
+  await page.goto('/incidents');
+  await expect(page.getByText(`ui_incident_${SUFFIX}`)).toHaveCount(0, { timeout: 60_000 });
 });

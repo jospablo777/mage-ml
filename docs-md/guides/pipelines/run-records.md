@@ -49,6 +49,10 @@ A failed or cancelled run's page opens on what failed, above its block runs:
 | The blocks that did not complete, with their state | A failed run cancels the blocks it had not run |
 | **Retry from &lt;block&gt; and the blocks after it**, **Retry the blocks that did not complete** | The run's retry actions, the same as the buttons above the block runs |
 
+**Incidents**, in the left navigation, lists the pipelines with a failed run in the last
+day, week or month, still failing first: how many runs failed, what failed in the latest
+one with its error line, and the run that recovered it. Each row opens the failed run.
+
 Fix the block, then retry from the panel: the run goes on from the failed block with the
 code as it is now, and the run record keeps both starts.
 

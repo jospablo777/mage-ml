@@ -15,6 +15,7 @@ import Tooltip from '@oracle/components/Tooltip';
 import api from '@api';
 import useProject from '@utils/models/project/useProject';
 import {
+  AlertTriangle,
   BranchAlt,
   CubeWithArrowDown,
   GraphWithNodes,
@@ -127,6 +128,14 @@ const DEFAULT_NAV_ITEMS = ({
           label: () => 'Pipeline runs',
           linkProps: {
             href: '/pipeline-runs',
+          },
+        },
+        {
+          Icon: AlertTriangle,
+          id: 'incidents',
+          label: () => 'Incidents',
+          linkProps: {
+            href: '/incidents',
           },
         },
         {

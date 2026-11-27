@@ -116,6 +116,7 @@ export const PIPELINE_TRIGGERS: 'pipeline_triggers' = 'pipeline_triggers';
 export const PULL_REQUESTS: 'pull_requests' = 'pull_requests';
 export const PROJECTS: 'projects' = 'projects';
 export const ROLES: 'roles' = 'roles';
+export const INCIDENTS: 'incidents' = 'incidents';
 export const RUN_RECORDS: 'run_records' = 'run_records';
 export const SEARCH_RESULTS: 'search_results' = 'search_results';
 export const SECRETS: 'secrets' = 'secrets';
@@ -200,6 +201,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PIPELINE_SERVICE_BUILDS],
   [PIPELINE_SERVICE_MODELS],
   [LANGUAGE_ENVIRONMENTS],
+  [INCIDENTS],
   [PYTHON_WORKERS],
   [PYTHON_WORKER_COMBINATIONS],
   [PYTHON_WORKER_AUDITS],

@@ -201,3 +201,63 @@ def summary(run, pipeline, log_lines: int = LOG_LINES) -> Optional[Dict]:
         for block in blocks
     ]
     return dict(blocks=blocks, not_completed=not_completed, recovery=recovery)
+
+
+def recent(days: int = 7, limit: int = 200) -> List[Dict]:
+    """
+    The pipelines with a failed run in the last `days`, the latest failure first: how many
+    runs failed, the latest one's failed blocks and error lines, and whether a later run
+    completed (recovered) or the pipeline is still failing. From the run records only, no
+    logs, so the list stays fast.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+    Status = PipelineRun.PipelineRunStatus
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    failed = (
+        PipelineRun.query
+        .filter(PipelineRun.status == Status.FAILED, PipelineRun.created_at >= since)
+        .order_by(PipelineRun.id.desc())
+        .limit(limit)
+        .all()
+    )
+    by_pipeline: Dict[str, List] = {}
+    for run in failed:
+        by_pipeline.setdefault(run.pipeline_uuid, []).append(run)
+    rows = []
+    for pipeline_uuid, runs in by_pipeline.items():
+        latest = runs[0]
+        later = (
+            PipelineRun.query.with_entities(PipelineRun.id)
+            .filter(
+                PipelineRun.pipeline_uuid == pipeline_uuid,
+                PipelineRun.status == Status.COMPLETED,
+                PipelineRun.id > latest.id,
+            )
+            .order_by(PipelineRun.id.desc())
+            .first()
+        )
+        blocks = []
+        for block_run in sorted(latest.block_runs, key=lambda br: br.id):
+            if _status(block_run) != FAILED:
+                continue
+            error = (block_run.metrics or {}).get('error') or {}
+            blocks.append(dict(
+                block_uuid=block_run.block_uuid,
+                error_line=error_line(error.get('message') or error.get('error')),
+            ))
+        rows.append(dict(
+            id=pipeline_uuid,
+            pipeline_uuid=pipeline_uuid,
+            failed_runs=len(runs),
+            latest_run_id=latest.id,
+            latest_at=latest.created_at.isoformat() if latest.created_at else None,
+            partition=getattr(latest, 'partition', None),
+            blocks=blocks,
+            recovered_by=later.id if later else None,
+        ))
+    # Still failing first, then the newest failure.
+    rows.sort(key=lambda r: (r['recovered_by'] is not None, -r['latest_run_id']))
+    return rows

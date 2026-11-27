@@ -136,3 +136,55 @@ class ReadableTest(DBTestCase):
         self.assertEqual(incidents.error_line(TRACEBACK), "KeyError: 'amount'")
         self.assertEqual(incidents.error_line('Timed out\nafter 30 s'), 'Timed out')
         self.assertIsNone(incidents.error_line(None))
+
+
+class RecentIncidentsTest(DBTestCase):
+    """The pipelines failing lately, still failing first, each with its latest failure."""
+
+    def test_still_failing_pipelines_come_before_recovered_ones(self):
+        from mage_ai.orchestration.db.models.schedules import PipelineRun as Run
+
+        Status = BlockRun.BlockRunStatus
+        recovered = create_pipeline_with_blocks('recent_recovered', self.repo_path)
+        failing = create_pipeline_with_blocks('recent_failing', self.repo_path)
+        self.addCleanup(recovered.delete)
+        self.addCleanup(failing.delete)
+
+        def run(pipeline, status, blocks=()):
+            created = create_pipeline_run_with_schedule(
+                pipeline_uuid=pipeline.uuid, status=status, create_block_runs=False)
+            for block_uuid, state, metrics in blocks:
+                BlockRun.create(pipeline_run_id=created.id, block_uuid=block_uuid,
+                                status=state, metrics=metrics)
+            return created
+
+        run(recovered, Run.PipelineRunStatus.FAILED, [('block1', Status.FAILED, None)])
+        fixed = run(recovered, Run.PipelineRunStatus.COMPLETED)
+        run(failing, Run.PipelineRunStatus.FAILED, [('block2', Status.FAILED, None)])
+        latest = run(failing, Run.PipelineRunStatus.FAILED, [
+            ('block1', Status.COMPLETED, None),
+            ('block2', Status.FAILED, dict(error=dict(message=TRACEBACK))),
+        ])
+
+        rows = [r for r in incidents.recent(days=7)
+                if r['pipeline_uuid'] in (recovered.uuid, failing.uuid)]
+
+        self.assertEqual([r['pipeline_uuid'] for r in rows], [failing.uuid, recovered.uuid])
+        self.assertEqual(
+            (rows[0]['failed_runs'], rows[0]['latest_run_id'], rows[0]['recovered_by']),
+            (2, latest.id, None),
+        )
+        self.assertEqual(rows[0]['blocks'],
+                         [dict(block_uuid='block2', error_line="KeyError: 'amount'")])
+        self.assertEqual(rows[1]['recovered_by'], fixed.id)
+
+    def test_the_api_lists_them_for_a_number_of_days(self):
+        import asyncio
+
+        from mage_ai.api.errors import ApiError
+        from mage_ai.api.resources.IncidentResource import IncidentResource
+
+        result = asyncio.run(IncidentResource.collection(dict(days=['3']), {}, None))
+        self.assertIsInstance(list(result), list)
+        with self.assertRaises(ApiError):
+            asyncio.run(IncidentResource.collection(dict(days=['400']), {}, None))
