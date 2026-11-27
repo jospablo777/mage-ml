@@ -66,6 +66,17 @@ class IcebergSinkTest(TestCase):
         with self.assertRaisesRegex(ValueError, 'partition_by'):
             self.sink(table='a.b', partition_by=['week(ts)'])
 
+    def test_text_columns_take_other_values_as_json_and_partitions_need_their_column(self):
+        sink = self.sink(table='lake.notes', create_table=True, columns=dict(note='string'))
+        sink.batch_write([dict(id=1, note=True), dict(id=2, note=2.5), dict(id=3, note='x')])
+        rows = sorted(sink.catalog.load_table('lake.notes').scan().to_arrow().to_pylist(),
+                      key=lambda r: r['id'])
+        self.assertEqual([r['note'] for r in rows], ['true', '2.5', 'x'])
+
+        sink = self.sink(table='lake.parts', create_table=True, partition_by=['day(ts)'])
+        with self.assertRaisesRegex(ValueError, 'first messages have no ts; give its type'):
+            sink.batch_write([dict(id=1)])
+
     def test_partition_fields_read_as_transforms_of_columns(self):
         self.assertEqual(partition_field('region'), ('identity', None, 'region'))
         self.assertEqual(partition_field('day(ts)'), ('day', None, 'ts'))

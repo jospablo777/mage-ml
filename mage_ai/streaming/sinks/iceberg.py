@@ -200,6 +200,11 @@ class IcebergSink(BaseSink):
         fields = []
         for i, text in enumerate(self.config.partition_by or []):
             name, n, column = partition_field(text)
+            if column not in schema.column_names:
+                raise ValueError(
+                    f'Iceberg partition_by {text}: the first messages have no {column}; '
+                    'give its type under columns.'
+                )
             source = schema.find_field(column)
             target = column if name == 'identity' else (
                 f'{column}_{"trunc" if name == "truncate" else name}'
@@ -230,11 +235,8 @@ class IcebergSink(BaseSink):
         for column in schema:
             values = [row.get(column.name) for row in rows]
             if pa.types.is_string(column.type) or pa.types.is_large_string(column.type):
-                values = [
-                    v if v is None or isinstance(v, str) else json.dumps(v)
-                    if isinstance(v, (dict, list)) else str(v)
-                    for v in values
-                ]
+                # Other values as their JSON text (true, 2.5, [1]), as the engine writes them.
+                values = [v if v is None or isinstance(v, str) else json.dumps(v) for v in values]
                 arrays.append(pa.array(values, type=column.type))
                 continue
             try:

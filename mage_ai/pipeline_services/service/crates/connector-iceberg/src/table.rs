@@ -526,6 +526,12 @@ pub(crate) async fn open(
     let mut spec = PartitionSpec::builder(schema.clone());
     for field in &settings.partition_by {
         let (transform, column) = partition_field(field)?;
+        if schema.field_by_name(&column).is_none() {
+            return Err(fatal(format!(
+                "Iceberg partition_by {field}: the first messages have no {column}; give its \
+                 type under columns."
+            )));
+        }
         let target = match transform {
             Transform::Identity => column.clone(),
             Transform::Bucket(_) => format!("{column}_bucket"),

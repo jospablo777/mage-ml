@@ -179,6 +179,19 @@ async fn a_message_that_does_not_fit_and_a_missing_table_stop_the_stream() {
         !error.retryable && error.message.contains("does not exist"),
         "{error:?}"
     );
+
+    let mut by_day = config.clone();
+    by_day["table"] = "lake.by_day".into();
+    by_day["partition_by"] = serde_json::json!(["day(ts)"]);
+    let sink = IcebergSink::new(&by_day, "s").unwrap();
+    let (b, m) = batch(0, 0, &[r#"{"id": 1}"#]);
+    let error = sink.write(&b, &m).await.err().unwrap();
+    assert!(
+        error
+            .message
+            .contains("the first messages have no ts; give its type under columns"),
+        "{error:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
