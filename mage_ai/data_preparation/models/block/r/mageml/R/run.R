@@ -306,6 +306,8 @@ run_chain <- function(job_dir, quit_on_error = TRUE) {
       } else {
         utils::limitedLabels(calls)
       }
+      # Every call too, for an error inside mageml, which has no block line.
+      write_lines(utils::tail(labels, 30), file.path(job_dir, "calls.txt"))
       labels <- labels[grepl("^block_[0-9]+\\.R#", labels)]
       write_lines(labels, file.path(job_dir, "traceback.txt"))
       if (quit_on_error) {
@@ -368,6 +370,8 @@ run_block <- function(job_dir, quit_on_error = TRUE) {
       } else {
         utils::limitedLabels(calls)
       }
+      # Every call too, for an error inside mageml, which has no block line.
+      write_lines(utils::tail(labels, 30), file.path(job_dir, "calls.txt"))
       # The block's calls, with their lines; Mage's own calls are left out.
       labels <- labels[startsWith(labels, "block.R#")]
       write_lines(labels, file.path(job_dir, "traceback.txt"))

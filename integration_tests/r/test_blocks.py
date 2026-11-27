@@ -422,3 +422,13 @@ def test_an_r_block_reads_the_secrets_it_names(monkeypatch):
 
     assert frame['token'].tolist() == ['s3cr3t']
     assert 'get_secret_value("api_token")' in seen[0]
+
+
+def test_an_error_inside_mageml_says_where_it_happened():
+    """An error with no line of the block's code (I-549, seen once in CI with no calls) lists
+    the calls R was in."""
+    with pytest.raises(RBlockError) as caught:
+        transform('transformer(function(...) new.env())')
+    message = str(caught.value)
+    assert '(inside MageML)' in message, message
+    assert 'write_output' in message, message

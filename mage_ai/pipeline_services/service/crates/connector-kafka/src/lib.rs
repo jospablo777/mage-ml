@@ -153,9 +153,7 @@ fn assign_from(
     for (topic, partition) in &partitions {
         list.add_partition(topic, *partition);
     }
-    let committed = consumer
-        .committed_offsets(list.clone(), Duration::from_secs(30))
-        .map_err(connector_error)?;
+    let committed = committed_offsets(consumer, &list)?;
     let kind = offset["type"].as_str().unwrap_or("beginning");
     let wanted = match kind {
         "beginning" => Offset::Beginning,
@@ -223,6 +221,45 @@ fn assign_from(
         })
         .collect();
     Ok((assigned, starts))
+}
+
+/// How long a start waits for the group's coordinator before it fails.
+const COORDINATOR_WITHIN: Duration = Duration::from_secs(60);
+
+/// Whether an error is the group's coordinator not ready yet: a new group, or one whose
+/// coordinator moved or is loading, answers so for a few seconds.
+fn coordinator_not_ready(error: &KafkaError) -> bool {
+    matches!(
+        error.rdkafka_error_code(),
+        Some(
+            RDKafkaErrorCode::NotCoordinator
+                | RDKafkaErrorCode::CoordinatorLoadInProgress
+                | RDKafkaErrorCode::CoordinatorNotAvailable
+                | RDKafkaErrorCode::RequestTimedOut
+                | RDKafkaErrorCode::OperationTimedOut
+        )
+    )
+}
+
+/// The group's committed offsets of the partitions, retried while its coordinator is not
+/// ready (up to [`COORDINATOR_WITHIN`]): a stream started with a new group failed at once
+/// with NotCoordinator and never started.
+fn committed_offsets<C: ConsumerContext>(
+    consumer: &BaseConsumer<C>,
+    list: &TopicPartitionList,
+) -> Result<TopicPartitionList, ConnectorError> {
+    let deadline = Instant::now() + COORDINATOR_WITHIN;
+    let mut wait = Duration::from_millis(200);
+    loop {
+        match consumer.committed_offsets(list.clone(), Duration::from_secs(30)) {
+            Ok(committed) => return Ok(committed),
+            Err(error) if coordinator_not_ready(&error) && Instant::now() < deadline => {
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(Duration::from_secs(5));
+            }
+            Err(error) => return Err(connector_error(error)),
+        }
+    }
 }
 
 /// Where a bounded stream stops reading (`stop_at`), so it ends once it has read up to it:
@@ -801,9 +838,7 @@ pub fn committed_positions(config: &Value) -> Result<Vec<(String, i64)>, Connect
             }
         }
     }
-    let committed = consumer
-        .committed_offsets(list, within)
-        .map_err(connector_error)?;
+    let committed = committed_offsets(&consumer, &list)?;
     Ok(committed
         .elements()
         .iter()
@@ -2519,6 +2554,23 @@ mod tests {
         assert_eq!(table.unconfirmed(id), 300);
         table.confirm("orders", 0, 950);
         assert_eq!(table.unconfirmed(id), 0);
+    }
+
+    #[test]
+    fn a_coordinator_not_ready_yet_is_waited_for_and_other_errors_are_not() {
+        for code in [
+            RDKafkaErrorCode::NotCoordinator,
+            RDKafkaErrorCode::CoordinatorLoadInProgress,
+            RDKafkaErrorCode::CoordinatorNotAvailable,
+        ] {
+            assert!(coordinator_not_ready(&KafkaError::MetadataFetch(code)));
+        }
+        assert!(!coordinator_not_ready(&KafkaError::MetadataFetch(
+            RDKafkaErrorCode::GroupAuthorizationFailed
+        )));
+        assert!(!coordinator_not_ready(&KafkaError::MetadataFetch(
+            RDKafkaErrorCode::UnknownTopicOrPartition
+        )));
     }
 
     #[test]

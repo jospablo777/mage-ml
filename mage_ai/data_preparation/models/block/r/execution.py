@@ -73,6 +73,13 @@ class RChainRun:
     kept: Dict[int, List[Any]]
 
 
+def _mageml_calls(job_dir: str) -> str:
+    """For an error with no line of the block's code (inside mageml), the calls R was in, so
+    the error says where it happened."""
+    calls = _read_text(os.path.join(job_dir, 'calls.txt'))
+    return f'(inside MageML)\n{calls}' if calls else ''
+
+
 def execute_r_chain(
     steps: List[Dict],
     input_vars: List = None,
@@ -144,7 +151,7 @@ def execute_r_chain(
         if exit_code != 0:
             message = _read_text(os.path.join(job_dir, 'error.txt'))
             block = _read_text(os.path.join(job_dir, 'error_block.txt')) or None
-            calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
+            calls = _read_text(os.path.join(job_dir, 'traceback.txt')) or _mageml_calls(job_dir)
             text = (f'R block {block or steps[0]["block_uuid"]} failed: '
                     f'{message or describe_exit(exit_code, "Rscript")}')
             hint = r_hint(message)
@@ -235,7 +242,7 @@ def execute_r_code(
         exit_code = runtime.run_r_job(config, RUNNER, RESIDENT_RUNNER, job_dir, env, cwd)
         if exit_code != 0:
             message = _read_text(os.path.join(job_dir, 'error.txt'))
-            calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
+            calls = _read_text(os.path.join(job_dir, 'traceback.txt')) or _mageml_calls(job_dir)
             text = f'R block {block_uuid} failed: {message or describe_exit(exit_code, "Rscript")}'
             hint = r_hint(message)
             if hint:

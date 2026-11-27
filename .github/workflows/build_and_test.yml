@@ -332,7 +332,9 @@ jobs:
             services: postgres
             tests: integration_tests/topologies
             r: true
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
+            # The Rust inference topology builds a program of its own: warmed too, as built
+            # inside its test it ran past the 900 s limit (I-550).
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/topologies/test_inference.py::test_inference[linear_rust-1000]'"
           - id: soak
             name: "MageML: scheduler soak"
             services: postgres redis
