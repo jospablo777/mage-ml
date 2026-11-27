@@ -61,12 +61,25 @@ def load(repo_path: str) -> List[Dict[str, Any]]:
     path = _path(repo_path)
     if not os.path.isfile(path):
         return []
-    with open(path) as file:
-        document = yaml.safe_load(file) or {}
+    try:
+        with open(path) as file:
+            document = yaml.safe_load(file) or {}
+    except yaml.YAMLError as error:
+        raise DatasetError(f'{FILE} is not valid YAML: {error}')
+    if not isinstance(document, dict):
+        raise DatasetError(f'{FILE}: datasets is a list.')
     entries = document.get('datasets') or []
     if not isinstance(entries, list):
         raise DatasetError(f'{FILE}: datasets is a list.')
-    return [dict(e, output=e.get('output') or 'output_0') for e in entries if isinstance(e, dict)]
+    for number, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict):
+            raise DatasetError(f'{FILE}: dataset {number} is not a mapping.')
+        for key in ('id', 'pipeline', 'block'):
+            if not entry.get(key):
+                raise DatasetError(
+                    f"{FILE}: dataset {entry.get('id') or number} has no {key}.",
+                )
+    return [dict(e, id=str(e['id']), output=e.get('output') or 'output_0') for e in entries]
 
 
 def _save(repo_path: str, entries: List[Dict[str, Any]]) -> None:
@@ -246,7 +259,21 @@ def status(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
             footer = None
     published = _as_time(getattr(completed, 'completed_at', None))
     through = _as_time((footer or {}).get('through'))
+    fresh = freshness(entry, published, through)
+    if through is None and (footer or {}).get('through') is not None and entry.get('max_age'):
+        fresh = dict(state='unknown', basis='data',
+                     reason=f"{entry['time_column']} is not a date or a time.")
     failing = []
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    try:
+        pipeline = Pipeline.get(entry['pipeline'], repo_path=repo_path, check_if_exists=True)
+    except Exception:
+        pipeline = None
+    if pipeline is None:
+        failing.append(f"its pipeline {entry['pipeline']} does not exist")
+    elif pipeline.get_block(entry['block']) is None:
+        failing.append(f"its block {entry['block']} is not in {entry['pipeline']}")
     if latest is not None and _status(latest) == 'failed':
         failing.append(f'its latest run failed (run {latest.pipeline_run_id})')
     for monitor in ((getattr(completed, 'metrics', None) or {}).get('monitors') or []):
@@ -259,7 +286,7 @@ def status(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         rows=(footer or {}).get('rows'),
         columns=(footer or {}).get('columns'),
         data_through=through.isoformat() if through else None,
-        freshness=freshness(entry, published, through),
+        freshness=fresh,
         checks=dict(state='failing' if failing else ('passing' if completed else 'unknown'),
                     failing=failing),
         runs=[dict(block_run_id=r.id, pipeline_run_id=r.pipeline_run_id, status=_status(r),
@@ -289,7 +316,11 @@ def dependencies(repo_path: str, entries: List[Dict[str, Any]],
     from mage_ai.orchestration import pipeline_dependencies
 
     def ancestors_of(dataset) -> List[str]:
-        pipeline = Pipeline.get(dataset['pipeline'], repo_path=repo_path)
+        try:
+            pipeline = Pipeline.get(dataset['pipeline'], repo_path=repo_path)
+        except Exception:
+            # Its pipeline is gone: status says so; it reads nothing.
+            return []
         return _ancestors(pipeline, dataset['block'])
 
     try:

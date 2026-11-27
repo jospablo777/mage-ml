@@ -7,6 +7,8 @@ import textwrap
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
 from mage_ai.data_preparation import datasets
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -114,3 +116,41 @@ class DatasetsTest(DBTestCase):
             self.register(id='second', block=self.load_uuid)
         datasets.unregister(self.repo_path, 'first')
         self.assertEqual(datasets.load(self.repo_path), [])
+
+    def test_a_hand_edited_file_and_a_removed_pipeline_are_explained(self):
+        path = Path(self.repo_path, datasets.FILE)
+        path.write_text('datasets:\n  - id: orphan\n    block: b\n')
+        with self.assertRaisesRegex(datasets.DatasetError, 'dataset orphan has no pipeline'):
+            datasets.load(self.repo_path)
+        path.write_text('datasets:\n  - pipeline: p\n    block: b\n')
+        with self.assertRaisesRegex(datasets.DatasetError, 'dataset 1 has no id'):
+            datasets.load(self.repo_path)
+        path.write_text('datasets: [unclosed\n')
+        with self.assertRaisesRegex(datasets.DatasetError, 'not valid YAML'):
+            datasets.load(self.repo_path)
+        path.unlink()
+
+        kept = self.register(id='kept', block=self.load_uuid)
+        document = yaml.safe_load(path.read_text())
+        document['datasets'] += [
+            dict(id='gone', pipeline='removed_pipeline', block='b'),
+            dict(id='moved', pipeline=self.pipeline.uuid, block='renamed'),
+        ]
+        path.write_text(yaml.safe_dump(document))
+        entries = {e['id']: e for e in datasets.load(self.repo_path)}
+        gone = datasets.status(self.repo_path, entries['gone'])
+        self.assertEqual(gone['checks']['failing'],
+                         ['its pipeline removed_pipeline does not exist'])
+        moved = datasets.status(self.repo_path, entries['moved'])
+        self.assertEqual(moved['checks']['failing'],
+                         [f'its block renamed is not in {self.pipeline.uuid}'])
+        self.assertEqual(datasets.dependencies(self.repo_path, list(entries.values()), kept),
+                         dict(upstream=[], downstream=[]))
+        datasets.dependencies(self.repo_path, list(entries.values()), entries['gone'])
+
+    def test_a_time_column_that_is_not_a_time_is_named(self):
+        entry = self.register(id='by_sales', block=self.load_uuid, time_column='sales',
+                              max_age='1d')
+        self.run_once()
+        found = datasets.status(self.repo_path, entry)
+        self.assertEqual(found['freshness']['reason'], 'sales is not a date or a time.')
