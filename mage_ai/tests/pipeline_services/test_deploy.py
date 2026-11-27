@@ -137,6 +137,130 @@ class DockerTargetTest(TestCase):
             self.target.rollback('shop', 'prod')
 
 
+class DeploySavepointTest(TestCase):
+    """A deploy takes a savepoint of the running deployment's streams before it stops it."""
+
+    def setUp(self):
+        super().setUp()
+        self.docker = FakeDocker()
+        self.calls = []
+        self.fail = False
+
+        def savepoints(port, token, name):
+            # Taken while the deployment before still runs.
+            running = self.docker.containers['mage-shop-prod']['running']
+            self.calls.append((port, token, name, running))
+            if self.fail:
+                raise deploy.DeployError('savepoint deploy-1 of stream orders failed (500)')
+            return ['orders'], ['clicks: no savepoint, it keeps no Kafka offsets']
+
+        self.target = deploy.DockerTarget(runner=self.docker, health=lambda *a: True,
+                                          savepoints=savepoints)
+
+    def deploy(self, image, savepoint='deploy-1'):
+        return self.target.deploy(
+            'shop', 'prod', image, 7001, env=dict(MAGE_SERVICE_TOKEN='tok'),
+            labels=dict(commit='abc', lock=image), timeout=1, savepoint=savepoint,
+        )
+
+    def test_the_savepoint_is_taken_of_the_running_deployment_first(self):
+        first = self.deploy('mage-shop:1')
+        self.assertEqual((first.savepoints, self.calls), ([], []), 'nothing ran before')
+
+        second = self.deploy('mage-shop:2')
+
+        self.assertEqual(self.calls, [(7001, 'tok', 'deploy-1', True)])
+        self.assertEqual(second.savepoints, ['orders'])
+        self.assertEqual(second.savepoint_notes,
+                         ['clicks: no savepoint, it keeps no Kafka offsets'])
+
+    def test_a_failed_savepoint_stops_the_deploy_before_anything_changes(self):
+        self.deploy('mage-shop:1')
+        self.fail = True
+
+        with self.assertRaisesRegex(deploy.DeployError, 'failed'):
+            self.deploy('mage-shop:2')
+
+        current = self.docker.containers['mage-shop-prod']
+        self.assertEqual((current['image'], current['running']), ('mage-shop:1', True))
+        self.assertNotIn('mage-shop-prod-previous', self.docker.containers)
+
+    def test_without_a_savepoint_none_is_taken(self):
+        self.deploy('mage-shop:1')
+        self.deploy('mage-shop:2', savepoint=None)
+        self.assertEqual(self.calls, [])
+
+
+class TakeSavepointsTest(TestCase):
+    """take_savepoints against a service's API."""
+
+    def serve(self, answers):
+        import http.server
+        import threading
+
+        requests = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def answer(self):
+                requests.append((self.command, self.path, self.headers.get('Authorization')))
+                code, body = answers[(self.command, self.path)]
+                self.send_response(code)
+                self.end_headers()
+                if body is not None:
+                    self.wfile.write(json.dumps(body).encode())
+
+            do_GET = answer
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
+                self.answer()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        return server.server_address[1], requests
+
+    def test_kafka_streams_get_one_and_others_are_noted(self):
+        port, requests = self.serve({
+            ('GET', '/v1/streams'): (200, dict(streams=[
+                dict(pipeline='orders'), dict(pipeline='hooks'), dict(pipeline='old'),
+            ])),
+            ('POST', '/v1/streams/orders/savepoints'): (200, dict(files=2)),
+            ('POST', '/v1/streams/hooks/savepoints'): (
+                400, dict(error='Savepoints keep Kafka offsets; stream hooks reads http.')),
+            ('POST', '/v1/streams/old/savepoints'): (404, None),
+        })
+
+        taken, notes = deploy.take_savepoints(port, 'tok', 'deploy-1')
+
+        self.assertEqual(taken, ['orders'])
+        self.assertIn('hooks: no savepoint, Savepoints keep Kafka offsets', notes[0])
+        self.assertIn('predates them', notes[1])
+        self.assertEqual({r[2] for r in requests}, {'Bearer tok'})
+
+    def test_a_savepoint_that_fails_stops_with_the_way_on(self):
+        port, _ = self.serve({
+            ('GET', '/v1/streams'): (200, dict(streams=[dict(pipeline='orders')])),
+            ('POST', '/v1/streams/orders/savepoints'): (
+                503, dict(error='Stream orders did not settle within 120 seconds')),
+        })
+        with self.assertRaisesRegex(deploy.DeployError, 'did not settle.*--no-savepoint'):
+            deploy.take_savepoints(port, 'tok', 'deploy-1')
+
+    def test_a_deployment_that_does_not_answer_does_not_hold_up_the_deploy(self):
+        import socket
+
+        with socket.socket() as unused:
+            unused.bind(('127.0.0.1', 0))
+            port = unused.getsockname()[1]
+        taken, notes = deploy.take_savepoints(port, 'tok', 'deploy-1', timeout=2)
+        self.assertEqual(taken, [])
+        self.assertIn('did not answer', notes[0])
+
+
 class DeployCommandTest(TestCase):
     """mage service deploy, status, diff and rollback with a fake Docker."""
 

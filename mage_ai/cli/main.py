@@ -2154,8 +2154,14 @@ def service_deploy(
         None, '--skip-tests', metavar='REASON',
         help='deploy without running the service tests; the reason is recorded.',
     ),
+    savepoint: bool = typer.Option(
+        True, '--savepoint/--no-savepoint',
+        help='take a savepoint of the running deployment\'s Kafka streams first (Docker).',
+    ),
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
+    from datetime import datetime, timezone
+
     from mage_ai.pipeline_services import (
         definitions,
         deploy,
@@ -2229,12 +2235,17 @@ def service_deploy(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     port = int(settings.get('port') or 6800)
+    savepoint_name = None
     try:
         if on_cluster:
             deployment = target.deploy(name, env, image, values, labels, timeout=timeout)
         else:
+            # The version before can start again from its streams' state as it was.
+            savepoint_name = (
+                f'deploy-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}' if savepoint else None
+            )
             deployment = target.deploy(name, env, image, port, values, labels=labels,
-                                       timeout=timeout)
+                                       timeout=timeout, savepoint=savepoint_name)
     except deploy.DeployError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
@@ -2246,6 +2257,14 @@ def service_deploy(
         where = f'http://127.0.0.1:{port}'
     promoted = f', promoted from {from_env}' if from_env else ''
     typer.echo(f'{name} runs in {env} on {where} ({deployment.image}{promoted}).')
+    for note in getattr(deployment, 'savepoint_notes', None) or []:
+        typer.echo(f'Savepoint: {note}.')
+    if getattr(deployment, 'savepoints', None):
+        typer.echo(
+            f'Savepoint {savepoint_name} of {", ".join(deployment.savepoints)} was taken before; '
+            f'start the previous version from it with '
+            f'MAGE_SERVICE_START_FROM_SAVEPOINT={savepoint_name}.'
+        )
     typer.echo(f'API token: in {os.path.relpath(deploy.token_file(project, name, env), project)}.')
 
 

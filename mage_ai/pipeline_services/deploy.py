@@ -2,7 +2,9 @@
 Deploying a service to a target (ADR-0023), with the Docker adapter first (B3).
 
 A deploy builds the service's image, starts it as the environment's container with labels
-that record the commit, the lock and the image, and waits for /healthz. When the new
+that record the commit, the lock and the image, and waits for /healthz. Before it stops the
+running deployment, it takes a savepoint of each of its Kafka streams (`deploy-<time>`), so
+the version before can start again from the stream state it had. When the new
 container does not become healthy, it is removed and the previous one comes back: the
 platform holds the truth about what runs, so status and diff read the labels, and CI never
 commits back. The previous container is kept, stopped, for rollback.
@@ -16,8 +18,10 @@ import os
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -47,6 +51,10 @@ class Deployment:
     values: str = ''
     # The environment whose image a promotion deployed (deploy --from).
     promoted_from: str = ''
+    # The streams of the deployment before that the deploy took a savepoint of, and notes
+    # on those it could not.
+    savepoints: List[str] = field(default_factory=list)
+    savepoint_notes: List[str] = field(default_factory=list)
 
     def drift(self, lock: Optional[str]) -> str:
         if self.state != 'running':
@@ -68,10 +76,67 @@ def names(service: str, environment: str) -> Dict[str, str]:
     return dict(current=base, previous=f'{base}-previous', volume=f'{base}-data')
 
 
+def take_savepoints(port: int, token: Optional[str], name: str,
+                    timeout: float = 180) -> Tuple[List[str], List[str]]:
+    """
+    Savepoint `name` of each stream of the service on `port`, taken while it runs
+    (POST /v1/streams/{pipeline}/savepoints). Returns the streams it was taken of, and notes
+    on those skipped: a stream that cannot have one (it keeps no Kafka offsets), an engine
+    that predates savepoints of running streams, or a deployment that does not answer. A
+    savepoint the service fails to take raises.
+    """
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+
+    def call(method: str, path: str, body: Optional[Dict] = None) -> Dict:
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{port}{path}', method=method, headers=headers,
+            data=json.dumps(body).encode() if body is not None else None,
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read() or b'{}')
+
+    advice = 'deploy with --no-savepoint to go on without one'
+    try:
+        streams = call('GET', '/v1/streams').get('streams') or []
+    except (OSError, ValueError) as error:
+        # A deployment that does not answer (one that keeps failing) does not hold up the
+        # deploy that replaces it.
+        return [], [f'none taken: the running deployment did not answer ({error})']
+    taken, notes = [], []
+    for stream in streams:
+        pipeline = stream.get('pipeline')
+        try:
+            call('POST', f'/v1/streams/{urllib.parse.quote(pipeline)}/savepoints',
+                 dict(name=name))
+            taken.append(pipeline)
+        except urllib.error.HTTPError as error:
+            try:
+                message = json.loads(error.read() or b'{}').get('error') or ''
+            except ValueError:
+                message = ''
+            if error.code == 400 and 'Kafka offsets' in message:
+                notes.append(f'{pipeline}: no savepoint, {message}')
+            elif error.code in (404, 405) and not message:
+                notes.append(f'{pipeline}: no savepoint, the running engine takes none of '
+                             'running streams (it predates them)')
+            else:
+                raise DeployError(
+                    f'savepoint {name} of stream {pipeline} failed ({error.code}: '
+                    f'{message or error.reason}); {advice}.'
+                )
+        except OSError as error:
+            raise DeployError(f'savepoint {name} of stream {pipeline} failed ({error}); {advice}.')
+    return taken, notes
+
+
 class DockerTarget:
-    def __init__(self, runner: Runner = _docker, health: Optional[Callable] = None):
+    def __init__(self, runner: Runner = _docker, health: Optional[Callable] = None,
+                 savepoints: Optional[Callable] = None):
         self.runner = runner
         self.health = health or _healthy
+        self.savepoints = savepoints or take_savepoints
 
     def _run(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
         result = self.runner(list(arguments))
@@ -93,11 +158,23 @@ class DockerTarget:
         env: Dict[str, str],
         labels: Dict[str, str],
         timeout: float = 120,
+        savepoint: Optional[str] = None,
     ) -> Deployment:
+        """
+        Runs `image` as the environment's deployment. With `savepoint`, the running deployment's
+        streams get a savepoint of that name first; one that fails stops the deploy before the
+        running deployment is touched.
+        """
         n = names(service, environment)
+        had_current = self._exists(n['current'])
+        taken, notes = [], []
+        current = self.inspect(service, environment) if had_current and savepoint else None
+        if current is not None and current.state == 'running' and current.port:
+            taken, notes = self.savepoints(
+                current.port, self.current_token(service, environment), savepoint,
+            )
         if self._exists(n['previous']):
             self._run('rm', '-f', n['previous'])
-        had_current = self._exists(n['current'])
         if had_current:
             self._run('stop', n['current'])
             self._run('rename', n['current'], n['previous'])
@@ -129,7 +206,9 @@ class DockerTarget:
             os.unlink(env_file)
 
         if self.health(port, timeout):
-            return self.inspect(service, environment)
+            deployment = self.inspect(service, environment)
+            deployment.savepoints, deployment.savepoint_notes = taken, notes
+            return deployment
         logs = self._run('logs', '--tail', '40', n['current'], check=False)
         self._run('rm', '-f', n['current'], check=False)
         restored = self._restore(n, had_current)
