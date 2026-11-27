@@ -253,6 +253,16 @@ def test_block_runs_read_from_the_database_equal_the_servers(ports, signed_in):
               for uuid in pipelines):
         assert time.monotonic() < deadline, 'the scheduler made no block runs'
         time.sleep(1)
+    # And all of them finished: a block run started between the server's read and the
+    # gateway's moved in the default order (started_at), and the reads differed (I-570).
+    deadline = time.monotonic() + 180
+    while any(
+        run['status'] not in ('completed', 'failed', 'cancelled', 'condition_failed')
+        for uuid in pipelines
+        for run in call('GET', f'block_runs?pipeline_uuid={uuid}&_limit=100')['block_runs']
+    ):
+        assert time.monotonic() < deadline, 'the block runs did not finish'
+        time.sleep(1)
     # The comparisons of the calls above finish in the background; the baseline waits for them.
     before = settled(counts)
     for query in queries:

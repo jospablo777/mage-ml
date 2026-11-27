@@ -4,7 +4,7 @@ catalog:
   type: rest
   uri: "http://localhost:8181"
   warehouse: "lake"
-  # token: "{{ env_var('ICEBERG_TOKEN') }}"
+  # token: a secret, read with mage_secret_var
 table: "analytics.events"
 # Create the table from the first messages when it does not exist.
 create_table: false

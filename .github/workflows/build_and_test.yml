@@ -453,13 +453,17 @@ jobs:
       # limit does not pay for librdkafka and OpenSSL. A release build, as services ship and
       # as the timing tests need; MAGE_TEST_STREAM_RELEASE makes every test use it.
       - name: Build the engine with its stream connectors
-        if: matrix.id == 'streaming' || matrix.id == 'sql'
+        # pipelines: its R stream test runs an exported service too (I-571).
+        if: matrix.id == 'streaming' || matrix.id == 'sql' || matrix.id == 'pipelines'
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
+          # The tests' own feature list: a list of its own here drifted from it (iceberg was
+          # missing), and the first test rebuilt the engine within its time limit (I-571).
+          features=$(python3 -c "from integration_tests.exported_services import STREAM_FEATURES; print(STREAM_FEATURES)")
           cd mage_ai/pipeline_services/service
-          CARGO_TARGET_DIR=target/streams cargo build -q --release -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats,mongodb,sqs,pubsub,activemq,search,influxdb,sql
+          CARGO_TARGET_DIR=target/streams cargo build -q --release -p mage-service --features "$features"
           echo "MAGE_TEST_STREAM_RELEASE=1" >> "$GITHUB_ENV"
       # The IBM MQ connector loads IBM's MQ client at run time: the redistributable client,
       # the version and checksum exported images pin.
