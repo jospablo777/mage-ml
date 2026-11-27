@@ -455,6 +455,7 @@ fn service_facts(block: &Block) -> mage_service_core::plan::BlockFacts {
         }),
         upstream: block.upstream.clone(),
         worker: block.python_worker.clone(),
+        environment: block.language_environment(),
         // One Rust process has one MAGE_IO_CONFIG: blocks with different profiles split.
         profile: block.io_config.as_ref().map(|v| v.to_string()),
         alone,

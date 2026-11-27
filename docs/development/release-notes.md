@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Named R and Rust environments
+
+- Besides each language's default environment (`r/`, `rust/`), a project can have named R
+  environments (`r_environments/<name>/`, an rv project with its own packages and R version)
+  and named Rust environments (`rust_environments/<name>/`, a Cargo workspace with its own
+  crates and toolchain). A block chooses one with the chip in its header
+  (`r_environment` or `rust_environment` in its configuration), or its pipeline does
+  (`environment: {r: ..., rust: ...}`). The Workers page creates them from the default's
+  packages or from what blocks need, shows the pipelines that use each, and removes one no
+  block uses; `mage r` and `mage rust` commands take `--environment`. Chains of blocks stay
+  in one environment, compiling prepares each one used, and exported services install each R
+  environment and build one Rust binary per Rust environment.
+- A Rust block that used a crate its workspace does not list got no hint with current Rust
+  (I-541): the hint now says where to add it and which other environment lists it.
+
 ### Partitions
 
 - A pipeline can declare partitions (hourly, daily, weekly or monthly from a start date in a

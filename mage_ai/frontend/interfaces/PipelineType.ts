@@ -157,6 +157,10 @@ export default interface PipelineType {
     requirements?: string | string[];
     // A Python worker (python_workers/<name>/) for the Python blocks, instead.
     worker?: string;
+    // The named environments of its R and Rust blocks (r_environments/<name>/,
+    // rust_environments/<name>/); the project's default when not set.
+    r?: string;
+    rust?: string;
   };
   executor_type?: ExecutorTypeEnum;
   execution_framework?: PipelineExecutionFrameworkUUIDEnum;

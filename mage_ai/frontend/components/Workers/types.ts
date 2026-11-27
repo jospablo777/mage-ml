@@ -141,7 +141,8 @@ export type WorkerHeldPackagesType = {
   state: 'held' | 'current' | 'unchecked';
 };
 
-// language_environments.py: the R or Rust environment every block of that language runs with.
+// language_environments.py: an R or Rust environment, the language's default or a named one
+// (ADR-0040), which the blocks that select it run with.
 export type LanguagePackageType = {
   locked?: string;
   name: string;
@@ -154,8 +155,11 @@ export type LanguageEnvironmentType = {
   blocks: string[];
   commands?: string[];
   definition?: string;
+  // default, or the name of a folder under r_environments/ or rust_environments/.
+  environment: string;
   exists: boolean;
-  id: 'r' | 'rust';
+  // r or rust for the defaults, r.<name> or rust.<name> for named ones.
+  id: string;
   label: string;
   language: 'r' | 'rust';
   locked_count?: number;
@@ -163,6 +167,8 @@ export type LanguageEnvironmentType = {
   manifest_text?: string;
   package_count: number;
   packages: LanguagePackageType[];
+  // The pipelines whose blocks select it.
+  pipelines?: WorkerUsageType[];
   problems?: string[];
   state: 'ready' | 'problems' | 'none';
   tools?: { [tool: string]: string | null };

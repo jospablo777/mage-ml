@@ -24,7 +24,7 @@ export function canChooseWorker(block: BlockType): boolean {
   return block?.language === BlockLanguageEnum.PYTHON && WORKER_BLOCK_TYPES.includes(block?.type);
 }
 
-const ChipStyle = styled.button<{ builtin?: boolean; warning?: boolean }>`
+export const ChipStyle = styled.button<{ builtin?: boolean; warning?: boolean }>`
   align-items: center;
   background: none;
   border-radius: ${BORDER_RADIUS_SMALL}px;

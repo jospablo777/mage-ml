@@ -583,7 +583,7 @@ def run_r_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, f
             repo_path=os.environ.get('MAGE_REPO_PATH'),
             block_uuid=block['uuid'],
             pipeline_uuid=block.get('pipeline_uuid'),
-            environment=block.get('r_environment'),
+            environment=_r_environment(block),
         )
     except execution.RBlockError as error:
         raise BlockError('run', str(error))
@@ -595,6 +595,12 @@ def run_r_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, f
     if request.get('run_tests', True):
         _run_tests(block, tests)
     return list(run.outputs), tests, seconds
+
+
+def _r_environment(block: Dict) -> Optional[str]:
+    """The named R environment the export resolved into the block's configuration (ADR-0040);
+    None for the default."""
+    return (block.get('configuration') or {}).get('r_environment') or None
 
 
 def _r_tests(tests: List[Dict]) -> List[Dict]:
@@ -634,7 +640,7 @@ def run_r_chain(
             global_vars=variables,
             repo_path=os.environ.get('MAGE_REPO_PATH'),
             pipeline_uuid=blocks[0].get('pipeline_uuid'),
-            environment=blocks[0].get('r_environment'),
+            environment=_r_environment(blocks[0]),
         )
     except execution.RChainError as error:
         raise BlockError('run', str(error), block_uuid=error.block_uuid)

@@ -92,7 +92,13 @@ export class MageApi {
 
   async addBlock(
     pipelineUUID: string,
-    block: { content: string; name: string; type: string; upstream_blocks?: string[] },
+    block: {
+      content: string;
+      language?: string;
+      name: string;
+      type: string;
+      upstream_blocks?: string[];
+    },
   ) {
     await this.call('POST', `pipelines/${pipelineUUID}/blocks`, {
       block: { language: 'python', ...block },

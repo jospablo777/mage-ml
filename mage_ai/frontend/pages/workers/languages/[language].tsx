@@ -7,7 +7,7 @@ import { PADDING_UNITS } from '@oracle/styles/units/spacing';
 function LanguageEnvironmentPage({ language }: { language: string }) {
   return (
     <Dashboard
-      title={language === 'r' ? 'R' : 'Rust'}
+      title={(language || '').startsWith('rust') ? 'Rust' : 'R'}
       uuid="Workers/language"
     >
       <Spacing p={PADDING_UNITS}>

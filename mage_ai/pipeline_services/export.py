@@ -108,6 +108,10 @@ class Capture:
     rust_locked: bool = False
     # The rv environment R blocks run with (rproject.toml and rv.lock).
     r_project: Optional[Path] = None
+    # Named R and Rust environments the blocks use (ADR-0040), by language: {name: folder}.
+    r_environments: Dict[str, Path] = field(default_factory=dict)
+    # The Rust environment of each exported crate; crates absent are in the default one.
+    rust_environments: Dict[str, str] = field(default_factory=dict)
     # The pipeline environment (metadata.yaml `environment`) the Python blocks run in.
     environment: Optional[Any] = None
     # Python workers besides that environment, by alias: each a virtual environment in the
@@ -185,6 +189,14 @@ class Capture:
     def needs_r(self) -> bool:
         return any(
             b['language'] == 'r' for p in self.manifest['pipelines'] for b in p['blocks']
+        )
+
+    @property
+    def needs_default_r(self) -> bool:
+        """Whether an R block runs in the project's default R environment."""
+        return any(
+            b['language'] == 'r' and not (b.get('configuration') or {}).get('r_environment')
+            for p in self.manifest['pipelines'] for b in p['blocks']
         )
 
     @property
@@ -300,7 +312,7 @@ def capture(
         }
     if alerts:
         capture_.manifest['alerts'] = alerts
-    if capture_.needs_r:
+    if capture_.needs_default_r:
         capture_.r_project = _r_project(project_path)
     capture_.models = _models(capture_, models or [])
     capture_.challengers = dict(challengers or {})
@@ -2063,6 +2075,9 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
             'support yet.'
         )
         return None
+    environment = _block_environment(block, language, project, where, problems, capture_)
+    if environment is False:
+        return None
     monitors = _monitor_checks(pipeline, block, project, where, problems, capture_.notes)
     contract = _contract_check(block, project, where, problems, capture_.notes)
     path = Path(block.file_path).resolve()
@@ -2089,6 +2104,12 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
         ),
         configuration=_json_safe(block.configuration or {}),
     )
+    if language in ('r', 'rust'):
+        # The block's choice or its pipeline's, resolved: the engine reads only the block.
+        key = f'{language}_environment'
+        entry['configuration'].pop(key, None)
+        if environment:
+            entry['configuration'][key] = environment
     if conditions:
         entry['conditions'] = conditions
     if contract is not None:
@@ -2103,11 +2124,14 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
     if language == 'sql':
         entry['sql'] = _sql_details(pipeline, block)
     if language == 'rust':
-        crate = _prepare_rust_block(block, project, problems, where, stream=stream)
+        crate = _prepare_rust_block(block, project, problems, where, stream=stream,
+                                    environment=environment)
         if crate:
-            entry['binary'] = f'bin/{RUST_BUNDLE}'
+            entry['binary'] = f'bin/{_bundle_name(environment)}'
             entry['entry'] = crate
             capture_.rust_blocks.append((block.uuid, crate))
+            if environment:
+                capture_.rust_environments[crate] = environment
             if stream:
                 capture_.rust_stream_crates.add(crate)
         profile = _rust_io_config(block, path, project, problems, where)
@@ -2304,14 +2328,78 @@ def _json_safe(value):
     return json.loads(json.dumps(value, default=str))
 
 
+def _block_environment(block, language: str, project: Path, where: str,
+                       problems: List[str], capture_: 'Capture'):
+    """
+    The named R or Rust environment an R or Rust block runs in (ADR-0040): None for the
+    default (and other languages), False when the block cannot be exported. A named R
+    environment must be on the image's R version, with an rv.lock.
+    """
+    from mage_ai.data_preparation import block_environments
+
+    if language not in ('r', 'rust'):
+        return None
+    try:
+        name = block_environments.require(
+            str(project), language, block_environments.selection(block, language),
+        )
+    except block_environments.EnvironmentNameError as error:
+        problems.append(f'{where}: {error}')
+        return False
+    if name == block_environments.DEFAULT:
+        return None
+    if language == 'r' and name not in capture_.r_environments:
+        folder = block_environments.folder(str(project), 'r', name)
+        if not (folder / 'rv.lock').is_file():
+            problems.append(
+                f'{where} runs in R environment {name}, which has no rv.lock; run `mage r sync '
+                f'{project} --environment {name}` so the image installs the versions the '
+                'blocks ran with.'
+            )
+            return False
+        version = _r_version_of(folder)
+        if version and not IMAGE_R_VERSION.startswith(version) and \
+                not version.startswith(IMAGE_R_VERSION):
+            problems.append(
+                f'{where} runs in R environment {name}, which asks for R {version}; service '
+                f'images have R {IMAGE_R_VERSION}. Set r_version = "{IMAGE_R_VERSION}" in its '
+                'rproject.toml, or keep the pipeline in MageML.'
+            )
+            return False
+        r_system_packages(folder)
+        capture_.r_environments[name] = folder.resolve()
+    return name
+
+
+# The R of service images (CRAN's Debian repository, trixie-cran46).
+IMAGE_R_VERSION = '4.6'
+
+
+def _r_version_of(folder: Path) -> Optional[str]:
+    import tomllib
+
+    try:
+        project = tomllib.loads((folder / 'rproject.toml').read_text()).get('project') or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    version = str(project.get('r_version') or '').strip()
+    return version or None
+
+
+def _bundle_name(environment: Optional[str]) -> str:
+    """The binary of a Rust environment's blocks: mage-blocks, or mage-blocks-<name>."""
+    return RUST_BUNDLE if not environment else f'{RUST_BUNDLE}-{environment}'
+
+
 def _prepare_rust_block(block, project: Path, problems: List[str], where: str,
-                        stream: bool = False) -> Optional[str]:
+                        stream: bool = False, environment: Optional[str] = None
+                        ) -> Optional[str]:
     from mage_ai.data_preparation.models.block.rust import build as rust_build
 
     try:
         prepared = rust_build.prepare(
             Path(block.file_path).read_text(), block.type, block.uuid, str(project),
-            stream=stream,
+            stream=stream, environment=environment,
         )
     except Exception as error:
         problems.append(f'{where}: {error}')
@@ -3224,12 +3312,23 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
             if (Path(worker.definition) / name).is_file():
                 shutil.copy2(Path(worker.definition) / name, target / name)
     if capture_.rust_blocks:
-        _copy_rust_workspace(capture_, out_dir / 'rust')
+        # The image builds every environment with --locked only when every lock allows it.
+        capture_.rust_locked = all([
+            _copy_rust_workspace(capture_, out_dir / _rust_folder(environment), environment)
+            for environment in _rust_environments_used(capture_)
+        ])
     if capture_.r_project is not None:
         (out_dir / 'r').mkdir(parents=True, exist_ok=True)
         for name in ('rproject.toml', 'rv.lock', R_SYSTEM_PACKAGES):
             if (capture_.r_project / name).is_file():
                 shutil.copy2(capture_.r_project / name, out_dir / 'r' / name)
+    for environment, folder in sorted(capture_.r_environments.items()):
+        # Where block_environments finds it in the image: <project>/r_environments/<name>.
+        target = out_dir / 'r_environments' / environment
+        target.mkdir(parents=True, exist_ok=True)
+        for name in ('rproject.toml', 'rv.lock', R_SYSTEM_PACKAGES):
+            if (folder / name).is_file():
+                shutil.copy2(folder / name, target / name)
     _copy_service_source(out_dir / 'build' / 'mage_service')
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
     (out_dir / '.dockerignore').write_text(
@@ -3747,23 +3846,41 @@ def _copy_tree(source: Path, target: Path, skip: Iterable[str]) -> None:
 RUST_BUNDLE = 'mage-blocks'
 
 
-def _copy_rust_workspace(capture_: Capture, target: Path) -> None:
+def _rust_environments_used(capture_: Capture) -> List[Optional[str]]:
+    """The Rust environments of the exported crates: None (the default) first."""
+    used = {capture_.rust_environments.get(crate) for _, crate in capture_.rust_blocks}
+    return sorted(used, key=lambda e: (e is not None, e or ''))
+
+
+def _rust_folder(environment: Optional[str]) -> str:
+    """Where an environment's workspace goes in the export (and the image's build stage)."""
+    return 'rust' if not environment else f'rust_environments/{environment}'
+
+
+def _copy_rust_workspace(capture_: Capture, target: Path,
+                         environment: Optional[str] = None) -> bool:
+    """Copies an environment's workspace with its blocks and bundle; returns whether its
+    Cargo.lock lets the image build with --locked."""
     from mage_ai.data_preparation.models.block.rust import workspace as ws
 
-    root = ws.workspace_root(str(capture_.project))
+    root = ws.workspace_root(str(capture_.project), environment)
     target.mkdir(parents=True, exist_ok=True)
     for name in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml'):
         if (root / name).is_file():
             shutil.copy2(root / name, target / name)
     _copy_tree(root / '.mage' / 'sdk', target / '.mage' / 'sdk', ['target'])
-    for _, crate in capture_.rust_blocks:
+    crates = list(dict.fromkeys(
+        crate for _, crate in capture_.rust_blocks
+        if capture_.rust_environments.get(crate) == environment
+    ))
+    for crate in crates:
         _copy_tree(root / '.mage' / 'blocks' / crate, target / '.mage' / 'blocks' / crate,
                    ['target'])
         _block_library(target / '.mage' / 'blocks' / crate)
-    crates = list(dict.fromkeys(crate for _, crate in capture_.rust_blocks))
     _write_bundle(target, [c for c in crates if c not in capture_.rust_stream_crates],
-                  [c for c in crates if c in capture_.rust_stream_crates])
-    capture_.rust_locked = _sync_cargo_lock(capture_, target)
+                  [c for c in crates if c in capture_.rust_stream_crates],
+                  name=_bundle_name(environment))
+    return _sync_cargo_lock(capture_, target)
 
 
 def _block_library(directory: Path) -> None:
@@ -3812,7 +3929,8 @@ def _block_library(directory: Path) -> None:
     manifest.write_text(binary.sub('[lib]\npath = "src/lib.rs"\n', text, count=1))
 
 
-def _write_bundle(workspace: Path, crates: List[str], stream_crates: List[str] = ()) -> None:
+def _write_bundle(workspace: Path, crates: List[str], stream_crates: List[str] = (),
+                  name: str = RUST_BUNDLE) -> None:
     """
     One binary for all the Rust blocks: each block's binary held a copy of Polars (about
     75 MB), and after a few minutes idle macOS and Linux load each from disk again. Stream
@@ -3825,8 +3943,8 @@ def _write_bundle(workspace: Path, crates: List[str], stream_crates: List[str] =
     )
     (bundle / 'Cargo.toml').write_text(
         '# Generated by mage export service: the Rust blocks of the service in one binary.\n'
-        f'[package]\nname = "{RUST_BUNDLE}"\nversion = "0.0.0"\nedition = "2024"\n'
-        f'publish = false\n\n[[bin]]\nname = "{RUST_BUNDLE}"\npath = "src/main.rs"\n\n'
+        f'[package]\nname = "{name}"\nversion = "0.0.0"\nedition = "2024"\n'
+        f'publish = false\n\n[[bin]]\nname = "{name}"\npath = "src/main.rs"\n\n'
         f'[dependencies]\n{dependencies}'
     )
     arms = ''.join(f'        "{crate}" => {crate}::mage_run(),\n' for crate in crates)
@@ -3959,15 +4077,56 @@ R_PREPARE = (
 )
 
 
+def _r_environment_steps(capture_: Capture) -> str:
+    """The Dockerfile steps that install each R environment's packages as its rv.lock pins
+    them: the default in /srv/mage-service/r, named ones where block_environments finds them
+    in the project (ADR-0040)."""
+    steps = []
+    if capture_.r_project is not None:
+        steps.append(
+            'ENV MAGE_R_PROJECT_DIR=/srv/mage-service/r\n'
+            "# The R packages of the project's R environment, as rv.lock pins them.\n"
+            'COPY r /srv/mage-service/r\n'
+            'RUN --mount=type=cache,target=/root/.cache/rv cd /srv/mage-service/r && rv sync\n'
+        )
+    project = capture_.project.name
+    for name in sorted(capture_.r_environments):
+        target = f'/srv/mage-service/{project}/r_environments/{name}'
+        steps.append(
+            f'# The packages of R environment {name}, as its rv.lock pins them.\n'
+            f'COPY r_environments/{name} {target}\n'
+            f'RUN --mount=type=cache,target=/root/.cache/rv cd {target} && rv sync\n'
+        )
+    return ''.join(steps)
+
+
+def _r_prepare(capture_: Capture) -> str:
+    """Installs mageml and checks each R environment the blocks use, at build time."""
+    if not capture_.r_environments:
+        return R_PREPARE
+    environments = ([None] if capture_.r_project is not None else []) + sorted(
+        capture_.r_environments)
+    project = f'/srv/mage-service/{capture_.project.name}'
+    return R_PREPARE.replace(
+        "print(rt.prepare(rt.r_config()))",
+        f"[print(rt.prepare(rt.r_config('{project}', e))) for e in {environments!r}]",
+    )
+
+
 def _uses_sdk_feature(capture_: Capture, feature: str) -> bool:
     """
-    Whether the project's rust/Cargo.toml, or the crate of a Rust block whose code uses
-    the feature's module, turns on a feature of MageML's crate.
+    Whether the Cargo.toml of a Rust environment the blocks use, or the crate of a Rust
+    block whose code uses the feature's module, turns on a feature of MageML's crate.
     """
     import tomllib
 
-    rust = capture_.project / 'rust'
-    manifests = [rust / 'Cargo.toml', *sorted((rust / '.mage' / 'blocks').glob('*/Cargo.toml'))]
+    from mage_ai.data_preparation.models.block.rust import workspace as ws
+
+    manifests = []
+    for environment in [None, *sorted(set(capture_.rust_environments.values()))]:
+        rust = ws.workspace_root(str(capture_.project), environment)
+        manifests += [rust / 'Cargo.toml',
+                      *sorted((rust / '.mage' / 'blocks').glob('*/Cargo.toml'))]
     for path in manifests:
         try:
             manifest = tomllib.loads(path.read_text(encoding='utf-8'))
@@ -4048,23 +4207,35 @@ def _dockerfile(capture_: Capture) -> str:
             'RUN apt-get update && apt-get install -y --no-install-recommends g++ && \\\n'
             '    rm -rf /var/lib/apt/lists/*\n'
         ) if onnx else ''
-        # Each service has its own: the blocks crate has the same path in every export.
-        blocks_cache = f'mage-blocks-{capture_.name}-{build_base}-$TARGETARCH'
+        builds = []
+        for environment in _rust_environments_used(capture_):
+            folder = _rust_folder(environment)
+            bundle = _bundle_name(environment)
+            # Each service and environment has its own: the blocks crate has the same path
+            # in every export.
+            blocks_cache = f'{bundle}-{capture_.name}-{build_base}-$TARGETARCH'
+            builds.append(
+                f'COPY {folder} ./{folder}\n'
+                'RUN --mount=type=cache,target=/usr/local/cargo/registry \\\n'
+                f'    --mount=type=cache,id={blocks_cache},target=/build/{folder}/target \\\n'
+                f'    cargo build --release {locked}--manifest-path {folder}/Cargo.toml '
+                f'-p {bundle} && \\\n'
+                f'    mkdir -p /out/bin && cp {folder}/target/release/{bundle} /out/bin/{bundle}\n'
+            )
+        what = 'one binary that runs any of them' if len(builds) == 1 \
+            else 'one binary per Rust environment (ADR-0040)'
         rust_blocks = f'''
-# The Rust blocks, compiled once here into one binary that runs any of them.
-{cxx}COPY rust ./rust
-RUN --mount=type=cache,target=/usr/local/cargo/registry \\
-    --mount=type=cache,id={blocks_cache},target=/build/rust/target \\
-    cargo build --release {locked}--manifest-path rust/Cargo.toml -p {RUST_BUNDLE} && \\
-    mkdir -p /out/bin && cp rust/target/release/{RUST_BUNDLE} /out/bin/{RUST_BUNDLE}
-'''
+# The Rust blocks, compiled once here into {what}.
+{cxx}{''.join(builds)}'''
         copy_blocks = 'COPY --from=build --chown=mage:mage /out/bin ./bin\n'
     r_install = ''
     r_prepare = ''
     if capture_.needs_r:
-        system_packages = ''.join(
-            f' \\\n      {name}' for name in r_system_packages(capture_.r_project)
-        )
+        folders = ([capture_.r_project] if capture_.r_project is not None else []) + [
+            folder for _, folder in sorted(capture_.r_environments.items())
+        ]
+        names = list(dict.fromkeys(n for f in folders for n in r_system_packages(f)))
+        system_packages = ''.join(f' \\\n      {name}' for name in names)
         # As in Mage's image: R 4.6 from CRAN's Debian repository and rv, which installs
         # the packages rv.lock pins (binaries where Posit has them, else from source).
         r_install = f'''
@@ -4087,15 +4258,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
       | tar -xz -C /usr/local/bin rv && \\
     rm -rf /var/lib/apt/lists/*
 ENV LIBARROW_MINIMAL=false \\
-    MAGE_R_PROJECT_DIR=/srv/mage-service/r \\
     MAGE_R_CACHE_DIR=/srv/mage-service/r-cache \\
     MAGE_R_SYNC=check
-# The R packages of the project's R environment, as rv.lock pins them.
-COPY r /srv/mage-service/r
-RUN --mount=type=cache,target=/root/.cache/rv cd /srv/mage-service/r && rv sync
-'''
+{_r_environment_steps(capture_)}'''
         # Mage's mageml package, installed now: the image's files are read-only at run time.
-        r_prepare = f'''RUN PYTHONPATH=/srv/mage-service/python python3 -c "{R_PREPARE}" && \\
+        prepare = _r_prepare(capture_)
+        r_prepare = f'''RUN PYTHONPATH=/srv/mage-service/python python3 -c "{prepare}" && \\
     chown -R mage:mage /srv/mage-service/r-cache
 # The R library was synced and checked above; nothing changes it at run time. rv still
 # reads its cache directory, which must be writable: /tmp is, also on Kubernetes.

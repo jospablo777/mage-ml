@@ -61,6 +61,8 @@ import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
 import Tooltip from '@oracle/components/Tooltip';
 import WorkerChip, { canChooseWorker } from './WorkerChip';
+import EnvironmentChip from './EnvironmentChip';
+import { ENVIRONMENT_KEYS, hasLanguageEnvironment } from '@utils/models/blockEnvironment';
 import UpstreamBlockSettings from './UpstreamBlockSettings';
 import api from '@api';
 import buildAutocompleteProvider from '@components/CodeEditor/autocomplete';
@@ -2536,6 +2538,26 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                                       // null, not a missing key: an empty configuration
                                       // would not be saved.
                                       python_worker: pythonWorker,
+                                    },
+                                  },
+                                })}
+                                pipeline={pipeline}
+                              />
+                            </>
+                          )}
+
+                          {hasLanguageEnvironment(block) && (
+                            <>
+                              <Spacing mr={1} />
+                              <EnvironmentChip
+                                block={block}
+                                onChange={environment => updateBlock({
+                                  block: {
+                                    configuration: {
+                                      ...block?.configuration,
+                                      // null, not a missing key: an empty configuration
+                                      // would not be saved.
+                                      [ENVIRONMENT_KEYS[block.language]]: environment,
                                     },
                                   },
                                 })}

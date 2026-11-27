@@ -51,6 +51,10 @@ pub struct BlockFacts {
     /// The named Python worker the block runs in; None for the default one.
     #[serde(default)]
     pub worker: Option<String>,
+    /// The named R or Rust environment the block runs in (ADR-0040); None for the default
+    /// one. A chain runs in one R session or one Rust program, so it stays in one.
+    #[serde(default)]
+    pub environment: Option<String>,
     /// The connection profile the block uses (io_config profile of a Rust block, the data
     /// provider profile of a SQL block).
     #[serde(default)]
@@ -335,6 +339,9 @@ fn service_rule(
     if kind == ServiceKind::Worker && next.worker != first.worker {
         return Some(("worker_switch", worker_switch(first, next)));
     }
+    if kind == ServiceKind::Rust && next.environment != first.environment {
+        return Some(("environment_switch", environment_switch(first, next)));
+    }
     if kind == ServiceKind::Rust
         && let (Some(a), Some(b)) = (profile, &next.profile)
         && a != b
@@ -391,6 +398,9 @@ fn segment_rule(
             ),
         ));
     }
+    if matches!(kind, SegmentKind::Rust | SegmentKind::R) && next.environment != first.environment {
+        return Some(("environment_switch", environment_switch(first, next)));
+    }
     match kind {
         SegmentKind::Rust => {
             if let (Some(a), Some(b)) = (profile, &next.profile)
@@ -432,6 +442,20 @@ fn worker_switch(block: &BlockFacts, next: &BlockFacts) -> String {
         name(&block.worker),
         next.uuid,
         name(&next.worker)
+    )
+}
+
+fn environment_switch(first: &BlockFacts, next: &BlockFacts) -> String {
+    let name = |e: &Option<String>| match e {
+        Some(e) => format!("environment {e}"),
+        None => "the default environment".into(),
+    };
+    format!(
+        "{} runs in {} and {} in {}: each environment builds and runs its own program.",
+        first.uuid,
+        name(&first.environment),
+        next.uuid,
+        name(&next.environment)
     )
 }
 
@@ -722,6 +746,42 @@ mod tests {
                     .any(|f| f.code == "profile_switch" && f.next == "c")
             );
         }
+    }
+
+    #[test]
+    fn chains_stay_in_one_r_or_rust_environment_in_mageml_and_services() {
+        let a = block("a", Language::Rust, &[]);
+        let mut b = block("b", Language::Rust, &["a"]);
+        b.environment = Some("onnx".into());
+        let mut c = block("c", Language::Rust, &["b"]);
+        c.environment = Some("onnx".into());
+        let blocks = [a, b, c];
+        let mageml_plan = plan(&blocks, &mageml()).unwrap();
+        assert_eq!(mageml_plan.segments[0].blocks, vec!["b", "c"]);
+        // One bundle binary per environment in a service.
+        let service_plan = plan(&blocks, &service()).unwrap();
+        assert_eq!(groups(&service_plan), vec![vec!["a"], vec!["b", "c"]]);
+        for found in [&mageml_plan.findings, &service_plan.findings] {
+            let finding = found
+                .iter()
+                .find(|f| f.code == "environment_switch")
+                .expect("the switch is explained");
+            assert_eq!(finding.next, "b");
+            assert!(finding.reason.contains("a runs in the default environment"));
+            assert!(finding.reason.contains("b in environment onnx"));
+        }
+
+        let mut model = block("model", Language::R, &[]);
+        model.environment = Some("models".into());
+        let plot = block("plot", Language::R, &["model"]);
+        let r_plan = plan(&[model, plot], &mageml()).unwrap();
+        assert!(r_plan.segments.is_empty(), "{:?}", r_plan.segments);
+        assert!(
+            r_plan
+                .findings
+                .iter()
+                .any(|f| f.code == "environment_switch")
+        );
     }
 
     #[test]

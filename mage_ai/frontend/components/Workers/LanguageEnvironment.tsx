@@ -2,6 +2,7 @@ import NextLink from 'next/link';
 import styled from 'styled-components';
 import { useEffect, useState } from 'react';
 import { useMutation } from 'react-query';
+import { useRouter } from 'next/router';
 
 import Button from '@oracle/elements/Button';
 import CodeEditor from '@components/CodeEditor';
@@ -15,11 +16,20 @@ import Text from '@oracle/elements/Text';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { BORDER_RADIUS_SMALL } from '@oracle/styles/units/borders';
-import { CardStyle, MonoStyle, PillStyle, TableStyle, ToneType, plural } from './shared';
+import {
+  CardStyle,
+  MonoStyle,
+  PillStyle,
+  TableStyle,
+  ToneType,
+  plural,
+  usageText,
+} from './shared';
 import { LanguageEnvironmentType } from './types';
 import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { onSuccess } from '@api/utils/response';
+import { reloadLanguageEnvironments } from '@utils/models/blockEnvironment';
 
 const CodeStyle = styled.pre`
   border-radius: ${BORDER_RADIUS_SMALL}px;
@@ -48,18 +58,121 @@ const ABOUT = {
   r: {
     check: 'rv',
     guide: 'https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/r-setup.md',
-    text: 'Every R block runs with this rv environment: the packages rproject.toml lists, '
+    text: 'R blocks run with this rv environment: the packages rproject.toml lists, '
       + 'installed as rv.lock pins them.',
     tools: { rig: 'rig', rscript: 'Rscript', rv: 'rv' },
   },
   rust: {
     check: 'cargo',
     guide: 'https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/rust-setup.md',
-    text: 'Every Rust block builds in this Cargo workspace and can use each crate under '
+    text: 'Rust blocks build in this Cargo workspace and can use each crate under '
       + '[workspace.dependencies]; Cargo.lock pins their versions.',
     tools: { cargo: 'cargo', rustc: 'rustc' },
   },
 };
+
+// Which blocks run in it, said before the text about its files.
+function whoRuns(environment: LanguageEnvironmentType): string {
+  const language = environment.language === 'r' ? 'R' : 'Rust';
+  if (environment.environment === 'default') {
+    return `Every ${language} block runs here unless it or its pipeline chooses a named `
+      + 'environment.';
+  }
+  const key = environment.language === 'r' ? 'r_environment' : 'rust_environment';
+  return `${language} blocks run here when they choose ${environment.environment} (in the `
+    + `block header, or ${key}: ${environment.environment} in its configuration), or when `
+    + `their pipeline does (environment: {${environment.language}: ${environment.environment}}).`;
+}
+
+// The pipelines whose blocks run in it, each linked to its editor.
+function UsedBy({ environment }: { environment: LanguageEnvironmentType }) {
+  const pipelines = environment.pipelines || [];
+  return (
+    <CardStyle>
+      <Text bold>Used by</Text>
+      {!pipelines.length && (
+        <Text muted small>No pipeline&apos;s blocks choose it yet.</Text>
+      )}
+      {pipelines.length > 0 && (
+        <Spacing mt={1}>
+          <TableStyle aria-label="Pipelines that use it">
+            <thead>
+              <tr><th>Pipeline</th><th>Blocks</th><th /></tr>
+            </thead>
+            <tbody>
+              {pipelines.map(usage => (
+                <tr key={usage.pipeline}>
+                  <td>
+                    <NextLink
+                      as={`/pipelines/${usage.pipeline}/edit`}
+                      href="/pipelines/[pipeline]/edit"
+                      passHref
+                    >
+                      <Link>{usage.name}</Link>
+                    </NextLink>
+                  </td>
+                  <td><MonoStyle>{usage.blocks.join(', ')}</MonoStyle></td>
+                  <td>
+                    {usage.default && (
+                      <Text muted xsmall>the pipeline&apos;s choice for its blocks</Text>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </TableStyle>
+        </Spacing>
+      )}
+    </CardStyle>
+  );
+}
+
+// Removing a named environment: refused while blocks use it, confirmed once.
+function Remove({ environment }: { environment: LanguageEnvironmentType }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string>(null);
+  const [remove, { isLoading }] = useMutation(
+    api.language_environments.useDelete(environment.id),
+    {
+      onSuccess: (response: any) => onSuccess(response, {
+        callback: () => reloadLanguageEnvironments().then(() => router.push('/workers')),
+        onErrorCallback: response => setError(response?.error?.message || 'Not removed.'),
+      }),
+    },
+  );
+  const used = (environment.pipelines || []).length > 0;
+  return (
+    <CardStyle>
+      <Text bold>Remove this environment</Text>
+      <Text muted small>
+        {used
+          ? `${usageText(environment.pipelines)} use it. Choose another environment for them `
+            + 'first.'
+          : `Removes ${environment.definition}/ with its lock and installed library.`}
+      </Text>
+      {error && <Spacing mt={2}><ErrorCallout message={error} title="Not removed" /></Spacing>}
+      <Spacing mt={2}>
+        {!confirming && (
+          <Button danger disabled={used} onClick={() => setConfirming(true)}>
+            Remove environment
+          </Button>
+        )}
+        {confirming && (
+          <FlexContainer alignItems="center">
+            <Text small>Remove {environment.label} for good?</Text>
+            <Spacing ml={2} />
+            <Button danger loading={isLoading} onClick={() => remove()}>
+              Yes, remove it
+            </Button>
+            <Spacing ml={1} />
+            <Button onClick={() => setConfirming(false)}>Keep it</Button>
+          </FlexContainer>
+        )}
+      </Spacing>
+    </CardStyle>
+  );
+}
 
 export function languageState(environment: LanguageEnvironmentType): {
   label: string;
@@ -149,7 +262,8 @@ function LanguageEnvironment({ language }: { language: string }) {
       <Text bold xlarge>{environment.label}</Text>
       <div style={{ maxWidth: UNIT * 90 }}>
         <Text default>
-          {about.text} <Link href={about.guide} inline openNewWindow>Setup guide</Link>
+          {whoRuns(environment)} {about.text}{' '}
+          <Link href={about.guide} inline openNewWindow>Setup guide</Link>
         </Text>
       </div>
       <Spacing mt={1} />
@@ -333,7 +447,7 @@ function LanguageEnvironment({ language }: { language: string }) {
                   setText(value);
                 }}
                 onSave={() => dirty && save()}
-                uuid={`language-environment/${environment.language}`}
+                uuid={`language-environment/${environment.id}`}
                 value={text}
                 width="100%"
               />
@@ -371,16 +485,26 @@ function LanguageEnvironment({ language }: { language: string }) {
         </Spacing>
       )}
 
+      <Spacing mt={3}>
+        <UsedBy environment={environment} />
+      </Spacing>
+
       {environment.blocks?.length > 0 && (
         <Spacing mt={3}>
           <CardStyle>
-            <Text bold>Blocks</Text>
+            <Text bold>Block files</Text>
             <Spacing mt={1}>
               {environment.blocks.map(block => (
                 <Text key={block} small><MonoStyle>{block}</MonoStyle></Text>
               ))}
             </Spacing>
           </CardStyle>
+        </Spacing>
+      )}
+
+      {environment.environment && environment.environment !== 'default' && (
+        <Spacing mt={3}>
+          <Remove environment={environment} />
         </Spacing>
       )}
     </>

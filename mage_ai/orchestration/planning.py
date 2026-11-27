@@ -72,6 +72,17 @@ def block_facts(pipeline, block, executable_uuids, segments: bool = True) -> Dic
         worker = environments.worker_selection(block)
         if worker not in (None, 'mage'):
             facts['worker'] = worker
+    if language in ('r', 'rust'):
+        # A chain runs in one R session or one Rust program: one environment (ADR-0040).
+        from mage_ai.data_preparation import block_environments
+
+        try:
+            environment = block_environments.selection(block, language)
+        except block_environments.EnvironmentNameError:
+            environment = str((block.configuration or {}).get(
+                block_environments.BLOCK_KEYS[language]))
+        if environment != block_environments.DEFAULT:
+            facts['environment'] = environment
     if not segments:
         return facts
     if language in ('rust', 'sql'):

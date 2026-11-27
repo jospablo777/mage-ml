@@ -546,6 +546,21 @@ pub struct Block {
     pub python_worker: Option<String>,
 }
 
+impl Block {
+    /// The named R or Rust environment the block runs in (ADR-0040): the export writes the
+    /// block's choice, or its pipeline's, into `r_environment` or `rust_environment` of its
+    /// configuration. None for the default environment and for other languages.
+    pub fn language_environment(&self) -> Option<String> {
+        let key = match self.language {
+            Language::R => "r_environment",
+            Language::Rust => "rust_environment",
+            _ => return None,
+        };
+        let name = self.configuration.get(key)?.as_str()?.trim().to_lowercase();
+        (!name.is_empty() && name != "default").then_some(name)
+    }
+}
+
 /// A monitor of the block's output, as MageML runs it: its settings (the monitor file as
 /// MageML parsed it), the output it profiles, and the baseline a `run:<id>` baseline names,
 /// taken from MageML's record of that run. A `previous` baseline is the service's own

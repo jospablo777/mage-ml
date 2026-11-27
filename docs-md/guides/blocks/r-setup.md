@@ -176,13 +176,24 @@ installed.
 - **macOS with rig:** rig's R versions run only as the default one; switch with
   `rig default 4.5`.
 
+## Several R environments
+
+Blocks that need other package versions, or another R, run in a named environment in
+`r_environments/<name>/`, which the block or its pipeline chooses:
+
+```bash
+mage r init path/to/project --environment models --r-version 4.5
+```
+
+See [R and Rust environments](../pipelines/python-workers.md#r-and-rust-environments).
+
 ## Settings
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `MAGE_RSCRIPT` | `Rscript` on `PATH`, then rig's | The Rscript that runs R blocks |
 | `MAGE_RV` | `rv` on `PATH` | The rv executable |
-| `MAGE_R_PROJECT_DIR` | `<project>/r`, then `<project>` | The folder with `rproject.toml` |
+| `MAGE_R_PROJECT_DIR` | `<project>/r`, then `<project>` | The folder with `rproject.toml` of the default environment |
 | `MAGE_R_SYNC` | `check` | `check` stops R blocks when the library does not match `rv.lock`; `auto` runs `rv sync` first; `off` skips the check |
 
 ## Troubleshooting

@@ -97,3 +97,66 @@ test('the R environment says how to set it up or what stops its blocks', async (
     await expect(page.getByText(problem, { exact: true })).toBeVisible();
   }
 });
+
+test('a named Rust environment is created, chosen in a block header and removed', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  // A leftover from an interrupted run.
+  await api.call('DELETE', 'language_environments/rust.e2e_named').catch(() => null);
+  await page.goto('/workers');
+  await page.getByRole('button', { name: 'New environment' }).click();
+  await page.getByLabel('Language').selectOption('rust');
+  await page.getByLabel('Name').fill('Bad Name');
+  await expect(page.getByText('Lowercase letters, digits, _ and -')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create environment' })).toBeDisabled();
+  await page.getByLabel('Name').fill('e2e_named');
+  await page.getByLabel('Start from').selectOption('minimal');
+  await page.getByRole('button', { name: 'Create environment' }).click();
+
+  await expect(page).toHaveURL(/\/workers\/languages\/rust\.e2e_named$/, { timeout: 60_000 });
+  await expect(page.getByText('Rust e2e_named', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Rust blocks run here when they choose e2e_named/)).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Packages' }).getByText('mage-block', {
+    exact: true,
+  })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText('No pipeline\'s blocks choose it yet.')).toBeVisible();
+
+  // A Rust block chooses it in its header.
+  const pipeline = await api.createPipeline(`e2e named rust ${Date.now()}`);
+  try {
+    await api.addBlock(pipeline, {
+      content: 'use mage::prelude::*;\n\nfn transform(d: LazyFrame) -> LazyFrame {\n    d\n}\n',
+      name: 'fast',
+      language: 'rust',
+      type: 'transformer',
+    });
+    await page.goto(`/pipelines/${pipeline}/edit`);
+    const chip = page.getByRole('button', { name: 'Runs in: Rust default' });
+    await expect(chip).toBeVisible({ timeout: 60_000 });
+    await chip.click();
+    await page.getByText('e2e_named', { exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Runs in: e2e_named' })).toBeVisible();
+    await expect.poll(async () => {
+      const shown = await api.call('GET', 'language_environments/rust.e2e_named');
+      return (shown.language_environment.pipelines || []).map(p => p.blocks.join(','));
+    }, { timeout: 30_000 }).toEqual(['fast']);
+
+    // In use: not removed, and the page says by what.
+    await page.goto('/workers/languages/rust.e2e_named');
+    await expect(page.getByRole('table', { name: 'Pipelines that use it' })).toContainText('fast');
+    await expect(page.getByRole('button', { name: 'Remove environment' })).toBeDisabled();
+  } finally {
+    await api.deletePipeline(pipeline);
+  }
+
+  await page.goto('/workers');
+  const table = page.getByRole('table', { name: 'R and Rust' });
+  await expect(table.getByRole('link', { name: 'Open Rust e2e_named' })).toBeVisible();
+  await table.getByRole('link', { name: 'Open Rust e2e_named' }).click();
+
+  await page.getByRole('button', { name: 'Remove environment' }).click();
+  await page.getByRole('button', { name: 'Yes, remove it' }).click();
+  await expect(page).toHaveURL(/\/workers$/, { timeout: 60_000 });
+  await expect(table.getByRole('link', { name: 'Open Rust e2e_named' })).toHaveCount(0);
+});

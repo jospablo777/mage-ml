@@ -69,6 +69,8 @@ enum Program {
     },
     R {
         pool: Arc<PythonPool>,
+        /// The named R environment of the blocks (ADR-0040); None for the default.
+        environment: Option<String>,
         /// The command, from the Python worker on the first start.
         command: Option<RCommand>,
     },
@@ -133,11 +135,28 @@ impl RustStreamSession {
         let first = order.first().ok_or("the stream has no blocks")?;
         let r = first.language == mage_service_core::manifest::Language::R;
         let program = if r {
+            // One R program runs the stream's R blocks: they share one environment.
+            let environment = first.language_environment();
+            if let Some(other) = order
+                .iter()
+                .find(|b| b.language_environment() != environment)
+            {
+                let name = |e: Option<String>| e.unwrap_or_else(|| "default".into());
+                return Err(format!(
+                    "R stream blocks run in one R program, so they must choose one R \
+                     environment: {} chooses {} and {} chooses {}.",
+                    first.uuid,
+                    name(environment.clone()),
+                    other.uuid,
+                    name(other.language_environment())
+                ));
+            }
             Program::R {
                 pool: options
                     .pool
                     .clone()
                     .ok_or("the stream has R blocks but the service has no Python worker")?,
+                environment,
                 command: None,
             }
         } else {
@@ -365,9 +384,15 @@ impl RustStreamSession {
                 }
                 command
             }
-            Program::R { pool, command } => {
+            Program::R {
+                pool,
+                environment,
+                command,
+            } => {
                 if command.is_none() {
-                    *command = Some(r_command(pool, &self.log, &self.cancel).await?);
+                    *command = Some(
+                        r_command(pool, environment.as_deref(), &self.log, &self.cancel).await?,
+                    );
                 }
                 let r = command.as_ref().expect("asked");
                 let mut command = tokio::process::Command::new(&r.argv[0]);
@@ -541,12 +566,13 @@ fn rand_u64() -> u64 {
 /// How the Python worker says to start R (mage_ai's r/stream.py).
 async fn r_command(
     pool: &PythonPool,
+    environment: Option<&str>,
     log: &RunLog,
     cancel: &CancellationToken,
 ) -> Result<RCommand, String> {
     let reply = pool
         .run(
-            json!({"op": "r_stream_command"}),
+            json!({"op": "r_stream_command", "r_environment": environment}),
             log.clone(),
             "stream",
             None,

@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import Button from '@oracle/elements/Button';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
+import NewLanguageEnvironment from './NewLanguageEnvironment';
 import NewWorker from './NewWorker';
 import { languageState } from './LanguageEnvironment';
 import Spacing from '@oracle/elements/Spacing';
@@ -61,30 +62,42 @@ const HELD_BACK_HINT = 'Locked below their newest release, which does not fit th
 
 // The Workers page: every Python worker of the project, whether it can run blocks, how much
 // it installs, where it is used and whether it has known vulnerabilities; New worker.
-// R and Rust: one environment each, which every block of that language runs with.
+// R and Rust: each language's default environment and its named ones (ADR-0040).
 function LanguageRows() {
   const router = useRouter();
+  const [adding, setAdding] = useState(false);
   const { data } = api.language_environments.list({}, { revalidateOnFocus: false });
   const environments: LanguageEnvironmentType[] = data?.language_environments || [];
   if (!environments.length) {
     return null;
   }
-  const open = (language: string) => router.push(
-    '/workers/languages/[language]', `/workers/languages/${language}`,
+  const open = (id: string) => router.push(
+    '/workers/languages/[language]', `/workers/languages/${id}`,
   );
 
   return (
     <Spacing mt={3}>
-      <Text bold large>R and Rust</Text>
-      <Text muted small>
-        One environment per language, which every block of that language runs with.
-      </Text>
+      <HeaderStyle>
+        <div>
+          <Text bold large>R and Rust</Text>
+          <Text muted small>
+            Blocks run in their language&apos;s default environment, or in a named one that
+            the block or its pipeline chooses.
+          </Text>
+        </div>
+        {!adding && <Button onClick={() => setAdding(true)}>New environment</Button>}
+      </HeaderStyle>
+      {adding && (
+        <Spacing mt={1.5}>
+          <NewLanguageEnvironment onCancel={() => setAdding(false)} />
+        </Spacing>
+      )}
       <Spacing mt={1.5} />
       <CardStyle>
         <TableStyle aria-label="R and Rust">
           <thead>
             <tr>
-              <th>Language</th>
+              <th>Environment</th>
               <th>Version</th>
               <th>Packages</th>
               <th>Blocks</th>
@@ -97,12 +110,12 @@ function LanguageRows() {
               return (
                 <RowLinkStyle
                   aria-label={`Open ${environment.label}`}
-                  key={environment.language}
-                  onClick={() => open(environment.language)}
+                  key={environment.id}
+                  onClick={() => open(environment.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      open(environment.language);
+                      open(environment.id);
                     }
                   }}
                   role="link"

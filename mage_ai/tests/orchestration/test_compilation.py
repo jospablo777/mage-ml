@@ -92,6 +92,20 @@ class CompilationTest(DBTestCase):
         self.assertEqual(compilation.start(pipeline).state, 'nothing')
         self.assertEqual(compilation.summary_for(pipeline)['languages'], ['sql'])
 
+    def test_rust_chains_stay_in_one_environment(self):
+        pipeline = self.pipeline([
+            ('load', 'data_loader', 'rust', LOAD),
+            ('double', 'transformer', 'rust', TRANSFORM),
+            ('again', 'transformer', 'rust', TRANSFORM),
+        ])
+        pipeline.environment = dict(rust='fast')
+        prefix = f'{self._testMethodName}_'
+        pipeline.get_block(f'{prefix}load').configuration = dict(rust_environment='default')
+        self.assertEqual(self.names(compilation.units_for(pipeline)), [
+            ('rust_block', ['load']),
+            ('rust_chain', ['double', 'again']),
+        ])
+
     def test_each_r_environment_the_blocks_use_is_prepared_once(self):
         pipeline = self.pipeline([
             ('fit', 'transformer', 'r', None),

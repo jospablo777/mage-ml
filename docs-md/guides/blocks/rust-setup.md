@@ -156,6 +156,19 @@ edits `rust/Cargo.toml`, saving a change only once cargo resolves it. New projec
 with `anyhow`, `serde`, `serde_json`, `rayon` and `ureq` (HTTP with rustls). Polars comes with the `mage` crate; to enable more Polars features, add `polars`
 with the same version and the features you need. See [Rust blocks](rust-blocks.md#crates).
 
+## Several Rust environments
+
+Every Rust block builds with every crate its workspace lists. A heavy crate, or a crate at
+another version, goes in a named environment in `rust_environments/<name>/`, which the block
+or its pipeline chooses; the other blocks keep building without it:
+
+```bash
+mage rust init path/to/project --environment onnx
+```
+
+All environments build into the same target directory. See
+[R and Rust environments](../pipelines/python-workers.md#r-and-rust-environments).
+
 ## The build cache
 
 Compiled code goes to one directory shared by every project on the machine, so a second

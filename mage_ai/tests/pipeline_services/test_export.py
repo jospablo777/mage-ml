@@ -1281,6 +1281,116 @@ class RExportTest(ExportTestCase):
             export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
         self.assertIn('rv.lock', str(caught.exception))
 
+class NamedEnvironmentExportTest(ExportTestCase):
+    """Services build each R and Rust environment their blocks use (ADR-0040)."""
+
+    RUST_TRANSFORM = """
+        use mage::prelude::*;
+
+        fn transform(data: LazyFrame) -> LazyFrame {
+            data
+        }
+    """
+
+    def setUp(self):
+        super().setUp()
+        for folder in ('r', 'r_environments', 'rust', 'rust_environments'):
+            self.addCleanup(shutil.rmtree, self.project / folder, ignore_errors=True)
+
+    def r_environment(self, folder: Path, version: str = '4.6'):
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'rproject.toml').write_text(
+            f'[project]\nname = "p"\nr_version = "{version}"\n')
+        (folder / 'rv.lock').write_text(f'version = 2\nr_version = "{version}"\n')
+
+    def test_r_blocks_install_and_run_in_their_named_environment(self):
+        self.r_environment(self.project / 'r')
+        self.r_environment(self.project / 'r_environments' / 'models')
+        (self.project / 'r_environments' / 'models' / 'system-packages.txt').write_text(
+            'libgdal-dev\n')
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        fit = self.add('fit', 'transformer', RExportTest.R_TRANSFORM, upstream=[load],
+                       language='r', configuration=dict(r_environment='models'))
+        self.add('plot', 'transformer', RExportTest.R_TRANSFORM, upstream=[fit], language='r')
+        captured = export.capture(str(self.project), [self.pipeline.uuid], name='r-named')
+        out = export.write(captured, tempfile.mkdtemp(), force=True)
+        self.addCleanup(shutil.rmtree, out, ignore_errors=True)
+
+        manifest = json.loads((out / 'service.json').read_text())
+        environments = {b['uuid'].split('_')[-1]: b['configuration'].get('r_environment')
+                        for b in manifest['pipelines'][0]['blocks'] if b['language'] == 'r'}
+        self.assertEqual(environments, {'fit': 'models', 'plot': None})
+        for name in ('rproject.toml', 'rv.lock', 'system-packages.txt'):
+            self.assertTrue((out / 'r_environments' / 'models' / name).is_file(), name)
+        dockerfile = (out / 'Dockerfile').read_text()
+        target = f'/srv/mage-service/{self.project.name}/r_environments/models'
+        self.assertIn(f'COPY r_environments/models {target}', dockerfile)
+        self.assertIn(f'cd {target} && rv sync', dockerfile)
+        self.assertIn('COPY r /srv/mage-service/r', dockerfile)
+        self.assertIn('libgdal-dev', dockerfile)
+        self.assertIn(f"rt.r_config('/srv/mage-service/{self.project.name}', e))) for e in "
+                      "[None, 'models']", dockerfile)
+
+    def test_only_named_r_environments_need_no_default(self):
+        self.r_environment(self.project / 'r_environments' / 'models')
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        self.add('fit', 'transformer', RExportTest.R_TRANSFORM, upstream=[load], language='r',
+                 configuration=dict(r_environment='models'))
+        captured = export.capture(str(self.project), [self.pipeline.uuid], name='r-named')
+        self.assertIsNone(captured.r_project)
+        self.assertEqual(list(captured.r_environments), ['models'])
+        dockerfile = export._dockerfile(captured)
+        self.assertNotIn('MAGE_R_PROJECT_DIR', dockerfile)
+        self.assertIn("for e in ['models']", dockerfile)
+
+    def test_an_r_environment_the_image_cannot_run_is_explained(self):
+        self.r_environment(self.project / 'r_environments' / 'old', version='4.3')
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        self.add('fit', 'transformer', RExportTest.R_TRANSFORM, upstream=[load], language='r',
+                 configuration=dict(r_environment='old'))
+        self.add('other', 'transformer', RExportTest.R_TRANSFORM, upstream=[load],
+                 language='r', configuration=dict(r_environment='gone'))
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(str(self.project), [self.pipeline.uuid], name='r-named')
+        message = str(caught.exception)
+        self.assertIn('asks for R 4.3; service images have R 4.6', message)
+        self.assertIn('There is no R environment named gone', message)
+
+    def test_rust_blocks_build_one_binary_per_environment(self):
+        from mage_ai.data_preparation.models.block.rust import workspace as ws
+
+        ws.init(str(self.project))
+        ws.init(str(self.project), 'fast')
+        self.pipeline.environment = dict(rust='fast')
+        self.pipeline.save()
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        slow = self.add('slow', 'transformer', self.RUST_TRANSFORM, upstream=[load],
+                        language='rust', configuration=dict(rust_environment='default'))
+        self.add('quick', 'transformer', self.RUST_TRANSFORM, upstream=[slow],
+                 language='rust')
+        captured = export.capture(str(self.project), [self.pipeline.uuid], name='rust-named')
+        out = export.write(captured, tempfile.mkdtemp(), force=True)
+        self.addCleanup(shutil.rmtree, out, ignore_errors=True)
+
+        blocks = {b['uuid'].split('_')[-1]: b for b in json.loads(
+            (out / 'service.json').read_text())['pipelines'][0]['blocks']}
+        self.assertEqual(blocks['slow']['binary'], 'bin/mage-blocks')
+        self.assertEqual(blocks['quick']['binary'], 'bin/mage-blocks-fast')
+        self.assertEqual(blocks['quick']['configuration']['rust_environment'], 'fast')
+        self.assertNotIn('rust_environment', blocks['slow']['configuration'])
+        self.assertEqual(blocks['quick']['entry'], ws.crate_name(blocks['quick']['uuid'], 'fast'))
+        bundle = out / 'rust_environments' / 'fast' / '.mage' / 'bundle' / 'Cargo.toml'
+        self.assertIn('name = "mage-blocks-fast"', bundle.read_text())
+        self.assertIn(blocks['quick']['entry'], bundle.read_text())
+        self.assertNotIn(blocks['slow']['entry'], bundle.read_text())
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn('--manifest-path rust/Cargo.toml -p mage-blocks &&', dockerfile)
+        self.assertIn('--manifest-path rust_environments/fast/Cargo.toml -p mage-blocks-fast',
+                      dockerfile)
+        self.assertIn('cp rust_environments/fast/target/release/mage-blocks-fast '
+                      '/out/bin/mage-blocks-fast', dockerfile)
+
+
 class FakeDistribution:
     """A distribution that counts how often its metadata is parsed."""
 
