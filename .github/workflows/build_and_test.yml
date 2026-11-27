@@ -313,7 +313,9 @@ jobs:
             # The deploy test builds a service image and deploys it to the runner's Docker.
             tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models integration_tests/lineage
             r: false
-            warm: ""
+            # Its Rust block test is warmed first, with the shared Rust blocks cache: built
+            # inside the test with every feature (MAGE_RUST_FEATURES), it passed 900 s.
+            warm: "'integration_tests/models/test_rust_audit.py::test_a_rust_block_records_its_decisions'"
           - id: pipelines
             name: "MageML: compiled and polyglot pipelines"
             services: postgres mysql minio api
