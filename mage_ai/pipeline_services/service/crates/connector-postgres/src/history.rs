@@ -232,6 +232,48 @@ impl PgSink {
             .map_err(|e| classify("writing versions", e))?;
         Ok(())
     }
+
+    /// The source read everything through `through` (Unix microseconds) and the history has
+    /// it: its progress moves there, so lookups as of a later time do not wait for a change
+    /// that is not coming. Only for histories timed by the change's commit, whose order
+    /// the source's clock follows.
+    pub(crate) async fn history_caught_up(
+        &self,
+        client: &Client,
+        through: i64,
+    ) -> Result<(), ConnectorError> {
+        let settings = &self.settings;
+        let Some(history) = &settings.history else {
+            return Ok(());
+        };
+        if history.time != "_mage_commit_time" || settings.table.contains('{') {
+            return Ok(());
+        }
+        let schema = quote(&settings.schema);
+        let progress = format!("{schema}.{}", quote(PROGRESS_TABLE));
+        client
+            .batch_execute(&format!(
+                "CREATE SCHEMA IF NOT EXISTS {schema}; CREATE TABLE IF NOT EXISTS {progress} \
+                 (history_table text PRIMARY KEY, through timestamptz NOT NULL, \
+                 updated_at timestamptz NOT NULL)"
+            ))
+            .await
+            .map_err(|e| classify("keeping the history's progress", e))?;
+        let label = format!("{}.{}", settings.schema, settings.table);
+        client
+            .execute(
+                &format!(
+                    "INSERT INTO {progress} (history_table, through, updated_at) \
+                     VALUES ($1, to_timestamp($2::float8 / 1000000), now()) \
+                     ON CONFLICT (history_table) DO UPDATE SET \
+                     through = greatest({progress}.through, EXCLUDED.through), updated_at = now()"
+                ),
+                &[&label, &(through as f64)],
+            )
+            .await
+            .map_err(|e| classify("keeping the history's progress", e))?;
+        Ok(())
+    }
 }
 
 /// The version columns, the index that makes versions unique, and the progress table.
@@ -533,6 +575,45 @@ pub(crate) mod tests {
         assert!(
             !lookup
                 .covers(&["2026-11-05T00:00:00Z".into()])
+                .await
+                .unwrap()
+        );
+        // The source is caught up through 11-06 with no change since: the history is too,
+        // and never goes back.
+        let micros = |at: &str| {
+            chrono::DateTime::parse_from_rfc3339(at)
+                .unwrap()
+                .timestamp_micros()
+        };
+        sink.caught_up(micros("2026-11-06T00:00:00Z"))
+            .await
+            .unwrap();
+        sink.caught_up(micros("2026-11-02T00:00:00Z"))
+            .await
+            .unwrap();
+        assert!(
+            lookup
+                .covers(&["2026-11-05T00:00:00Z".into()])
+                .await
+                .unwrap()
+        );
+        assert!(
+            !lookup
+                .covers(&["2026-11-07T00:00:00Z".into()])
+                .await
+                .unwrap()
+        );
+        // A history timed by a field of the messages, not the commit, stays where it is.
+        let mut by_field = config.clone();
+        by_field["history"] = serde_json::json!({"key": "id", "time": "updated_at"});
+        PgSink::new(&by_field)
+            .unwrap()
+            .caught_up(micros("2026-11-09T00:00:00Z"))
+            .await
+            .unwrap();
+        assert!(
+            !lookup
+                .covers(&["2026-11-07T00:00:00Z".into()])
                 .await
                 .unwrap()
         );

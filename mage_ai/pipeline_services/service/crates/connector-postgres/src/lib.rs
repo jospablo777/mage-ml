@@ -873,6 +873,25 @@ impl Sink for PgSink {
             transactional: true,
         }
     }
+
+    fn caught_up(&self, through: i64) -> BoxFuture<'_, Result<(), ConnectorError>> {
+        Box::pin(async move {
+            if self.settings.history.is_none() {
+                return Ok(());
+            }
+            let mut guard = self.client.lock().await;
+            if guard.as_ref().is_none_or(|c| c.is_closed()) {
+                *guard = Some(self.connect().await?);
+            }
+            let result = self
+                .history_caught_up(guard.as_ref().expect("connected"), through)
+                .await;
+            if result.as_ref().is_err_and(|e| e.retryable) {
+                *guard = None;
+            }
+            result
+        })
+    }
 }
 
 #[cfg(test)]

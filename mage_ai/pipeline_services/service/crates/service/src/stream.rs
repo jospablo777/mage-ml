@@ -545,6 +545,11 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let mut reading = true;
     let mut assigned: std::collections::BTreeSet<PartitionId> = Default::default();
     let mut idle_warned = false;
+    // The source's caught-up time last handed to the sinks, and whether a hand-over runs.
+    let mut told_through = i64::MIN;
+    let telling = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Each sink's last error handing it over, so a repeated one is written once.
+    let told_errors: Arc<Mutex<BTreeMap<usize, String>>> = Default::default();
     let (mut last_in, mut last_out) = (0u64, 0u64);
     let started = std::time::Instant::now();
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -754,6 +759,40 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     s.lag = lag;
                     s.assigned = assigned.len();
                 });
+                // Nothing more to read: sinks that keep how far they are move on (a history's
+                // progress, which lookups as of a later time wait for).
+                if let Some(through) = parts.source.caught_up()
+                    && through > told_through
+                    && !telling.swap(true, std::sync::atomic::Ordering::AcqRel)
+                {
+                    told_through = through;
+                    let sinks: Vec<Arc<dyn Sink>> =
+                        parts.sinks.iter().map(|(sink, _)| sink.clone()).collect();
+                    let (telling, told_errors, name) =
+                        (telling.clone(), told_errors.clone(), parts.name.clone());
+                    tokio::spawn(async move {
+                        for (index, sink) in sinks.iter().enumerate() {
+                            let result = sink.caught_up(through).await;
+                            let mut errors = told_errors.lock().unwrap_or_else(|p| p.into_inner());
+                            match result {
+                                Ok(()) => {
+                                    errors.remove(&index);
+                                }
+                                Err(error) => {
+                                    if errors.get(&index) != Some(&error.message) {
+                                        crate::log::warn(&format!(
+                                            "Stream {name}: sink {index} could not keep how far \
+                                             it is: {}",
+                                            error.message
+                                        ));
+                                        errors.insert(index, error.message);
+                                    }
+                                }
+                            }
+                        }
+                        telling.store(false, std::sync::atomic::Ordering::Release);
+                    });
+                }
                 // More instances than partitions leave some idle: say so once (I-38).
                 if assigned.is_empty()
                     && !idle_warned
@@ -1861,6 +1900,112 @@ mod tests {
         control.send(WriterControl::Cancel(first_id)).unwrap();
         assert!(
             matches!(next(&mut events).await, Event::SinkReceipt { id, .. } if id == second_id)
+        );
+    }
+
+    /// A memory source that is caught up through `through` once all it has is acknowledged.
+    struct CaughtUpSource {
+        inner: MemorySource,
+        handle: mage_connector_local::MemorySourceHandle,
+        total: usize,
+        through: i64,
+    }
+
+    impl Source for CaughtUpSource {
+        fn next_event(&mut self) -> BoxFuture<'_, Result<SourceEvent, ConnectorError>> {
+            self.inner.next_event()
+        }
+        fn commit<'a>(
+            &'a mut self,
+            commits: &'a [mage_stream_ports::Commit],
+        ) -> BoxFuture<'a, CommitOutcome> {
+            self.inner.commit(commits)
+        }
+        fn pause(&mut self, partition: PartitionId) {
+            self.inner.pause(partition)
+        }
+        fn resume(&mut self, partition: PartitionId) {
+            self.inner.resume(partition)
+        }
+        fn caught_up(&self) -> Option<i64> {
+            (self.handle.committed() == vec![self.total]).then_some(self.through)
+        }
+        fn capabilities(&self) -> mage_stream_ports::SourceCapabilities {
+            self.inner.capabilities()
+        }
+        fn close(&mut self) -> BoxFuture<'_, ()> {
+            self.inner.close()
+        }
+    }
+
+    /// Records what it was written and each caught-up time, with the messages it had then.
+    #[derive(Default)]
+    struct ToldSink {
+        written: std::sync::atomic::AtomicUsize,
+        told: std::sync::Mutex<Vec<(i64, usize)>>,
+    }
+
+    impl Sink for ToldSink {
+        fn write<'a>(
+            &'a self,
+            batch: &'a RecordBatch,
+            _meta: &'a BatchMeta,
+        ) -> BoxFuture<'a, Result<(), ConnectorError>> {
+            Box::pin(async move {
+                self.written
+                    .fetch_add(batch.num_rows(), std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn flush(&self) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+
+        fn caught_up(&self, through: i64) -> BoxFuture<'_, Result<(), ConnectorError>> {
+            Box::pin(async move {
+                let written = self.written.load(std::sync::atomic::Ordering::SeqCst);
+                self.told.lock().unwrap().push((through, written));
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn sinks_hear_once_when_the_source_is_caught_up_after_everything_was_written() {
+        let source = MemorySource::new(vec![messages(10)], 4, false);
+        let handle = source.handle();
+        let sink = Arc::new(ToldSink::default());
+        let shutdown = CancellationToken::new();
+        let stream = tokio::spawn(run(
+            StreamParts {
+                name: "dimension".into(),
+                source: Box::new(CaughtUpSource {
+                    inner: source,
+                    handle,
+                    total: 10,
+                    through: 1_764_000_000_000_000,
+                }),
+                sinks: vec![(sink.clone(), None)],
+                dead_letter: None,
+                transform: None,
+                config: config(1, false, PoisonPolicy::Stop),
+                shutdown_deadline: Duration::from_secs(5),
+                pause: None,
+                tap: false,
+                time: None,
+                transaction: None,
+            },
+            SharedStatus::default(),
+            shutdown.clone(),
+        ));
+        // Three ticks: told once, as the time does not move.
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+        shutdown.cancel();
+        stream.await.unwrap();
+        assert_eq!(
+            *sink.told.lock().unwrap(),
+            vec![(1_764_000_000_000_000, 10)]
         );
     }
 

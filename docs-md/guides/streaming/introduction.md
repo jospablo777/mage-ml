@@ -416,6 +416,10 @@ lookup:
 - Before it reads, a batch waits until the history is through its latest time (the history
   keeps how far it is), so an order never joins a version that a change not yet written
   would have ended. After `max_wait_seconds` it joins what there is, and the log says so.
+- A history written from PostgreSQL changes (timed by `_mage_commit_time`) stays current
+  when its table does not change: once the change stream has read everything and its sinks
+  wrote it, the history is through the source server's clock, less a second. A lookup after
+  that does not wait for a change that is not coming.
 - Without `as_of`, a history lookup reads each key's current version, cached as a query's.
 
 ## Keyed state

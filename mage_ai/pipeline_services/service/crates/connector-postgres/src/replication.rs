@@ -319,6 +319,15 @@ impl Replication {
 
     /// Tells the server the log through `flushed` is handled, so it may free it.
     pub async fn status(&mut self, flushed: u64) -> Result<(), ConnectorError> {
+        self.status_update(flushed, false).await
+    }
+
+    /// The same, asking for a keepalive at once: its log end says how far the server sent.
+    pub async fn status_reply(&mut self, flushed: u64) -> Result<(), ConnectorError> {
+        self.status_update(flushed, true).await
+    }
+
+    async fn status_update(&mut self, flushed: u64, reply: bool) -> Result<(), ConnectorError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as i64)
@@ -329,7 +338,7 @@ impl Replication {
         update.put_u64(flushed);
         update.put_u64(flushed);
         update.put_i64(now);
-        update.put_u8(0);
+        update.put_u8(u8::from(reply));
         frontend::CopyData::new(update.freeze())
             .map_err(|e| ConnectorError::fatal(format!("PostgreSQL: {e}")))?
             .write(&mut self.write);

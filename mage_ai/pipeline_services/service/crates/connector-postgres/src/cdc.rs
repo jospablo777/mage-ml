@@ -47,6 +47,11 @@ const PARTITION: PartitionId = PartitionId(0);
 /// How often the server hears where the stream is, also while it is paused. The server drops
 /// a connection it has not heard from in `wal_sender_timeout` (60 seconds by default).
 const STATUS_EVERY: Duration = Duration::from_secs(10);
+/// How often an idle source asks whether it is caught up ([`Source::caught_up`]).
+const PROBE_EVERY: Duration = Duration::from_secs(1);
+/// A commit takes its time before its record is flushed: a caught-up time is moved back by
+/// this much, so a transaction committing at the probe is never counted as read.
+const CAUGHT_UP_MARGIN_MICROS: i64 = 1_000_000;
 
 /// How a source groups messages into batches.
 #[derive(Debug, Clone, Copy)]
@@ -256,6 +261,12 @@ pub struct PgCdcSource {
     /// The last copied row's position, until the sinks took it.
     copy_last: Option<u64>,
     record: Option<Arc<dyn CopyRecord>>,
+    /// The server's flushed log position and clock (Unix microseconds) when it was asked
+    /// for a keepalive; a keepalive at or past it, with nothing left for the sinks, makes
+    /// the clock the caught-up time.
+    probe: Option<(u64, i64)>,
+    probed_at: Instant,
+    caught_up: Option<i64>,
 }
 
 impl PgCdcSource {
@@ -284,6 +295,9 @@ impl PgCdcSource {
             copy: None,
             copy_last: None,
             record: None,
+            probe: None,
+            probed_at: Instant::now(),
+            caught_up: None,
         })
     }
 
@@ -511,6 +525,7 @@ impl PgCdcSource {
     }
 
     fn lose(&mut self) -> SourceEvent {
+        self.probe = None;
         self.connection = None;
         self.copy = None;
         self.copy_last = None;
@@ -565,6 +580,42 @@ impl PgCdcSource {
     }
 
     /// Tells the server where the stream is when it is time to, or when it moved on.
+    /// Nothing read is waiting for the sinks.
+    fn settled(&self) -> bool {
+        self.pending.is_none() && self.committed == self.delivered && !self.in_transaction
+    }
+
+    /// With nothing left for the sinks: reads the server's flushed log position and clock
+    /// and asks for a keepalive, whose log end says when the stream has read through them.
+    /// A failed probe is tried again later; it never stops the stream.
+    async fn probe(&mut self) {
+        if self.probe.is_some() || !self.settled() || self.probed_at.elapsed() < PROBE_EVERY {
+            return;
+        }
+        self.probed_at = Instant::now();
+        let Some(client) = &self.client else {
+            return;
+        };
+        let Ok(row) = client
+            .query_one(
+                "SELECT pg_current_wal_flush_lsn()::text, \
+                 (extract(epoch FROM clock_timestamp()) * 1000000)::bigint",
+                &[],
+            )
+            .await
+        else {
+            return;
+        };
+        let (Some(lsn), clock) = (parse_lsn(row.get::<_, &str>(0)), row.get::<_, i64>(1)) else {
+            return;
+        };
+        if let Some(connection) = self.connection.as_mut()
+            && connection.status_reply(self.confirmed).await.is_ok()
+        {
+            self.probe = Some((lsn, clock));
+        }
+    }
+
     async fn report(&mut self, now: bool) -> Result<(), ConnectorError> {
         if !now && self.confirmed == self.reported && self.last_status.elapsed() < STATUS_EVERY {
             return Ok(());
@@ -1274,6 +1325,7 @@ impl Source for PgCdcSource {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     return Ok(self.take()?.unwrap_or(SourceEvent::Idle));
                 }
+                self.probe().await;
                 let wait = self.wait();
                 let connection = self.connection.as_mut().expect("connected");
                 match tokio::time::timeout(wait, connection.next()).await {
@@ -1290,6 +1342,16 @@ impl Source for PgCdcSource {
                         // the server frees the log of changes the stream does not read.
                         if self.committed == self.delivered && !self.in_transaction {
                             self.confirmed = self.confirmed.max(wal_end);
+                        }
+                        if let Some((lsn, clock)) = self.probe
+                            && wal_end >= lsn
+                        {
+                            self.probe = None;
+                            if self.settled() {
+                                let through = clock - CAUGHT_UP_MARGIN_MICROS;
+                                self.caught_up =
+                                    Some(self.caught_up.map_or(through, |t| t.max(through)));
+                            }
                         }
                         if self.report(reply).await.is_err() {
                             return Ok(self.lose());
@@ -1346,6 +1408,10 @@ impl Source for PgCdcSource {
 
     fn pause(&mut self, _partition: PartitionId) {
         self.paused = true;
+    }
+
+    fn caught_up(&self) -> Option<i64> {
+        self.caught_up
     }
 
     /// While the initial copy runs: the rows left by the tables' estimate.
@@ -1665,8 +1731,18 @@ mod tests {
         assert!(Reader::new(&[0, 1, b't', 0, 0, 0, 9]).tuple().is_err());
     }
 
+    /// Every sink took the batch.
+    async fn acknowledge(source: &mut PgCdcSource, meta: &BatchMeta) {
+        let commits = [Commit {
+            partition: PARTITION,
+            epoch: meta.id.epoch,
+            position: meta.last.clone(),
+        }];
+        assert_eq!(source.commit(&commits).await, CommitOutcome::Committed);
+    }
+
     #[tokio::test]
-    async fn the_initial_copy_lags_by_the_rows_left_and_by_nothing_after() {
+    async fn the_initial_copy_lags_by_the_rows_left_then_the_source_is_caught_up() {
         let Some(mut config) = crate::history::tests::server() else {
             eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
             return;
@@ -1712,6 +1788,7 @@ mod tests {
             if let SourceEvent::Batch { meta, .. } = source.next_event().await.unwrap() {
                 copied += meta.records;
                 lags.push(source.lag().get(&0).copied().unwrap_or(0));
+                acknowledge(&mut source, &meta).await;
             }
         }
         assert_eq!(copied, 1200);
@@ -1719,6 +1796,20 @@ mod tests {
         assert!(lags.windows(2).all(|w| w[0] >= w[1]), "{lags:?}");
         assert!(lags[0] < 1200, "{lags:?}");
         assert!(source.lag().is_empty());
+
+        // Nothing more to read and everything acknowledged: caught up through about now.
+        let until = Instant::now() + Duration::from_secs(15);
+        while source.caught_up().is_none() && Instant::now() < until {
+            if let SourceEvent::Batch { meta, .. } = source.next_event().await.unwrap() {
+                acknowledge(&mut source, &meta).await;
+            }
+        }
+        let now = chrono::Utc::now().timestamp_micros();
+        let through = source.caught_up().expect("caught up within 15 s");
+        assert!(
+            through <= now && through > now - 20_000_000,
+            "{through} {now}"
+        );
 
         source.close().await;
         admin

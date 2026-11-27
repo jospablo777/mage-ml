@@ -131,6 +131,12 @@ pub trait Source: Send {
     fn lag(&self) -> std::collections::BTreeMap<u32, i64> {
         std::collections::BTreeMap::new()
     }
+    /// The source's own clock (Unix microseconds) through which every change it has was
+    /// read and acknowledged by every sink, where the source can tell (a change capture
+    /// source with nothing left to read). The stream hands it to the sinks on idle ticks.
+    fn caught_up(&self) -> Option<i64> {
+        None
+    }
     fn capabilities(&self) -> SourceCapabilities;
     fn close(&mut self) -> BoxFuture<'_, ()>;
 }
@@ -169,6 +175,12 @@ pub trait Sink: Send + Sync {
     fn flush(&self) -> BoxFuture<'_, ()>;
     fn capabilities(&self) -> SinkCapabilities {
         SinkCapabilities::default()
+    }
+    /// Every change the source made through `through` (Unix microseconds, the source's
+    /// clock) is written ([`Source::caught_up`]): a sink that keeps how far it is (a
+    /// PostgreSQL history) moves on, though nothing new came.
+    fn caught_up(&self, _through: i64) -> BoxFuture<'_, Result<(), ConnectorError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
