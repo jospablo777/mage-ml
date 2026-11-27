@@ -111,9 +111,58 @@ impl BlockingStore {
     }
 }
 
+impl BlockingStore {
+    /// The keys under a prefix, relative to it, sorted: every object at any depth.
+    pub fn list(&self, prefix: &str) -> Result<Vec<String>, String> {
+        let path = self.path(prefix);
+        let where_ = self.describe(prefix);
+        self.call(move |runtime, store| {
+            runtime.block_on(async {
+                use futures_util::TryStreamExt;
+                let base = path.as_ref().to_string();
+                let mut keys: Vec<String> = store
+                    .list(Some(&path))
+                    .map_ok(|meta| meta.location.as_ref().to_string())
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .map_err(|e| format!("listing {where_}: {e}"))?
+                    .into_iter()
+                    .filter_map(|key| {
+                        key.strip_prefix(&base)
+                            .map(|rest| rest.trim_start_matches('/').to_string())
+                    })
+                    .filter(|key| !key.is_empty())
+                    .collect();
+                keys.sort();
+                Ok(keys)
+            })
+        })?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_prefix_lists_its_keys_at_every_depth() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            BlockingStore::open(&format!("file://{}/state", dir.path().display()), None).unwrap();
+        for key in [
+            "svc/p/b/partition-0.json",
+            "svc/p/b/partition-1.json",
+            "svc/p/c/x.json",
+            "svc/q/b/partition-0.json",
+        ] {
+            store.put(key, b"{}".to_vec()).unwrap();
+        }
+        assert_eq!(
+            store.list("svc/p").unwrap(),
+            vec!["b/partition-0.json", "b/partition-1.json", "c/x.json"]
+        );
+        assert!(store.list("svc/none").unwrap().is_empty());
+    }
 
     #[test]
     fn objects_round_trip_and_a_missing_one_is_none() {

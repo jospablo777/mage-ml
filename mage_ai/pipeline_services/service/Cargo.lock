@@ -3393,6 +3393,7 @@ dependencies = [
  "arrow-json",
  "arrow-schema",
  "bytes",
+ "futures-util",
  "mage-service-core",
  "mage-stream-core",
  "mage-stream-ports",
