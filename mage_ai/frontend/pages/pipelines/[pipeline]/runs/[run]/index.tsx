@@ -13,6 +13,7 @@ import ErrorsType from '@interfaces/ErrorsType';
 import Flex from '@oracle/components/Flex';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Headline from '@oracle/elements/Headline';
+import Link from '@oracle/elements/Link';
 import Paginate, { MAX_PAGES } from '@components/shared/Paginate';
 import PipelineDetailPage from '@components/PipelineDetailPage';
 import RunRecord from '@components/PipelineDetail/RunRecord';
@@ -352,7 +353,14 @@ function PipelineBlockRuns({
       uuid={`pipelines/detail/${PageNameEnum.RUNS}`}
     >
       <Spacing mt={PADDING_UNITS} px={PADDING_UNITS}>
-        <Headline level={5}>Block runs</Headline>
+        <FlexContainer alignItems="center" justifyContent="space-between">
+          <Headline level={5}>Block runs</Headline>
+          {pipelineRun?.trace_url && (
+            <Link href={pipelineRun.trace_url} openNewWindow>
+              Trace of this run
+            </Link>
+          )}
+        </FlexContainer>
       </Spacing>
 
       <Divider light mt={PADDING_UNITS} short />

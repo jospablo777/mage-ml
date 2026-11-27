@@ -232,3 +232,17 @@ def pipeline_run_ended(pipeline_run, status) -> None:
          'mage.run.status': status},
         error=f'The run {status}.' if status == 'failed' else None,
     ))
+
+
+def trace_url(pipeline_run) -> Optional[str]:
+    """
+    The pipeline run's trace in the tracing UI: MAGE_TRACE_URL with {trace_id} in it, such as
+    https://jaeger.example/trace/{trace_id}; None when runs are not traced or it is not set.
+    """
+    template = (os.getenv('MAGE_TRACE_URL') or '').strip()
+    if '{trace_id}' not in template or config() is None:
+        return None
+    from mage_ai.orchestration.lineage import _project_name
+
+    trace_id, _ = run_ids(_project_name(), pipeline_run.id)
+    return template.replace('{trace_id}', trace_id)

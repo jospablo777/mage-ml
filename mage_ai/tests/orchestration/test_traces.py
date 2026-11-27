@@ -48,6 +48,25 @@ class ConfigTest(TestCase):
         self.assertTrue(350 < kept < 650, kept)
 
 
+class TraceUrlTest(TestCase):
+    def test_a_runs_link_needs_a_template_and_traced_runs(self):
+        from types import SimpleNamespace
+
+        from mage_ai.orchestration.lineage import _project_name
+
+        run = SimpleNamespace(id=42)
+        traced = {'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT': 'http://c:4318/v1/traces'}
+        with patch.dict('os.environ', dict(traced, MAGE_TRACE_URL='https://j/trace/{trace_id}'),
+                        clear=True):
+            trace_id, _ = traces.run_ids(_project_name(), 42)
+            self.assertEqual(traces.trace_url(run), f'https://j/trace/{trace_id}')
+        with patch.dict('os.environ', traced, clear=True):
+            self.assertIsNone(traces.trace_url(run))
+        with patch.dict('os.environ', {'MAGE_TRACE_URL': 'https://j/trace/{trace_id}'},
+                        clear=True):
+            self.assertIsNone(traces.trace_url(run))
+
+
 class RunTracesTest(DBTestCase):
     def setUp(self):
         super().setUp()

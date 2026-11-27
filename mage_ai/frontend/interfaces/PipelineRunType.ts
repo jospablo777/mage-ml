@@ -148,6 +148,8 @@ export default interface PipelineRunType {
   event_variables?: Obj;
   execution_date?: string;
   id?: number;
+  /** The run's trace in the tracing UI, when runs are traced and MAGE_TRACE_URL is set. */
+  trace_url?: string;
   metrics?: PipelineRunMetricsType;
   passed_sla?: boolean;
   pipeline_schedule_id?: number;

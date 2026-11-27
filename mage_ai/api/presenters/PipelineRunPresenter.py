@@ -70,6 +70,12 @@ class PipelineRunPresenter(BasePresenter):
                 arr.append(block_run)
             arr.sort(key=lambda b: b.get('created_at'))
             data['block_runs'] = arr
+            # Where its trace is, when runs are traced and MAGE_TRACE_URL says (traces.py).
+            from mage_ai.orchestration import traces
+
+            trace_url = traces.trace_url(data_to_display)
+            if trace_url:
+                data['trace_url'] = trace_url
 
             return data
         elif 'with_basic_details' == display_format:

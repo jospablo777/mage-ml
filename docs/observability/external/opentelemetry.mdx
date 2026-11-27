@@ -67,6 +67,10 @@ Since the server's exporter takes `OTEL_EXPORTER_OTLP_ENDPOINT` as gRPC, runs ar
 `OTEL_TRACES_SAMPLER_ARG` apply. A block run's process waits at most 5 seconds at its end
 for its spans to be sent.
 
+With `MAGE_TRACE_URL` set to your tracing UI's address of a trace, with `{trace_id}` where
+the id goes (such as `https://jaeger.example/trace/{trace_id}`), a pipeline run's page links
+to its trace (Trace of this run).
+
 ## Lineage (OpenLineage)
 
 With `OPENLINEAGE_URL` set (a Marquez, DataHub or OpenMetadata endpoint), MageML sends
