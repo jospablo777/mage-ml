@@ -447,6 +447,14 @@ impl Ledger {
     }
 
     fn open_on(path: &Path, host: &str) -> Result<Ledger> {
+        let ledger = Ledger::open_quiet(path, host)?;
+        start_heartbeats(ledger.clone());
+        Ok(ledger)
+    }
+
+    /// `open_on` without the heartbeat thread: the simulation renews leases itself, at the
+    /// steps it chooses.
+    fn open_quiet(path: &Path, host: &str) -> Result<Ledger> {
         let mut connection = Connection::open(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         // A run is acknowledged after its commit reaches the write-ahead log.
@@ -465,11 +473,23 @@ impl Ledger {
             PathBuf::from(wal),
             Arc::downgrade(&ledger.store),
         );
-        start_heartbeats(ledger.clone());
         Ok(ledger)
     }
 
     fn open_postgres(
+        url: &str,
+        schema: &str,
+        service: &str,
+        migrate: bool,
+        host: &str,
+    ) -> Result<Ledger> {
+        let ledger = Ledger::open_postgres_quiet(url, schema, service, migrate, host)?;
+        start_heartbeats(ledger.clone());
+        Ok(ledger)
+    }
+
+    /// `open_postgres` without the heartbeat thread, as `open_quiet`.
+    fn open_postgres_quiet(
         url: &str,
         schema: &str,
         service: &str,
@@ -508,9 +528,7 @@ impl Ledger {
                 }
             })
         })?;
-        let ledger = Ledger::register(Store::Postgres(postgres), host)?;
-        start_heartbeats(ledger.clone());
-        Ok(ledger)
+        Ledger::register(Store::Postgres(postgres), host)
     }
 
     /// Registers this process as an instance with a fresh lease.
@@ -2445,5 +2463,485 @@ pub(crate) mod rule_conformance {
         let other = Ledger::open_on(&path, "second").unwrap();
         conform(&me, &other);
         assert!(run_rules::may_claim(0, 1));
+    }
+}
+
+/// Deterministic simulation of instances sharing one run history (CANDIDATES_2026-11 #5):
+/// a seeded schedule of creates, claims, block writes, finishes, cancels, heartbeats, lease
+/// expiries (a stalled process), crashes (a process gone without releasing its lease),
+/// releases and recoveries, with the fencing rules checked after every step:
+///
+/// - a finished run never changes again, nor do its block runs;
+/// - no pipeline has more running runs than its limit, on all instances together;
+/// - a write of an instance that no longer holds the run changes nothing;
+/// - a recovery fails exactly the running runs of expired instances;
+/// - once every process is healthy again, every run finishes.
+///
+/// `MAGE_LEDGER_SIM_SEEDS` runs more seeds; `MAGE_LEDGER_SIM_SEED` replays one, printing
+/// each step.
+#[cfg(test)]
+mod simulation {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::*;
+
+    const PIPELINES: [&str; 2] = ["etl", "score"];
+    const MAX_RUNNING: u32 = 2;
+    const INSTANCES: usize = 3;
+
+    /// splitmix64: the same seed, the same schedule.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+
+        fn pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T> {
+            (!items.is_empty()).then(|| &items[self.below(items.len())])
+        }
+    }
+
+    struct Process {
+        ledger: Ledger,
+        /// The runs this process thinks it is running: a stalled one keeps thinking so.
+        running: BTreeSet<String>,
+    }
+
+    type Snapshot = (RunStatus, Vec<(String, BlockStatus)>);
+
+    /// Opens one more instance of the shared run history, on a host.
+    type Open = Box<dyn Fn(&str) -> Ledger>;
+
+    struct World {
+        open: Open,
+        processes: Vec<Process>,
+        /// Instances whose lease ended (expired, released, or a crashed process's, once
+        /// expired) and that have not renewed it.
+        lapsed: BTreeSet<String>,
+        /// Instances of crashed processes: their leases stay until expired here.
+        dead: Vec<String>,
+        owner: BTreeMap<String, String>,
+        runs: Vec<String>,
+        finished: BTreeMap<String, Snapshot>,
+        /// Each process's host: a restart on the same one ends its earlier lease.
+        hosts: Vec<String>,
+        restarts: usize,
+        blocks: Vec<String>,
+        log: Vec<String>,
+    }
+
+    impl World {
+        fn new(open: Open) -> World {
+            let processes = (0..INSTANCES)
+                .map(|i| Process {
+                    ledger: open(&format!("host{i}")),
+                    running: BTreeSet::new(),
+                })
+                .collect();
+            World {
+                open,
+                processes,
+                lapsed: BTreeSet::new(),
+                dead: Vec::new(),
+                hosts: (0..INSTANCES).map(|i| format!("host{i}")).collect(),
+                restarts: 0,
+                owner: BTreeMap::new(),
+                runs: Vec::new(),
+                finished: BTreeMap::new(),
+                blocks: vec!["load".into(), "transform".into()],
+                log: Vec::new(),
+            }
+        }
+
+        fn any(&self) -> &Ledger {
+            &self.processes[0].ledger
+        }
+
+        fn detail(&self, id: &str) -> RunDetail {
+            self.any().run(id).unwrap().unwrap()
+        }
+
+        fn snapshot(&self, id: &str) -> Snapshot {
+            let detail = self.detail(id);
+            (
+                detail.run.status,
+                detail
+                    .blocks
+                    .into_iter()
+                    .map(|b| (b.block, b.status))
+                    .collect(),
+            )
+        }
+
+        /// Whether `instance` holds `id` in the run history now: the writes that may apply.
+        fn holds(&self, instance: &str, id: &str) -> bool {
+            self.detail(id).run.status == RunStatus::Running
+                && self.owner.get(id).map(String::as_str) == Some(instance)
+        }
+
+        fn expire(&mut self, instance: &str) {
+            self.any().sql(
+                "UPDATE instances SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
+                cells![instance],
+            );
+            self.lapsed.insert(instance.to_string());
+        }
+
+        fn step(&mut self, rng: &mut Rng) -> std::result::Result<(), String> {
+            let p = rng.below(self.processes.len());
+            let instance = self.processes[p].ledger.instance().to_string();
+            match rng.below(100) {
+                0..=17 => {
+                    let pipeline = PIPELINES[rng.below(PIPELINES.len())];
+                    // A few keys, so a repeated request and a retry after a failure meet.
+                    let key = (rng.below(3) == 0).then(|| format!("key{}", rng.below(4)));
+                    let variables = Map::new();
+                    let (id, created) = self.processes[p]
+                        .ledger
+                        .create_run(NewRun {
+                            pipeline,
+                            source: "api",
+                            variables: &variables,
+                            idempotency_key: key.as_deref(),
+                            blocks: &self.blocks,
+                        })
+                        .map_err(|e| e.to_string())?;
+                    self.log
+                        .push(format!("{p} create {pipeline} {key:?} -> {id} {created}"));
+                    if created {
+                        self.runs.push(id);
+                    }
+                }
+                18..=37 => {
+                    let pipeline = PIPELINES[rng.below(PIPELINES.len())];
+                    let claimed = self.processes[p]
+                        .ledger
+                        .claim_next(pipeline, MAX_RUNNING)
+                        .map_err(|e| e.to_string())?;
+                    self.log
+                        .push(format!("{p} claim {pipeline} -> {claimed:?}"));
+                    if let Some(id) = claimed {
+                        if self.finished.contains_key(&id) {
+                            return Err(format!("claimed {id}, which had finished"));
+                        }
+                        self.owner.insert(id.clone(), instance);
+                        self.processes[p].running.insert(id);
+                    }
+                }
+                38..=59 => {
+                    let mine: Vec<String> = self.processes[p].running.iter().cloned().collect();
+                    let Some(id) = rng.pick(&mine).cloned() else {
+                        return Ok(());
+                    };
+                    let block = self.blocks[rng.below(self.blocks.len())].clone();
+                    let holds = self.holds(&instance, &id);
+                    let before = self.snapshot(&id);
+                    let ledger = &self.processes[p].ledger;
+                    if rng.below(2) == 0 {
+                        ledger
+                            .start_block(&id, &block, 1)
+                            .map_err(|e| e.to_string())?;
+                    } else {
+                        let status = [BlockStatus::Completed, BlockStatus::Failed][rng.below(2)];
+                        ledger
+                            .finish_block(&id, &block, status, None, &[])
+                            .map_err(|e| e.to_string())?;
+                    }
+                    self.log
+                        .push(format!("{p} block {id} {block} (holds {holds})"));
+                    if !holds && self.snapshot(&id) != before {
+                        return Err(format!(
+                            "instance {p} wrote block {block} of {id}, which it no longer holds"
+                        ));
+                    }
+                }
+                60..=71 => {
+                    let mine: Vec<String> = self.processes[p].running.iter().cloned().collect();
+                    let Some(id) = rng.pick(&mine).cloned() else {
+                        return Ok(());
+                    };
+                    let holds = self.holds(&instance, &id);
+                    let status = [RunStatus::Completed, RunStatus::Failed][rng.below(2)];
+                    let applied = self.processes[p]
+                        .ledger
+                        .finish_run(&id, status, None)
+                        .map_err(|e| e.to_string())?;
+                    self.log
+                        .push(format!("{p} finish {id} {status:?} -> {applied}"));
+                    if applied != holds {
+                        return Err(format!(
+                            "instance {p} finishing {id}: applied {applied}, holds {holds}"
+                        ));
+                    }
+                    self.processes[p].running.remove(&id);
+                }
+                72..=75 => {
+                    // A queued run cancelled by any instance; a running one only by its owner.
+                    let Some(id) = rng.pick(&self.runs).cloned() else {
+                        return Ok(());
+                    };
+                    let detail = self.detail(&id);
+                    let expected =
+                        detail.run.status == RunStatus::Queued || self.holds(&instance, &id);
+                    let applied = self.processes[p]
+                        .ledger
+                        .finish_run(&id, RunStatus::Cancelled, Some("cancelled"))
+                        .map_err(|e| e.to_string())?;
+                    self.log.push(format!("{p} cancel {id} -> {applied}"));
+                    if applied != expected {
+                        return Err(format!(
+                            "cancel of {id} by {p}: {applied}, expected {expected}"
+                        ));
+                    }
+                }
+                76..=81 => {
+                    // A stall past the lease: the process does not know.
+                    self.log.push(format!("{p} stalls"));
+                    self.expire(&instance);
+                }
+                82..=87 => {
+                    let renewed = self.processes[p]
+                        .ledger
+                        .heartbeat()
+                        .map_err(|e| e.to_string())?;
+                    let expected = !self.lapsed.contains(&instance);
+                    self.log.push(format!("{p} heartbeat -> {renewed}"));
+                    if renewed != expected {
+                        return Err(format!("heartbeat of {p}: {renewed}, expected {expected}"));
+                    }
+                    self.lapsed.remove(&instance);
+                }
+                88..=93 => {
+                    let expected: BTreeSet<String> = self
+                        .runs
+                        .iter()
+                        .filter(|id| {
+                            self.detail(id).run.status == RunStatus::Running
+                                && self.owner.get(*id).is_some_and(|o| self.lapsed.contains(o))
+                        })
+                        .cloned()
+                        .collect();
+                    let recovered: BTreeSet<String> = self.processes[p]
+                        .ledger
+                        .recover_interrupted()
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .collect();
+                    self.log.push(format!("{p} recover -> {recovered:?}"));
+                    if recovered != expected {
+                        return Err(format!(
+                            "recovery failed {recovered:?}, expected the runs of expired \
+                             instances {expected:?}"
+                        ));
+                    }
+                }
+                94..=96 => {
+                    // The process is killed and starts again as a new instance. On its host
+                    // (the same pid, as a restarted container), registering ends the old
+                    // lease; on another machine the old lease stays until it expires.
+                    self.restarts += 1;
+                    let same_host = rng.below(2) == 0;
+                    let host = if same_host {
+                        self.hosts[p].clone()
+                    } else {
+                        format!("host{p}-{}", self.restarts)
+                    };
+                    self.log.push(format!("{p} crashes and restarts on {host}"));
+                    self.processes[p] = Process {
+                        ledger: (self.open)(&host),
+                        running: BTreeSet::new(),
+                    };
+                    if same_host {
+                        self.lapsed.insert(instance);
+                    } else {
+                        self.dead.push(instance);
+                    }
+                    self.hosts[p] = host;
+                }
+                97 => {
+                    if let Some(dead) = rng.pick(&self.dead).cloned() {
+                        self.log.push(format!("lease of dead {dead} expires"));
+                        self.expire(&dead);
+                    }
+                }
+                _ => {
+                    // A clean stop: the lease ends at once, so others recover at once.
+                    self.log.push(format!("{p} releases"));
+                    self.processes[p]
+                        .ledger
+                        .release()
+                        .map_err(|e| e.to_string())?;
+                    self.lapsed.insert(instance);
+                }
+            }
+            self.check()
+        }
+
+        fn check(&mut self) -> std::result::Result<(), String> {
+            for pipeline in PIPELINES {
+                let running = self
+                    .any()
+                    .running_count(pipeline)
+                    .map_err(|e| e.to_string())?;
+                if running > MAX_RUNNING {
+                    return Err(format!("{running} runs of {pipeline} running at once"));
+                }
+            }
+            for id in self.runs.clone() {
+                let now = self.snapshot(&id);
+                match self.finished.get(&id) {
+                    Some(then) if *then != now => {
+                        return Err(format!("finished run {id} changed: {then:?} -> {now:?}"));
+                    }
+                    Some(_) => {}
+                    None if !matches!(now.0, RunStatus::Queued | RunStatus::Running) => {
+                        self.finished.insert(id, now);
+                    }
+                    None => {}
+                }
+            }
+            Ok(())
+        }
+
+        /// Every process healthy again: leases renewed, the dead ones' expired and their runs
+        /// recovered, then the queue worked off. Every run must finish.
+        fn settle(&mut self) -> std::result::Result<(), String> {
+            for dead in self.dead.clone() {
+                self.expire(&dead);
+            }
+            for process in &self.processes {
+                process.ledger.heartbeat().map_err(|e| e.to_string())?;
+                self.lapsed.remove(process.ledger.instance());
+            }
+            self.any()
+                .recover_interrupted()
+                .map_err(|e| e.to_string())?;
+            for _ in 0..self.runs.len() + 1 {
+                for p in 0..self.processes.len() {
+                    for id in std::mem::take(&mut self.processes[p].running) {
+                        self.processes[p]
+                            .ledger
+                            .finish_run(&id, RunStatus::Completed, None)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    for pipeline in PIPELINES {
+                        while let Some(id) = self.processes[p]
+                            .ledger
+                            .claim_next(pipeline, MAX_RUNNING)
+                            .map_err(|e| e.to_string())?
+                        {
+                            let instance = self.processes[p].ledger.instance().to_string();
+                            self.owner.insert(id.clone(), instance);
+                            self.processes[p].running.insert(id);
+                        }
+                    }
+                }
+                self.check()?;
+            }
+            for id in &self.runs {
+                let status = self.detail(id).run.status;
+                if matches!(status, RunStatus::Queued | RunStatus::Running) {
+                    return Err(format!("run {id} is still {status:?} after settling"));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn simulate(
+        open: Open,
+        seed: u64,
+        steps: usize,
+    ) -> std::result::Result<(), (String, Vec<String>)> {
+        let mut rng = Rng(seed);
+        let mut world = World::new(open);
+        for _ in 0..steps {
+            if let Err(error) = world.step(&mut rng) {
+                return Err((error, world.log));
+            }
+        }
+        world.settle().map_err(|error| (error, world.log.clone()))
+    }
+
+    fn sqlite() -> Open {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runs.db");
+        Box::new(move |host| {
+            let _keep = &dir;
+            Ledger::open_quiet(&path, host).unwrap()
+        })
+    }
+
+    #[test]
+    fn instances_sharing_a_run_history_keep_its_rules_under_any_schedule() {
+        run(sqlite, 40);
+    }
+
+    /// The same schedules on PostgreSQL (advisory locks, the database's clock), with
+    /// MAGE_TEST_POSTGRES_URL; each seed in a schema of its own.
+    #[test]
+    fn instances_sharing_a_postgresql_run_history_keep_its_rules_under_any_schedule() {
+        let Ok(url) = std::env::var("MAGE_TEST_POSTGRES_URL") else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let schemas = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let opened = schemas.clone();
+        let open = move || -> Open {
+            let schema = format!("ledger_sim_{}", uuid::Uuid::new_v4().simple());
+            opened.lock().unwrap().push(schema.clone());
+            let url = url.clone();
+            Box::new(move |host| {
+                Ledger::open_postgres_quiet(&url, &schema, "svc", true, host).unwrap()
+            })
+        };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(open, 5)));
+        if let Ok(url) = std::env::var("MAGE_TEST_POSTGRES_URL") {
+            for schema in schemas.lock().unwrap().iter() {
+                let ledger = Ledger::open_postgres_quiet(&url, schema, "svc", true, "").unwrap();
+                ledger.sql(&format!("DROP SCHEMA {schema} CASCADE"), &[]);
+            }
+        }
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    fn run(open: impl Fn() -> Open, default_seeds: u64) {
+        let steps = 300;
+        if let Some(seed) = std::env::var("MAGE_LEDGER_SIM_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            if let Err((error, log)) = simulate(open(), seed, steps) {
+                for line in &log {
+                    eprintln!("{line}");
+                }
+                panic!("seed {seed}: {error}");
+            }
+            return;
+        }
+        let seeds: u64 = std::env::var("MAGE_LEDGER_SIM_SEEDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(default_seeds);
+        for seed in 0..seeds {
+            if let Err((error, log)) = simulate(open(), seed, steps) {
+                let tail = log[log.len().saturating_sub(15)..].join("\n");
+                panic!(
+                    "seed {seed}: {error}\nlast steps:\n{tail}\n(replay: \
+                     MAGE_LEDGER_SIM_SEED={seed})"
+                );
+            }
+        }
     }
 }

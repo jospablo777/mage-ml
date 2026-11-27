@@ -18,6 +18,24 @@ with their causes, and how to run the same checks on your machine before pushing
 | Storybook tests | `mage_ai/frontend` stories | Playwright | The Storybook build | test_backend |
 | Compilation study | `integration_tests/topologies` | pytest | Small grid by default; full grid with `MAGE_STUDY_FULL=1` | The small grid, in Integration tests |
 | Benchmarks | `integration_tests/benchmark` (fusion and Rust pipelines) | pytest | Rust; `make -C integration_tests test-benchmark` keeps results under `integration_tests/benchmark/results` | Both, as smoke tests that also compare outputs, in Integration tests |
+| Simulations | The run history's (`crates/ledger`, `simulation`) and a stream's (`crates/stream-core/tests/simulation.rs`) | cargo test | Rust | Rust extension |
+
+### Simulations
+
+Seeded schedules of faults against the engine's rules, checked after every step. The run
+history: three instances on one SQLite ledger create, claim, write blocks, finish, cancel,
+stall past their lease, crash (restarting on the same host or another), release and recover;
+a finished run never changes, no pipeline runs more than its limit, a fenced write changes
+nothing, a recovery fails exactly the runs of expired instances, and every run finishes once
+the processes are healthy. A stream: two Kafka-like partitions read in batches through
+failing transforms and sinks, rebalances and crashes that restart from the committed
+offsets; at least once loses nothing, and exactly once shows each output once at every step.
+
+A failure prints its seed and last steps. `MAGE_LEDGER_SIM_SEED=<n>` and
+`STREAM_SIM_SEED=<n>` replay one seed printing every step; `MAGE_LEDGER_SIM_SEEDS` and
+`STREAM_SIM_SEEDS` run more (40 and 100 by default, about 10 seconds each; 5 on PostgreSQL with `MAGE_TEST_POSTGRES_URL`). Each was checked
+by breaking a rule it guards (the fences of block and run writes, the running limit, the
+order of commits, exactly-once's held writes): it failed on the first seeds.
 
 ## Writing tests
 
@@ -139,7 +157,8 @@ limited to 10 GB), saved by the pipelines group.
 | --- | --- |
 | Caches are saved from master only; branches restore master's | The repository has 10 GB of caches. Branch copies (the daily dependency fixes saved 1.5 GB of Rust blocks and the R library) pushed master's out, and the next master run built them again: ColumnAtlas from source in every job (11 minutes), the R library (47 minutes) |
 | The R environment reads Posit's snapshot of the day `rv.lock` was written (`rproject.toml`) | `cran/latest` has binaries of each package's newest version only, so the locked duckdb 1.5.6 built from source for 47 minutes whenever its cache was gone. Move the date when the lock changes; a package still built from source builds on every CPU (`MAKEFLAGS=-j4`) |
-| Unit tests run on four workers, a file's tests on one (`-n 4 --dist loadfile`) | 42 minutes in one process. Each worker has its own test database (`test<worker>.db`) and each test class its own project folder |
+| Unit tests run on four workers, a file's tests on one (`-n 4 --dist loadfile`) | 42 minutes in one process. Each worker has its own test database (`test<worker>.db`) and each test class its own project folder. A test must not depend on what an earlier file in its process left: a kernel left running, a path added to `sys.path` |
+| Every integration group builds Rust blocks with the same features (`MAGE_RUST_FEATURES`) | With each group's own features, Polars built again in every group but the one that saved the cache (9 to 18 minutes each) |
 
 ## Failures and their causes
 
