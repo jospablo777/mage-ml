@@ -622,7 +622,8 @@ jobs:
         run: python3 scripts/junit_annotations.py integration_tests/results-*.xml integration_tests/soak*-results.xml
       - name: Rust caches and disk
         if: always()
-        run: du -sh ~/.cache/mage/rust/bin ~/.cache/mage/rust/target 2>/dev/null; df -h /
+        # A group without Rust blocks has no cache folders: du fails, and the step must not.
+        run: du -sh ~/.cache/mage/rust/bin ~/.cache/mage/rust/target 2>/dev/null || true; df -h /
       - name: Service states
         if: failure() && matrix.services != ''
         run: python3 scripts/compose_states.py integration_tests/compose.yaml
