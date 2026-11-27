@@ -111,3 +111,33 @@ class PartitionRunsTest(DBTestCase):
         partition_state.accept_code(pipeline, ['2026-11-02'])
         self.assertEqual(state(), 'done')
 
+
+
+class PartitionBackfillTest(DBTestCase):
+    def test_a_backfill_runs_the_partitions_holding_its_dates(self):
+        from mage_ai.orchestration.backfills.service import start_backfill
+        from mage_ai.orchestration.db.models.schedules import Backfill
+        from mage_ai.tests.factory import create_backfill
+
+        pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        asyncio.run(pipeline.update(dict(partitions=dict(
+            key='day', daily=dict(start='2026-11-01')))))
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        # Nov 3 has a run in progress: the backfill leaves it.
+        busy, _ = run_partition(pipeline, '2026-11-03')
+        backfill = create_backfill(
+            pipeline.uuid,
+            start_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            end_datetime=datetime(2026, 11, 3, 23, tzinfo=timezone.utc),
+            interval_type=Backfill.IntervalType.HOUR,
+        )
+
+        runs = start_backfill(backfill)
+
+        # 72 hourly dates, three days: one run per partition, Nov 3 already running.
+        self.assertEqual([r.partition for r in runs], ['2026-11-01', '2026-11-02'])
+        self.assertEqual({r.backfill_id for r in runs}, {backfill.id})
+        self.assertEqual(runs[0].variables['day'], '2026-11-01')
+        self.assertEqual(runs[0].execution_partition, 'partitions/2026-11-01')
+        self.assertNotEqual(busy.id, runs[-1].id)

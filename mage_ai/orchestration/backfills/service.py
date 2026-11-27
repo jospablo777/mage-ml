@@ -1,11 +1,12 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 import dateutil.parser
 from dateutil.relativedelta import relativedelta
 
 from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleStatus
+from mage_ai.orchestration import partitions
 from mage_ai.orchestration.db.models.schedules import (
     Backfill,
     PipelineRun,
@@ -49,24 +50,67 @@ def start_backfill(backfill: Backfill) -> List[PipelineRun]:
             settings=backfill.settings,
         )
 
+    declaration = _time_partitions(backfill.pipeline_uuid)
+    started = set()
     for backfill_run_variables in variables_list:
         execution_date = None
         if 'execution_date' in backfill_run_variables:
             execution_date = dateutil.parser.parse(backfill_run_variables['execution_date'])
 
-        pipeline_run = PipelineRun.create(
+        run = dict(
             backfill_id=backfill.id,
             execution_date=execution_date,
             pipeline_schedule_id=pipeline_schedule.id,
             pipeline_uuid=backfill.pipeline_uuid,
             variables=merge_dict(backfill_variables or {}, backfill_run_variables),
         )
+        if declaration is not None and execution_date is not None:
+            # A partitioned pipeline's backfill runs the partitions holding its dates, once
+            # each, as partition runs: their folders and states (ADR-0039).
+            if execution_date.tzinfo is None:
+                execution_date = execution_date.replace(tzinfo=timezone.utc)
+            value = partitions.value_of(declaration, execution_date)
+            if value in started or _active_partition_run(backfill.pipeline_uuid, value):
+                continue
+            started.add(value)
+            run['execution_date'] = partitions.run_start(declaration, value)
+            run['partition'] = value
+            run['variables'] = merge_dict(
+                run['variables'], partitions.run_variables(declaration, value),
+            )
+        pipeline_run = PipelineRun.create(**run)
         pipeline_runs.append(pipeline_run)
 
     backfill.update(pipeline_schedule_id=pipeline_schedule.id)
     pipeline_schedule.update(status=ScheduleStatus.ACTIVE)
 
     return pipeline_runs
+
+
+def _time_partitions(pipeline_uuid: str):
+    """The pipeline's time partitions declaration, or None (no partitions, values, or a
+    declaration that does not parse: the backfill then runs dates as before)."""
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    try:
+        pipeline = Pipeline.get(pipeline_uuid, check_if_exists=True)
+        declaration = pipeline.partition_declaration if pipeline else None
+    except Exception:
+        return None
+    if declaration is None or declaration.kind == 'values':
+        return None
+    return declaration
+
+
+def _active_partition_run(pipeline_uuid: str, value: str) -> bool:
+    return PipelineRun.query.filter(
+        PipelineRun.pipeline_uuid == pipeline_uuid,
+        PipelineRun.partition == value,
+        PipelineRun.status.in_([
+            PipelineRun.PipelineRunStatus.INITIAL,
+            PipelineRun.PipelineRunStatus.RUNNING,
+        ]),
+    ).first() is not None
 
 
 def preview_run_dates(backfill: Backfill) -> List[Dict]:

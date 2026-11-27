@@ -13,6 +13,8 @@
   current code for changes that do not change results; the pipeline's Partitions tab shows
   them as a calendar with the same actions. With `schedule: on_close` the scheduler queues
   each time partition when it closes, catching up after downtime (at most `catch_up` at once).
+  A backfill of a pipeline with time partitions runs the partitions holding its dates, once
+  each, as partition runs.
 
 ### Checkpoints inside long blocks
 
