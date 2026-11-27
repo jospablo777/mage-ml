@@ -77,6 +77,8 @@ the medians it comes from, so one slow run makes none:
 | A block to work on first | It holds half or more of runs of 10 s or longer | `load holds 80% of the run's time (40.0 s of 50.0 s, median of the last 10 completed runs)` |
 | A language switch that moves much data | Its upstream block's stored output is 100 MB or more a run | `The switch from Python (load) to R (model) passes 1.2 GB a run (...)` |
 | Work that could be skipped | A block of 30 s or longer gave the same output (the same SHA-256 of its stored outputs) in every run looked at | `load gave the same output in each of the last 10 completed runs (...)` |
+| Memory near its limit | A block's measured peak is 90% or more of the memory it declares (`resources: memory`) | `load peaks at 7.6 GB of the 8.0 GB it declares (95%, ...)` |
+| Memory held unused | A block declares 2 GB or more and four times its peak or more | `load declares 32.0 GB and peaks at 1.0 GB (...)` |
 
 It needs at least 3 completed runs, and outputs' digests from run records
 (`MAGE_RUN_RECORDS`, on by default).

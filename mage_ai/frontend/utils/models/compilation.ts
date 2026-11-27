@@ -177,7 +177,8 @@ export type UnusedColumnsType = {
 /** Advice from the pipeline's last completed runs, with the measurement it comes from. */
 export type AdviceType = {
   blocks: string[];
-  kind: 'bottleneck' | 'language_switch' | 'repeated_output';
+  kind: 'bottleneck' | 'language_switch' | 'memory_near_limit' | 'memory_unused'
+    | 'repeated_output';
   measurement: { [key: string]: number | string };
   message: string;
 };

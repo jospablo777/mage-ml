@@ -9,6 +9,9 @@ checked, and none is given without one.
   reading the source itself, skips it.
 - A slow block whose output is the same, byte for byte, run after run (the outputs' SHA-256
   that run records keep): its work could be skipped while its source does not change.
+- A block whose measured memory peak nears the memory it declares (resources.py): the next
+  larger input fails; or one that declares far more than it uses, which holds memory other
+  block runs wait for.
 
 The numbers are medians over the last completed runs (RUNS), so one slow run does not make
 advice.
@@ -29,6 +32,11 @@ SWITCH_MIN_BYTES = 100 * 1024 * 1024
 # A block taking at least this long with the same output in every run looked at.
 REPEATED_MIN_SECONDS = 30.0
 CACHE_SECONDS = 60
+# A peak at least this share of the declared memory; a declaration at least this many times
+# the peak, of at least MEMORY_UNUSED_MIN_BYTES.
+MEMORY_NEAR_SHARE = 0.9
+MEMORY_UNUSED_FACTOR = 4
+MEMORY_UNUSED_MIN_BYTES = 2 * 1024**3
 
 
 @dataclass
@@ -37,6 +45,8 @@ class BlockMeasure:
     output_bytes: int = 0
     # The SHA-256 of its outputs, joined; None when not recorded.
     digest: Optional[str] = None
+    # Its process tree's memory peak (track_memory_peak); 0 when not measured.
+    memory_peak: int = 0
 
 
 @dataclass
@@ -67,6 +77,7 @@ def advise(
     runs: List[RunMeasure],
     languages: Dict[str, str],
     edges: List[Tuple[str, str]],
+    declared_memory: Optional[Dict[str, int]] = None,
 ) -> List[Dict]:
     """The advice the runs (newest first) give, most important first."""
     if len(runs) < MIN_RUNS:
@@ -133,7 +144,36 @@ def advise(
                 ),
                 measurement=dict(block_seconds=seconds, runs=count, sha256=digests[0]),
             ))
-    order = dict(bottleneck=0, language_switch=1, repeated_output=2)
+    for uuid, declared in (declared_memory or {}).items():
+        peaks = [r.blocks[uuid].memory_peak for r in runs
+                 if uuid in r.blocks and r.blocks[uuid].memory_peak]
+        if not declared or len(peaks) < MIN_RUNS:
+            continue
+        peak = statistics.median(peaks)
+        if peak >= MEMORY_NEAR_SHARE * declared:
+            advice.append(dict(
+                kind='memory_near_limit',
+                blocks=[uuid],
+                message=(
+                    f'{uuid} peaks at {_size(peak)} of the {_size(declared)} it declares '
+                    f'({round(100 * peak / declared)}%, median of the last {len(peaks)} '
+                    f'measured runs): a larger input runs it out of memory. Declare more.'
+                ),
+                measurement=dict(memory_peak=peak, declared=declared, runs=len(peaks)),
+            ))
+        elif declared >= MEMORY_UNUSED_MIN_BYTES and declared >= MEMORY_UNUSED_FACTOR * peak:
+            advice.append(dict(
+                kind='memory_unused',
+                blocks=[uuid],
+                message=(
+                    f'{uuid} declares {_size(declared)} and peaks at {_size(peak)} (median '
+                    f'of the last {len(peaks)} measured runs): the rest is held from other '
+                    f'block runs, which wait for it. Declaring less lets them start.'
+                ),
+                measurement=dict(memory_peak=peak, declared=declared, runs=len(peaks)),
+            ))
+    order = dict(bottleneck=0, memory_near_limit=1, language_switch=2, repeated_output=3,
+                 memory_unused=4)
     return sorted(advice, key=lambda a: order[a['kind']])
 
 
@@ -170,6 +210,7 @@ def measures(pipeline) -> List[RunMeasure]:
             seconds=(block_run.completed_at - block_run.started_at).total_seconds(),
             output_bytes=sum(int(o.get('bytes') or 0) for o in outputs.values()),
             digest=digest,
+            memory_peak=int((block_run.metrics or {}).get('memory_peak') or 0),
         )
     return [
         RunMeasure(
@@ -196,6 +237,14 @@ def advice_for(pipeline) -> List[Dict]:
         (uuid, down) for uuid, b in blocks.items()
         for down in (b.downstream_block_uuids or []) if down in blocks
     ]
-    found = advise(measures(pipeline), languages, edges)
+    from mage_ai.orchestration import resources
+
+    declared = {}
+    for uuid, block in blocks.items():
+        try:
+            declared[uuid] = resources.request_of(block).memory
+        except Exception:
+            continue
+    found = advise(measures(pipeline), languages, edges, declared)
     _cache[pipeline.uuid] = (time.monotonic(), found)
     return found

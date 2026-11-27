@@ -73,6 +73,31 @@ class AdviseTest(TestCase):
         self.assertEqual(advisor.advise(measured, LANGUAGES, EDGES), [])
 
 
+class MemoryAdviceTest(TestCase):
+    def measured(self, peak):
+        measured = runs(load=5.0, model=5.0)
+        for run in measured:
+            run.blocks['load'].memory_peak = peak
+        return measured
+
+    def test_a_peak_near_the_declared_memory_and_memory_held_unused(self):
+        gib = 1024**3
+        [near] = advisor.advise(self.measured(int(7.6 * gib)), LANGUAGES, EDGES,
+                                dict(load=8 * gib))
+        self.assertEqual(near['kind'], 'memory_near_limit')
+        self.assertIn('load peaks at 7.6 GB of the 8.0 GB it declares (95%', near['message'])
+
+        [unused] = advisor.advise(self.measured(1 * gib), LANGUAGES, EDGES,
+                                  dict(load=32 * gib))
+        self.assertEqual(unused['kind'], 'memory_unused')
+        self.assertIn('load declares 32.0 GB and peaks at 1.0 GB', unused['message'])
+
+        # In between, or without a declaration: nothing.
+        self.assertEqual(
+            advisor.advise(self.measured(5 * gib), LANGUAGES, EDGES, dict(load=8 * gib)), [])
+        self.assertEqual(advisor.advise(self.measured(5 * gib), LANGUAGES, EDGES, {}), [])
+
+
 class MeasuresTest(DBTestCase):
     def test_runs_and_block_runs_of_the_history_become_measurements(self):
         pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
