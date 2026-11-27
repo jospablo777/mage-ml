@@ -224,14 +224,31 @@ class ServerTests(AsyncDBTestCase):
         # It slept 5 seconds on the event loop, in case the tables did not exist yet. A
         # time limit failed on loaded CI runners, where hashing the password takes seconds;
         # no sleep is the check.
+        import asyncio
+        import threading
         import time
 
         slept = []
         real_sleep = time.sleep
-        record = lambda s, *a, **k: slept.append(s) or real_sleep(0)  # noqa: E731
+        real_async_sleep = asyncio.sleep
+        this_thread = threading.get_ident()
+
+        # time.sleep is patched for the whole process: threads other tests left running
+        # sleep too, and only this thread's sleeps count (I-552).
+        def record(s, *a, **k):
+            if threading.get_ident() != this_thread:
+                return real_sleep(s)
+            slept.append(s)
+
+        def record_async(s, *a, **k):
+            if threading.get_ident() != this_thread:
+                return real_async_sleep(s, *a, **k)
+            slept.append(s)
+            return real_async_sleep(0)
+
         # The sleep was `from time import sleep` in the server module.
         with patch('time.sleep', side_effect=record), \
-                patch('asyncio.sleep', side_effect=lambda s, *a, **k: slept.append(s)), \
+                patch('asyncio.sleep', side_effect=record_async), \
                 patch.object(server_module, 'sleep', side_effect=record, create=True):
             initialize_user_authentication(ProjectType.STANDALONE)
         self.assertEqual([s for s in slept if s >= 1], [])
