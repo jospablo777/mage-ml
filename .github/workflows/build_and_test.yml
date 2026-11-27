@@ -350,6 +350,11 @@ jobs:
       # cached build directory serves every group: with each group's own features, the
       # groups that did not save the cache rebuilt Polars for 9 to 18 minutes.
       MAGE_RUST_FEATURES: clickhouse,duckdb,feast,models,mongodb,mysql,postgres,redis,storage
+      # Block binaries are about 70 MB (Polars in each): the default 5 GB cache held about
+      # 70, fewer than a group builds (tests make blocks with new names each run), so the
+      # binaries warmed at the start were evicted before the playground's golden tests,
+      # which then built them within their time limit (I-568).
+      MAGE_RUST_BINARY_CACHE_MB: 20000
     steps:
       - uses: actions/checkout@v5
       # uv sync compiles the ColumnAtlas extension in rust/column_atlas; exported-service
@@ -611,6 +616,9 @@ jobs:
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py integration_tests/results-*.xml integration_tests/soak*-results.xml
+      - name: Rust caches and disk
+        if: always()
+        run: du -sh ~/.cache/mage/rust/bin ~/.cache/mage/rust/target 2>/dev/null; df -h /
       - name: Service states
         if: failure() && matrix.services != ''
         run: python3 scripts/compose_states.py integration_tests/compose.yaml
