@@ -9,5 +9,7 @@ class PipelinePartitionPresenter(BasePresenter):
         'partitions',
         'pipeline_uuid',
         'result',
+        'schedule',
         'total',
+        'upstream',
     ]

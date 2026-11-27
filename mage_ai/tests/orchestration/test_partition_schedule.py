@@ -89,6 +89,10 @@ class UpstreamScheduleTest(DBTestCase):
         raw = self.make('raw')
         model = self.make('model', upstream=[raw.uuid], schedule='on_upstream')
         self.assertEqual(partition_schedule.due(model), [], 'nothing upstream is done')
+        from mage_ai.orchestration import partition_state as shown
+
+        listed = shown.states(model)
+        self.assertEqual((listed['schedule'], listed['upstream']), ('on_upstream', [raw.uuid]))
 
         self.complete(raw, 'eu', datetime(2026, 11, 1, 1))
         self.complete(raw, 'us', datetime(2026, 11, 1, 2))

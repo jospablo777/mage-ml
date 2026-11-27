@@ -156,7 +156,8 @@ def states(pipeline, now: Optional[datetime] = None) -> Dict:
     for row in rows:
         counts[row['state']] += 1
     return dict(key=declaration.key, kind=declaration.kind, partitions=rows, counts=counts,
-                total=len(rows))
+                total=len(rows), schedule=declaration.schedule,
+                upstream=list(declaration.upstream))
 
 
 def select(pipeline, choice, now: Optional[datetime] = None) -> List[str]:

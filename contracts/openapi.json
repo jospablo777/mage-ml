@@ -4494,7 +4494,9 @@
      "partitions": {},
      "pipeline_uuid": {},
      "result": {},
-     "total": {}
+     "schedule": {},
+     "total": {},
+     "upstream": {}
     },
     "type": "object"
    },

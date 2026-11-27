@@ -30,8 +30,23 @@ type PartitionsType = {
   key: string;
   kind: string;
   partitions: PartitionType[];
+  // on_close, on_upstream, or none: run when asked (partition_schedule.py).
+  schedule?: string;
   total: number;
+  upstream?: string[];
 };
+
+// How the scheduler runs the partitions, in one sentence.
+function scheduleText(found: PartitionsType): string {
+  const after = (found.upstream || []).join(', ');
+  if (found.schedule === 'on_close') {
+    return 'Each partition runs when it closes.';
+  }
+  if (found.schedule === 'on_upstream') {
+    return `Each partition runs once ${after}'s same partition is done.`;
+  }
+  return 'Partitions run when you ask.';
+}
 
 // Problems first, as the headline reads them.
 const STATES: PartitionType['state'][] = ['failed', 'stale', 'missing', 'running', 'queued', 'done'];
@@ -157,8 +172,8 @@ function PipelinePartitions({ pipeline }: { pipeline: { uuid: string } }) {
             <Spacing mt={1}>
               <Text muted small>
                 {found.kind === 'values' ? 'Values' : `${found.kind} partitions`} of
-                {' '}{found.key}. Stale: the code changed since the partition ran, or an
-                upstream pipeline&apos;s same partition ran after it.
+                {' '}{found.key}. {scheduleText(found)} Stale: the code changed since the
+                partition ran, or an upstream pipeline&apos;s same partition ran after it.
               </Text>
             </Spacing>
 
