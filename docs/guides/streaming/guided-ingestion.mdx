@@ -13,7 +13,7 @@ creates a streaming pipeline you can read, run from its Run tab and export as a 
 | Step | What it checks or asks |
 | --- | --- |
 | Source | `wal_level` is `logical`, the user may replicate (`REPLICATION`), a replication slot is free; then each table with its primary key and size |
-| Tables | Choose them; a table without a primary key cannot be chosen (rows upsert and delete by it). **Sample** shows its first rows |
+| Tables | Choose them. A table cannot be chosen, and says why, without a primary key (rows upsert and delete by it), or with `REPLICA IDENTITY NOTHING` (once published, its updates and deletes would fail on the source) or `USING INDEX` (its deletes would not carry the key). Two tables of the same name in different schemas go in separate syncs, as both would be written to one table. **Sample** shows its first rows |
 | Destination | The same server or another; the schema, and a prefix for the copies' names; whether a deleted row is deleted or kept with `_mage_deleted_at` |
 | Review | What the sync will do, in sentences: copy, keys, deletes, new columns, restarts |
 | Create | The pipeline; the passwords become project secrets |

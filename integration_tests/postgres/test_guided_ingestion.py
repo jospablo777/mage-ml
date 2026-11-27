@@ -17,7 +17,7 @@ def connection(postgres_settings, **extra):
 
 
 def test_checks_tables_sample_and_the_pipeline_it_creates(
-    mage_project, postgres_settings, pg, schema, tmp_path, monkeypatch,
+    mage_project, postgres_settings, pg, schema, tmp_path, monkeypatch, request,
 ):
     from mage_ai.pipeline_services import export
 
@@ -30,9 +30,21 @@ def test_checks_tables_sample_and_the_pipeline_it_creates(
             CREATE TABLE {schema}.lines (order_id integer, line integer, qty integer,
                                          PRIMARY KEY (order_id, line));
             CREATE TABLE {schema}.notes (body text);
+            CREATE TABLE {schema}.audit (id integer PRIMARY KEY);
+            ALTER TABLE {schema}.audit REPLICA IDENTITY NOTHING;
+            CREATE SCHEMA {schema}_other;
+            CREATE TABLE {schema}_other.orders (id integer PRIMARY KEY);
             INSERT INTO {schema}.orders VALUES (1, 'tea'), (2, 'cake');
         ''')
     pg.commit()
+
+    def drop_other():
+        pg.rollback()
+        with pg.cursor() as cursor:
+            cursor.execute(f'DROP SCHEMA IF EXISTS {schema}_other CASCADE')
+        pg.commit()
+
+    request.addfinalizer(drop_other)
     source = connection(postgres_settings)
 
     found = ingestion.check_source(source)
@@ -41,6 +53,10 @@ def test_checks_tables_sample_and_the_pipeline_it_creates(
     assert tables[f'{schema}.orders']['key'] == ['id']
     assert tables[f'{schema}.lines']['key'] == ['order_id', 'line']
     assert tables[f'{schema}.notes']['key'] == []
+    assert tables[f'{schema}.notes']['blocked'].startswith('no primary key')
+    assert tables[f'{schema}.orders']['blocked'] is None
+    # Published, a table without a replica identity fails its updates on the source.
+    assert 'REPLICA IDENTITY NOTHING' in tables[f'{schema}.audit']['blocked']
 
     assert ingestion.check_destination(source, f'{schema}_copy')['ready']
     rows = ingestion.sample(source, f'{schema}.orders')
@@ -53,6 +69,19 @@ def test_checks_tables_sample_and_the_pipeline_it_creates(
         raise AssertionError('a table without a key was accepted')
     except ingestion.IngestionError as error:
         assert 'has no key' in str(error)
+
+    # The request's keys are not trusted: the source's identity refuses the table.
+    for chosen, message in [
+        ([dict(tables[f'{schema}.audit'], blocked=None)], 'REPLICA IDENTITY NOTHING'),
+        ([dict(table=f'{schema}.missing', key=['id'])], 'is not a table of the source'),
+        ([tables[f'{schema}.orders'], dict(table=f'{schema}_other.orders', key=['id'])],
+         'would both be written to the table orders'),
+    ]:
+        try:
+            ingestion.create(mage_project, 'nope', source, source, chosen)
+            raise AssertionError(f'{chosen} was accepted')
+        except ingestion.IngestionError as error:
+            assert message in str(error), error
 
     created = ingestion.create(
         mage_project, f'sync_{schema}', source, source, keyed, deletes='soft',

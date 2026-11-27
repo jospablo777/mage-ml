@@ -49,6 +49,51 @@ def _connect(connection: Dict[str, Any]):
 def _check(name: str, ok: bool, detail: str) -> Dict[str, Any]:
     return dict(name=name, ok=bool(ok), detail=detail)
 
+_IDENTITY = {'d': 'key', 'f': 'full', 'i': 'index', 'n': 'none'}
+
+
+def _blocked(table: str, key: List[str], identity: str) -> Optional[str]:
+    """Why a table cannot be mirrored, or None."""
+    if not key:
+        return 'no primary key: a mirror upserts and deletes by one'
+    if identity == 'none':
+        # Published, its UPDATE and DELETE would fail on the source.
+        return (f'REPLICA IDENTITY NOTHING: once published, its updates and deletes would '
+                f'fail on the source. ALTER TABLE {table} REPLICA IDENTITY DEFAULT')
+    if identity == 'index':
+        return (f'REPLICA IDENTITY USING INDEX: its deletes carry the index columns, not the '
+                f'primary key. ALTER TABLE {table} REPLICA IDENTITY DEFAULT')
+    return None
+
+
+def _tables(cursor, names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """The source's tables (or those named) with their primary keys, sizes and identity."""
+    cursor.execute('''
+        SELECT n.nspname, c.relname, greatest(c.reltuples, 0)::bigint, c.relreplident,
+               pg_get_userbyid(c.relowner) = current_user OR
+                   (SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
+               coalesce((
+                   SELECT array_agg(a.attname ORDER BY array_position(i.indkey, a.attnum))
+                   FROM pg_index i JOIN pg_attribute a
+                       ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                   WHERE i.indrelid = c.oid AND i.indisprimary
+               ), '{}')
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind IN ('r', 'p')
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND n.nspname NOT LIKE 'pg_toast%%'
+          AND (%s::text[] IS NULL OR n.nspname || '.' || c.relname = ANY(%s::text[]))
+        ORDER BY n.nspname, c.relname
+    ''', (names, names))
+    found = []
+    for schema, name, rows, identity, owned, key in cursor.fetchall():
+        table, identity = f'{schema}.{name}', _IDENTITY.get(identity, identity)
+        found.append(dict(
+            table=table, rows=rows, key=list(key or []), replica_identity=identity,
+            owned=bool(owned), blocked=_blocked(table, list(key or []), identity),
+        ))
+    return found
+
 
 def check_source(connection: Dict[str, Any]) -> Dict[str, Any]:
     """The source's readiness for change capture, and its tables with keys and sizes."""
@@ -66,32 +111,7 @@ def check_source(connection: Dict[str, Any]) -> Dict[str, Any]:
                 '(SELECT count(*) FROM pg_replication_slots)'
             )
             slots, used = cursor.fetchone()
-            cursor.execute('''
-                SELECT n.nspname, c.relname, greatest(c.reltuples, 0)::bigint, c.relreplident,
-                       pg_get_userbyid(c.relowner) = current_user OR
-                           (SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
-                       coalesce((
-                           SELECT array_agg(a.attname ORDER BY array_position(i.indkey, a.attnum))
-                           FROM pg_index i JOIN pg_attribute a
-                               ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                           WHERE i.indrelid = c.oid AND i.indisprimary
-                       ), '{}')
-                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE c.relkind IN ('r', 'p')
-                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                  AND n.nspname NOT LIKE 'pg_toast%'
-                ORDER BY n.nspname, c.relname
-            ''')
-            tables = [
-                dict(
-                    table=f'{schema}.{name}', rows=rows, key=list(key or []),
-                    replica_identity={'d': 'key', 'f': 'full', 'i': 'index', 'n': 'none'}.get(
-                        identity, identity,
-                    ),
-                    owned=bool(owned),
-                )
-                for schema, name, rows, identity, owned, key in cursor.fetchall()
-            ]
+            tables = _tables(cursor)
     finally:
         db.close()
     checks = [
@@ -205,6 +225,32 @@ def _validate(tables: List[Dict[str, Any]], deletes: str) -> None:
             )
     if deletes not in ('delete', 'soft'):
         raise IngestionError('deletes is delete or soft.')
+    by_name: Dict[str, str] = {}
+    for table in tables:
+        name = table['table'].split('.', 1)[1]
+        if name in by_name and by_name[name] != table['table']:
+            raise IngestionError(
+                f"{by_name[name]} and {table['table']} would both be written to the table "
+                f'{name}: choose one of them per sync.'
+            )
+        by_name[name] = table['table']
+
+
+def _from_source(source: Dict[str, Any], tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The chosen tables as the source has them now; refused when one cannot be mirrored."""
+    names = [t['table'] for t in tables]
+    db = _connect(source)
+    try:
+        with db.cursor() as cursor:
+            found = {t['table']: t for t in _tables(cursor, names)}
+    finally:
+        db.close()
+    for name in names:
+        if name not in found:
+            raise IngestionError(f'{name} is not a table of the source.')
+        if found[name]['blocked']:
+            raise IngestionError(f"{name} cannot be copied: {found[name]['blocked']}.")
+    return [found[name] for name in dict.fromkeys(names)]
 
 
 def _identifier(text: str) -> str:
@@ -231,6 +277,8 @@ def create(
     if not name or not str(name).strip():
         raise IngestionError('Name the pipeline.')
     _validate(tables, deletes)
+    # Keys and replica identities from the source, not from the request.
+    tables = _from_source(source, tables)
     pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING, repo_path=repo_path)
     ident = _identifier(pipeline.uuid)
 

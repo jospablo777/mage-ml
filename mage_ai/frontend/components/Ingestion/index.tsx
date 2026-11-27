@@ -27,6 +27,7 @@ type CheckType = { detail: string; name: string; ok: boolean };
 
 type TableType = {
   key: string[];
+  blocked?: string;
   owned: boolean;
   replica_identity: string;
   rows: number;
@@ -190,26 +191,25 @@ function Ingestion() {
       {sourceFound && (
         <Step title="2. Tables">
           <Text muted small>
-            A table copies by its primary key: rows upsert and delete by it. Tables without one
-            cannot be chosen.
+            A table copies by its primary key: rows upsert and delete by it. A table without
+            one, or whose replica identity would break its updates once published, cannot be
+            chosen; it says why.
           </Text>
           {sourceFound.tables.map(table => (
             <div aria-label={table.table} key={table.table} role="group">
               <FlexContainer alignItems="center">
                 <Checkbox
                 checked={!!chosen[table.table]}
-                disabled={!table.key.length}
+                disabled={!!table.blocked}
                 label={table.table}
-                onClick={() => table.key.length && setChosen({
+                onClick={() => !table.blocked && setChosen({
                   ...chosen,
                   [table.table]: !chosen[table.table],
                 })}
               />
                 <Spacing ml={1}>
                   <Text muted small>
-                    {table.key.length
-                    ? `key ${table.key.join(', ')}, about ${table.rows} rows`
-                    : 'no primary key'}
+                    {table.blocked || `key ${table.key.join(', ')}, about ${table.rows} rows`}
                   </Text>
                 </Spacing>
                 <Spacing ml={1}>
