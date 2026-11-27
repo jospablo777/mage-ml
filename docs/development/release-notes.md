@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Failed runs
+
+- A failed or cancelled run's page compares it with the last run that completed before it
+  (of the same partition, for a partition's run): what changed since it last worked.
+
 ### Savepoints
 
 - `mage-service savepoint <name>` keeps a stopped service's stream state and the Kafka

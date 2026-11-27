@@ -49,6 +49,11 @@ On a run's page, enter another run's id under **Compare with run id** and click
 - which variables changed;
 - for each block, whether its outputs are the same, differ, or weren't recorded.
 
+A failed or cancelled run's page does this by itself with the last run of the pipeline that
+completed before it (of the same partition, for a partition's run), under **What changed
+since run N, the last that completed**: the code, packages and variables that changed
+since it last worked are the first places to look.
+
 From the command line:
 
 ```bash
