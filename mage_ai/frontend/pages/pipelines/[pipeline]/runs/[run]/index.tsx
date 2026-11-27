@@ -16,6 +16,7 @@ import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import Paginate, { MAX_PAGES } from '@components/shared/Paginate';
 import PipelineDetailPage from '@components/PipelineDetailPage';
+import Incident from '@components/PipelineDetail/Incident';
 import RunRecord from '@components/PipelineDetail/RunRecord';
 import PipelineRunType, {
   COMPLETED_STATUSES,
@@ -362,6 +363,21 @@ function PipelineBlockRuns({
           )}
         </FlexContainer>
       </Spacing>
+
+      {pipelineRunProp?.id && ['failed', 'cancelled'].includes(pipelineRunStatus) && (
+        <Spacing mt={PADDING_UNITS} px={PADDING_UNITS}>
+          <Incident
+            onRetry={(fromBlockUUID?: string) => updatePipelineRun({
+              pipeline_run: {
+                ...(fromBlockUUID ? { from_block_uuid: fromBlockUUID } : {}),
+                pipeline_run_action: 'retry_blocks',
+              },
+            })}
+            pipelineRunId={pipelineRunProp.id}
+            retrying={isLoadingUpdatePipelineRun}
+          />
+        </Spacing>
+      )}
 
       <Divider light mt={PADDING_UNITS} short />
       {tableBlockRuns}

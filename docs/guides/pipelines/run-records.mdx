@@ -39,6 +39,22 @@ variables.
   <img className="hidden dark:block" src="/images/screenshots/run-record.dark.png" alt="The Run record panel on a pipeline run: code, environment, variables, a failed monitor, Compare and Reproduce" />
 </Frame>
 
+## A failed run
+
+A failed or cancelled run's page opens on what failed, above its block runs:
+
+| Shown | From |
+| --- | --- |
+| Each failed block and its error, such as `KeyError: 'amount'` | The block run's recorded error, the exception line of its traceback |
+| How long it ran against its usual, as two bars on one scale | The median of the block's last 20 completed runs in the pipeline |
+| Its upstream blocks' states in the run | The run's block runs |
+| The end of its log, as time, level and message | The block run's log, over its rotated files |
+| The blocks that did not complete, with their state | A failed run cancels the blocks it had not run |
+| **Retry from &lt;block&gt; and the blocks after it**, **Retry the blocks that did not complete** | The run's retry actions, the same as the buttons above the block runs |
+
+Fix the block, then retry from the panel: the run goes on from the failed block with the
+code as it is now, and the run record keeps both starts.
+
 ## Compare two runs
 
 On a run's page, enter another run's id under **Compare with run id** and click

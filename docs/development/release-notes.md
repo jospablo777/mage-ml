@@ -20,6 +20,9 @@
 
 - A failed or cancelled run's page compares it with the last run that completed before it
   (of the same partition, for a partition's run): what changed since it last worked.
+- It opens on what failed: each failed block's error line, the end of its log, its time
+  against the median of its last 20 completed runs, its upstream blocks' states, the blocks
+  that did not complete, and buttons to retry from the failed block or retry the rest.
 
 ### Savepoints
 

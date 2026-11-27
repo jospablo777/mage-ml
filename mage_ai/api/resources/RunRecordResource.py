@@ -185,8 +185,12 @@ class RunRecordResource(GenericResource):
                 variables=latest['variables']['names'],
             )
         if str(run.status) in ('failed', 'cancelled'):
+            from mage_ai.orchestration import incidents
+
             # What changed since it last worked: the page compares with this run first.
             model['last_completed'] = _last_completed(run)
+            # What failed, with its error, log, usual time and the ways to recover.
+            model['incident'] = incidents.summary(run, pipeline)
         query = kwargs.get('query') or {}
         compare_with = query.get('compare_with')
         if isinstance(compare_with, list):
