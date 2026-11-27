@@ -318,6 +318,18 @@ class KafkaSource(BaseSource):
                 raise Exception(f'Kafka: topics {", ".join(topics)} have no partitions.')
             self.consumer.unsubscribe()
             self.consumer.assign(partitions)
+            # Each partition starts where the group got to, known before the first check of
+            # whether the stream is done: a position asked without waiting could fall back
+            # to the reset setting first, the end, and a second bounded stream of the group
+            # ended at once with nothing read (I-560).
+            for partition in partitions:
+                committed = self.consumer.committed(partition)
+                if committed is not None:
+                    self.consumer.seek(partition, committed)
+                elif str(self.config.auto_offset_reset or '').lower() == 'earliest':
+                    self.consumer.seek_to_beginning(partition)
+                else:
+                    self.consumer.seek_to_end(partition)
         partitions = sorted(self.consumer.assignment(), key=lambda p: (p.topic, p.partition))
         ends = self.consumer.end_offsets(partitions)
         if stop_at not in ('end', 'latest'):
