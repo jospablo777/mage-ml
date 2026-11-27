@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Bounded Kafka streams
+
+- `stop_at: end` (or a time in milliseconds) on a Kafka source reads every partition up to
+  where it was when the stream started, commits the group's offsets at that bound and
+  finishes, in services and in MageML: the same pipeline backfills or scores history, then
+  runs live.
+- A Kafka source with `delivery: exactly_once` failed to run in MageML with a TypeError
+  (I-545); MageML now runs it at least once and says so in the log.
+
 ### Exactly once from Kafka into PostgreSQL
 
 - `delivery: exactly_once` on a Kafka source now also works when every sink, dead letters

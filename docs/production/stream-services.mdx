@@ -225,6 +225,36 @@ sasl_config:
   ```
 - IBM Event Streams credentials: see [IBM Cloud](/integrations/ibm-cloud).
 
+#### Bounded streams: read a range, then finish
+
+```yaml
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: orders
+consumer_group: orders-backfill
+auto_offset_reset: earliest
+stop_at: end
+```
+
+With `stop_at`, a stream reads its topics up to a bound and then finishes: the stream's
+state turns `finished`, and it reads nothing more. Run the same pipeline over history to
+backfill a table, rebuild state, or score a model on last month's messages, then run it
+live without `stop_at`.
+
+| `stop_at` | Reads |
+| --- | --- |
+| `end` | Every partition up to where it ended when the stream started; newer messages wait for the next stream |
+| a time in milliseconds since the epoch | The messages before that time |
+
+- A bounded stream reads every partition of its topics itself, without the group's
+  rebalancing, so no other member takes part of the range. Each partition starts at the
+  group's committed offset, else at `auto_offset_reset` (or where `offset` says).
+- The group's offsets are committed up to the bound, never past it: a later stream reads
+  from there.
+- It works with `delivery: exactly_once`: into PostgreSQL, the partitions start where
+  `mageml_stream_positions` says.
+- In MageML, the same setting reads up to the bound and ends the run.
+
 #### Exactly once, Kafka to Kafka
 
 ```yaml

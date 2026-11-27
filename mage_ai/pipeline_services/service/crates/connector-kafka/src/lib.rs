@@ -131,7 +131,7 @@ fn assign_from(
     table: &Mutex<Table>,
     offset: &Value,
     starts: Option<&dyn StartPositions>,
-) -> Result<Vec<(u32, AssignmentEpoch)>, ConnectorError> {
+) -> Result<(Vec<(u32, AssignmentEpoch)>, TopicPartitionList), ConnectorError> {
     let fatal = |message: &str| ConnectorError::fatal(format!("Kafka source offset: {message}"));
     let partitions: Vec<(String, i32)> = offset["partitions"]
         .as_array()
@@ -215,13 +215,129 @@ fn assign_from(
     }
     consumer.assign(&starts).map_err(connector_error)?;
     let mut table = table.lock().unwrap_or_else(|p| p.into_inner());
-    Ok(partitions
+    let assigned = partitions
         .iter()
         .map(|(topic, partition)| {
             let id = table.id(topic, *partition);
             (id, table.assign(id))
         })
-        .collect())
+        .collect();
+    Ok((assigned, starts))
+}
+
+/// Where a bounded stream stops reading (`stop_at`), so it ends once it has read up to it:
+/// at the end each partition had when the stream started, or before the first message at or
+/// after a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopAt {
+    End,
+    /// Milliseconds since the epoch.
+    Time(i64),
+}
+
+fn stop_at(config: &Value) -> Result<Option<StopAt>, ConnectorError> {
+    match config.get("stop_at") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if text == "end" || text == "latest" => Ok(Some(StopAt::End)),
+        Some(Value::Number(n)) if n.as_i64().is_some() => Ok(n.as_i64().map(StopAt::Time)),
+        Some(other) => Err(ConnectorError::fatal(format!(
+            "Kafka source stop_at is end (the topic's end when the stream starts) or a time in \
+             milliseconds since the epoch, not {other}."
+        ))),
+    }
+}
+
+/// Every partition of the topics, as Mage's `offset` lists them, for a bounded stream: it
+/// reads all of them itself, so a rebalance cannot hand part of the range to another member.
+/// A partition the group has no offset for starts as `auto_offset_reset` says.
+fn all_partitions(
+    consumer: &KafkaConsumer,
+    topics: &[String],
+    auto_offset_reset: &str,
+) -> Result<Value, ConnectorError> {
+    let mut partitions = Vec::new();
+    for topic in topics {
+        let metadata = consumer
+            .fetch_metadata(Some(topic), Duration::from_secs(30))
+            .map_err(connector_error)?;
+        let Some(found) = metadata.topics().iter().find(|t| t.name() == topic) else {
+            return Err(ConnectorError::fatal(format!(
+                "Kafka: topic {topic} does not exist"
+            )));
+        };
+        if found.partitions().is_empty() {
+            return Err(ConnectorError::fatal(format!(
+                "Kafka: topic {topic} does not exist or has no partitions"
+            )));
+        }
+        for partition in found.partitions() {
+            partitions.push(serde_json::json!({"topic": topic, "partition": partition.id()}));
+        }
+    }
+    let kind = if auto_offset_reset == "earliest" {
+        "beginning"
+    } else {
+        "end"
+    };
+    Ok(serde_json::json!({"type": kind, "partitions": partitions}))
+}
+
+/// A bounded partition: the first offset past the stream's end, and the next offset to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Bound {
+    end: i64,
+    next: i64,
+}
+
+impl Bound {
+    fn done(&self) -> bool {
+        self.next >= self.end
+    }
+}
+
+/// Each started partition's bound: its start resolved to an offset, and where it stops.
+fn bounds_of(
+    consumer: &KafkaConsumer,
+    table: &Mutex<Table>,
+    starts: &TopicPartitionList,
+    stop: StopAt,
+) -> Result<BTreeMap<u32, Bound>, ConnectorError> {
+    let within = Duration::from_secs(30);
+    let mut bounds = BTreeMap::new();
+    for element in starts.elements() {
+        let (topic, partition) = (element.topic(), element.partition());
+        let (low, high) = consumer
+            .fetch_watermarks(topic, partition, within)
+            .map_err(connector_error)?;
+        let next = match element.offset() {
+            Offset::Offset(n) => n.clamp(low, high),
+            Offset::End => high,
+            _ => low,
+        };
+        let end = match stop {
+            StopAt::End => high,
+            StopAt::Time(at) => {
+                let mut asked = TopicPartitionList::new();
+                asked
+                    .add_partition_offset(topic, partition, Offset::Offset(at))
+                    .map_err(connector_error)?;
+                let found = consumer
+                    .offsets_for_times(asked, within)
+                    .map_err(connector_error)?;
+                match found.elements().first().map(|e| e.offset()) {
+                    Some(Offset::Offset(n)) if n >= 0 => n,
+                    // No message at or after the time: everything up to now.
+                    _ => high,
+                }
+            }
+        };
+        let id = table
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .id(topic, partition);
+        bounds.insert(id, Bound { end, next });
+    }
+    Ok(bounds)
 }
 
 fn offset_value_ms(offset: &Value) -> Option<i64> {
@@ -1247,6 +1363,11 @@ pub struct KafkaSource {
     stopped: BTreeSet<u32>,
     limits: BatchLimits,
     read: ReadPositions,
+    /// A bounded stream (`stop_at`): it ends once every partition has been read to its bound.
+    bounded: bool,
+    bounds: BTreeMap<u32, Bound>,
+    /// Bounded partitions read to their end, paused in librdkafka.
+    ended: BTreeSet<u32>,
 }
 
 /// The last offset read from each partition under its assignment. librdkafka can hand a
@@ -1347,13 +1468,28 @@ impl KafkaSource {
                 .unwrap_or(false),
         };
         let mut initial = std::collections::VecDeque::new();
-        if let Some(offset) = config.get("offset").filter(|o| !o.is_null()) {
+        let stop_reading = stop_at(config)?;
+        let offset = match config.get("offset").filter(|o| !o.is_null()) {
+            Some(offset) => Some(offset.clone()),
+            None if stop_reading.is_some() => Some(all_partitions(
+                &consumer,
+                &topics,
+                &text(config, "auto_offset_reset").unwrap_or_else(|| "latest".into()),
+            )?),
+            None => None,
+        };
+        let mut bounds = BTreeMap::new();
+        if let Some(offset) = offset {
             // Mage's offset: the listed partitions, assigned without the group's rebalancing.
-            for (id, epoch) in assign_from(&consumer, &table, offset, starts.as_deref())? {
+            let (assigned, started) = assign_from(&consumer, &table, &offset, starts.as_deref())?;
+            for (id, epoch) in assigned {
                 initial.push_back(SourceEvent::Assigned {
                     partition: PartitionId(id),
                     epoch,
                 });
+            }
+            if let Some(at) = stop_reading {
+                bounds = bounds_of(&consumer, &table, &started, at)?;
             }
         } else {
             let names: Vec<&str> = topics.iter().map(String::as_str).collect();
@@ -1395,6 +1531,9 @@ impl KafkaSource {
             held: BTreeMap::new(),
             stopped: BTreeSet::new(),
             limits,
+            bounded: stop_reading.is_some(),
+            bounds,
+            ended: BTreeSet::new(),
         })
     }
 
@@ -1511,6 +1650,53 @@ impl KafkaSource {
         Some(list)
     }
 
+    /// A bounded partition read to its end: librdkafka fetches no more of it.
+    fn end_partition(&mut self, id: u32) {
+        if self.ended.insert(id)
+            && let Some(list) = self.tpl(id)
+        {
+            let _ = self.consumer.pause(&list);
+        }
+    }
+
+    /// A bounded stream: whether every partition has been read to its end, the consumer's
+    /// position counting (it moves past transaction markers and compacted gaps, which carry
+    /// no message), and whether batches are still waiting to be handed over.
+    fn bounded_progress(&mut self) -> Option<bool> {
+        if !self.bounded {
+            return None;
+        }
+        if self.bounds.values().any(|b| !b.done())
+            && let Ok(positions) = self.consumer.position()
+        {
+            let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+            for element in positions.elements() {
+                if let (Some(id), Offset::Offset(next)) = (
+                    table
+                        .ids
+                        .get(&(element.topic().to_string(), element.partition())),
+                    element.offset(),
+                ) && let Some(bound) = self.bounds.get_mut(id)
+                {
+                    bound.next = bound.next.max(next);
+                }
+            }
+        }
+        let done: Vec<u32> = self
+            .bounds
+            .iter()
+            .filter(|(id, b)| b.done() && !self.ended.contains(id))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in done {
+            self.end_partition(id);
+        }
+        if self.bounds.values().any(|b| !b.done()) {
+            return None;
+        }
+        Some(self.pending.is_empty() && self.carry.values().all(|c| c.is_empty()))
+    }
+
     /// Adds the message to its partition's batch; true when that batch is now full.
     fn add(&mut self, fetched: Fetched) -> bool {
         let Fetched {
@@ -1530,6 +1716,14 @@ impl KafkaSource {
             return false;
         }
         let offset = message.offset();
+        if let Some(bound) = self.bounds.get_mut(&id) {
+            if offset >= bound.end {
+                // Past the stream's end: left for a later stream to read.
+                self.end_partition(id);
+                return false;
+            }
+            bound.next = bound.next.max(offset + 1);
+        }
         {
             let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
             // Until the broker confirms a commit, the assignment's first offset is the one a
@@ -1675,6 +1869,16 @@ impl Source for KafkaSource {
                 // A chunk's messages before anything newer, so events keep their order.
                 if let Some(batch) = self.take_carry()? {
                     return Ok(batch);
+                }
+                // A bounded stream read to its end hands over what it holds, then ends.
+                match self.bounded_progress() {
+                    Some(true) => return Ok(SourceEvent::End),
+                    Some(false) => {
+                        if let Some(batch) = self.ready(true)? {
+                            return Ok(batch);
+                        }
+                    }
+                    None => {}
                 }
                 self.stop_held();
                 if let Some(until) = self.holding_until() {
@@ -2227,6 +2431,24 @@ mod tests {
         assert_eq!(table.unconfirmed(id), 300);
         table.confirm("orders", 0, 950);
         assert_eq!(table.unconfirmed(id), 0);
+    }
+
+    #[test]
+    fn stop_at_is_the_end_or_a_time() {
+        use serde_json::json;
+        assert_eq!(stop_at(&json!({})).unwrap(), None);
+        assert_eq!(
+            stop_at(&json!({"stop_at": "end"})).unwrap(),
+            Some(StopAt::End)
+        );
+        assert_eq!(
+            stop_at(&json!({"stop_at": 1_700_000_000_000_i64})).unwrap(),
+            Some(StopAt::Time(1_700_000_000_000))
+        );
+        let error = stop_at(&json!({"stop_at": "tomorrow"})).unwrap_err();
+        assert!(error.message.contains("stop_at is end"), "{error:?}");
+        assert!(Bound { end: 5, next: 5 }.done());
+        assert!(!Bound { end: 5, next: 4 }.done());
     }
 
     #[test]

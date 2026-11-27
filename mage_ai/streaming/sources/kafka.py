@@ -8,7 +8,7 @@ if sys.version_info >= (3, 12, 0):
 
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from kafka import KafkaConsumer, TopicPartition
 
@@ -65,6 +65,12 @@ class KafkaConfig(BaseConfig):
     topics: List = field(default_factory=list)
     offset: Dict = None
     max_partition_fetch_bytes: int = 1048576
+    # at_least_once or exactly_once. Exactly once is the service engine's (Kafka or
+    # PostgreSQL transactions); MageML runs the stream at least once.
+    delivery: str = None
+    # A bounded stream: end (each partition's end when the stream starts) or a time in
+    # milliseconds; the stream ends once it has read up to it.
+    stop_at: Any = None
 
     @classmethod
     def parse_config(self, config: Dict) -> Dict:
@@ -286,9 +292,84 @@ class KafkaSource(BaseSource):
         elif offset_type == 'end':
             self.consumer.seek_to_end()
 
-    def read(self, handler: Callable):
-        if self.config.offset:
+    def _bounds(self) -> Optional[Dict]:
+        """
+        A bounded stream's end per partition (stop_at, as the service engine reads it): the
+        first offset past what it reads. Every partition of the topics is assigned here, so
+        a rebalance cannot move part of the range to another member; None when unbounded.
+        """
+        stop_at = self.config.stop_at
+        if stop_at is None:
+            return None
+        if stop_at not in ('end', 'latest') and (
+                isinstance(stop_at, bool) or not isinstance(stop_at, int)):
+            raise Exception(
+                'Kafka source stop_at is end (the topic\'s end when the stream starts) or a '
+                f'time in milliseconds since the epoch, not {stop_at!r}.'
+            )
+        if not self.config.offset:
+            topics = [self.config.topic] if self.config.topic else self.config.topics
+            partitions = [
+                TopicPartition(topic, p)
+                for topic in topics
+                for p in sorted(self.consumer.partitions_for_topic(topic) or [])
+            ]
+            if not partitions:
+                raise Exception(f'Kafka: topics {", ".join(topics)} have no partitions.')
+            self.consumer.unsubscribe()
+            self.consumer.assign(partitions)
+        partitions = sorted(self.consumer.assignment(), key=lambda p: (p.topic, p.partition))
+        ends = self.consumer.end_offsets(partitions)
+        if stop_at not in ('end', 'latest'):
+            found = self.consumer.offsets_for_times({p: stop_at for p in partitions})
+            ends = {p: (found[p].offset if found.get(p) else ends[p]) for p in partitions}
+        self._print(f'Bounded: reading up to {sum(ends.values()):,} offsets in '
+                    f'{len(partitions)} partitions, then ending.')
+        return ends
+
+    def _position(self, partition) -> Optional[int]:
+        """The partition's next offset, without waiting: kafka-python 2.3 blocks in position()
+        until its timeout before the first fetch of a partition with committed offsets, and
+        without one forever. None until it knows."""
+        return self.consumer.position(partition, timeout_ms=0)
+
+    def _bounded_done(self, ends: Dict) -> bool:
+        positions = {p: self._position(p) for p in ends}
+        return all(at is not None and at >= ends[p] for p, at in positions.items())
+
+    def _commit(self, ends: Optional[Dict]):
+        """Commits the positions read; a bounded stream at most its ends, so the messages
+        polled past them and dropped are read by a later stream."""
+        if ends is None:
+            self.consumer.commit()
+            return
+        from kafka.structs import OffsetAndMetadata
+
+        offsets = {}
+        for p, end in ends.items():
+            at = self._position(p)
+            if at is not None:
+                offsets[p] = OffsetAndMetadata(min(at, end), '', -1)
+        if offsets:
+            self.consumer.commit(offsets)
+
+    def _prepare_offsets(self):
+        """Mage's offset setting, applied once however the stream reads."""
+        if self.config.offset and not getattr(self, '_offsets_handled', False):
             self._handle_offsets()
+            self._offsets_handled = True
+
+    def _note_delivery(self):
+        if self.config.delivery == 'exactly_once':
+            self._print('delivery: exactly_once applies in exported services (Kafka or '
+                        'PostgreSQL transactions); MageML runs this stream at least once.')
+
+    def read(self, handler: Callable):
+        self._prepare_offsets()
+        self._note_delivery()
+        if self.config.stop_at is not None:
+            # One message at a time, through the bounded batches.
+            return self.batch_read(lambda messages: [handler(m) for m in messages])
         self._print('Start consuming single messages.')
         for message in self.consumer:
             self.__print_message(message)
@@ -309,8 +390,9 @@ class KafkaSource(BaseSource):
             self.consumer.commit()
 
     def batch_read(self, handler: Callable):
-        if self.config.offset:
-            self._handle_offsets()
+        self._prepare_offsets()
+        self._note_delivery()
+        ends = self._bounds()
         self._print('Start consuming messages in batches.')
         if self.config.batch_size > 0:
             batch_size = self.config.batch_size
@@ -322,6 +404,10 @@ class KafkaSource(BaseSource):
             timeout_ms = DEFAULT_TIMEOUT_MS
 
         while True:
+            if ends is not None and self._bounded_done(ends):
+                self._commit(ends)
+                self._print('Bounded: every partition was read to its end; the stream ends.')
+                return
             # Response format is {TopicPartiton('topic1', 1): [msg1, msg2]}
             msg_pack = self.consumer.poll(
                 max_records=batch_size,
@@ -331,6 +417,12 @@ class KafkaSource(BaseSource):
             message_values = []
             msg_printed = False
             for _tp, messages in msg_pack.items():
+                if ends is not None:
+                    # Past the stream's end: left for a later stream to read.
+                    messages = [m for m in messages if m.offset < ends[_tp]]
+                    at = self._position(_tp)
+                    if at is not None and at >= ends[_tp]:
+                        self.consumer.pause(_tp)
                 self._print(
                     f'Received {len(messages)} messages from topic="{_tp.topic}" '
                     + f'partition={_tp.partition} at time={time.time()}'
@@ -344,7 +436,7 @@ class KafkaSource(BaseSource):
                     message_values.append(message)
             if len(message_values) > 0:
                 handler(message_values)
-            self.consumer.commit()
+            self._commit(ends)
 
     def test_connection(self):
         self.consumer._client.check_version(timeout=5)

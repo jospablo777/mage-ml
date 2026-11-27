@@ -24,6 +24,21 @@ class KafkaTests(TestCase):
             ))
         self.assertEqual(source.config.topic, 'test_topic')
 
+    def test_delivery_and_stop_at_for_the_engine_load_in_mageml(self):
+        """A source with delivery: exactly_once (a service setting) failed to load in MageML
+        with a TypeError (I-545); MageML runs it at least once, and reads up to stop_at."""
+        with patch.object(KafkaSource, 'init_client'):
+            source = KafkaSource(dict(
+                connector_type='kafka', bootstrap_server='test_server', consumer_group='test',
+                topic='test_topic', delivery='exactly_once', stop_at='end',
+            ))
+        self.assertEqual((source.config.delivery, source.config.stop_at),
+                         ('exactly_once', 'end'))
+        with self.assertRaises(Exception) as context:
+            source.config.stop_at = 'tomorrow'
+            source._bounds()
+        self.assertIn('stop_at is end', str(context.exception))
+
     def test_init_client_with_topic(self):
         kafka_config = dict(
             connector_type='kafka',

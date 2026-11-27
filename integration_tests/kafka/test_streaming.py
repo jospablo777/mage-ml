@@ -132,3 +132,48 @@ def test_metadata(kafka_bootstrap, kafka_topic):
     assert message['metadata']['key'] == 'k1'
     assert message['metadata']['topic'] == kafka_topic
     assert message['metadata']['offset'] == 0
+
+
+def produce_at(bootstrap, topic, ids, timestamp_ms):
+    """Messages with one timestamp, spread over the topic's partitions by key."""
+    from kafka import KafkaProducer
+
+    producer = KafkaProducer(bootstrap_servers=bootstrap,
+                             key_serializer=lambda k: str(k).encode(),
+                             value_serializer=lambda v: json.dumps(v).encode())
+    for i in ids:
+        producer.send(topic, key=i, value=dict(id=i), timestamp_ms=timestamp_ms)
+    producer.flush()
+    producer.close()
+
+
+def test_a_bounded_stream_reads_up_to_its_end_and_ends(kafka_bootstrap):
+    """
+    stop_at, as the service engine reads it: a time bound reads the messages before it from
+    every partition and returns; the group's offsets stop at the bound, so the next stream
+    reads the rest. delivery: exactly_once is accepted and runs at least once in MageML.
+    """
+    from kafka.admin import KafkaAdminClient, NewTopic
+
+    topic = f'bounded_{uuid.uuid4().hex[:8]}'
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(topic, num_partitions=3, replication_factor=1)])
+    admin.close()
+    bound = 1_700_000_000_000
+    produce_at(kafka_bootstrap, topic, range(300), bound - 1000)
+    produce_at(kafka_bootstrap, topic, range(300, 350), bound + 1000)
+    group = f'group_{uuid.uuid4().hex[:8]}'
+
+    read = []
+    source(kafka_bootstrap, topic, group, stop_at=bound, delivery='exactly_once',
+           batch_size=40).batch_read(read.extend)
+
+    assert sorted(m['id'] for m in read) == list(range(300))
+    rest = source(kafka_bootstrap, topic, group, stop_at='end')
+    after = []
+    rest.batch_read(after.extend)
+    assert sorted(m['id'] for m in after) == list(range(300, 350))
+    # Read to its end, an empty bounded stream ends at once.
+    again = []
+    source(kafka_bootstrap, topic, group, stop_at='end').batch_read(again.extend)
+    assert again == []

@@ -938,8 +938,10 @@ KAFKA_SETTINGS = {
 KAFKA_SOURCE_SETTINGS = KAFKA_SETTINGS | {
     'topic', 'topics', 'consumer_group', 'auto_offset_reset', 'batch_size', 'timeout_ms',
     'include_metadata', 'serde_config', 'offset', 'max_partition_fetch_bytes',
-    # at_least_once (the default) or exactly_once: Kafka to Kafka in transactions.
+    # at_least_once (the default) or exactly_once: in Kafka or PostgreSQL transactions.
     'delivery',
+    # A bounded stream: end, or a time in milliseconds; the stream ends once read to it.
+    'stop_at',
 }
 KAFKA_SINK_SETTINGS = KAFKA_SETTINGS | {'topic', 'batch_size', 'timeout_ms'}
 SASL_SETTINGS = {'mechanism', 'username', 'password'}
