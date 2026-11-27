@@ -6,6 +6,10 @@
 //! digits (numeric as JSON numbers, timestamps as ISO text, json and jsonb as they are), and
 //! it stays that JSON text: a number is never read into a float. A row is the match of a key
 //! when its `match` column, as text, is the key; the first row of a key stands.
+//!
+//! A lookup of a history table (history.rs, ADR-0043) reads each key's current version, or
+//! with [`PgLookup::rows_as_of`] the version valid at each message's time; [`PgLookup::covers`]
+//! says whether the history is through a batch's times.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -16,13 +20,23 @@ use tokio::sync::Mutex;
 use tokio_postgres::types::Type;
 use tokio_postgres::{Client, Statement};
 
-use crate::{Settings, classify, connect};
+use crate::{Settings, classify, connect, quote};
 
 pub struct PgLookup {
     settings: Settings,
     query: String,
     match_column: String,
     client: Mutex<Option<(Client, Statement)>>,
+    /// A history table: its quoted name and its name in mageml_history_progress.
+    history: Option<(String, String)>,
+}
+
+/// A message's time, ISO 8601 text or Unix milliseconds, as a timestamp.
+fn time_of(text: &str) -> String {
+    format!(
+        "(CASE WHEN {text} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN to_timestamp({text}::double precision \
+         / 1000) ELSE {text}::timestamptz END)"
+    )
 }
 
 impl PgLookup {
@@ -52,14 +66,44 @@ impl PgLookup {
             query: query.to_string(),
             match_column: match_column.to_string(),
             client: Mutex::new(None),
+            history: None,
         })
     }
 
-    /// The matching row of each key that has one, by key, as the JSON object PostgreSQL made.
-    pub async fn rows(
+    /// A lookup of history table `table` (`schema.table`, or a table of the connection's
+    /// schema) whose `match_column` holds the key: [`PgLookup::rows`] reads current versions.
+    pub fn history(
+        config: &Value,
+        table: &str,
+        match_column: &str,
+    ) -> Result<PgLookup, ConnectorError> {
+        let (schema, name) = match table.split_once('.') {
+            Some((schema, name)) => (schema.to_string(), name.to_string()),
+            None => (
+                config
+                    .get("schema")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("public")
+                    .to_string(),
+                table.to_string(),
+            ),
+        };
+        let full = format!("{}.{}", quote(&schema), quote(&name));
+        let current = format!(
+            "SELECT * FROM {full} WHERE {m}::text = ANY($1) AND {vt} IS NULL AND NOT {del}",
+            m = quote(match_column),
+            vt = quote(crate::history::VALID_TO),
+            del = quote(crate::history::DELETED),
+        );
+        let mut lookup = PgLookup::new(config, &current, match_column)?;
+        lookup.history = Some((full, format!("{schema}.{name}")));
+        Ok(lookup)
+    }
+
+    async fn connected(
         &self,
-        keys: &[String],
-    ) -> Result<HashMap<String, Box<RawValue>>, ConnectorError> {
+    ) -> Result<tokio::sync::MutexGuard<'_, Option<(Client, Statement)>>, ConnectorError> {
         let mut guard = self.client.lock().await;
         if guard.as_ref().is_none_or(|(c, _)| c.is_closed()) {
             let client = connect(&self.settings).await?;
@@ -72,6 +116,113 @@ impl PgLookup {
                 .map_err(|e| classify("preparing the lookup query", e))?;
             *guard = Some((client, statement));
         }
+        Ok(guard)
+    }
+
+    fn history_table(&self) -> Result<&(String, String), ConnectorError> {
+        self.history
+            .as_ref()
+            .ok_or_else(|| ConnectorError::fatal("PostgreSQL lookup: as_of reads a history table"))
+    }
+
+    /// The version of each key valid at its time, in order; None where none was.
+    pub async fn rows_as_of(
+        &self,
+        keys: &[String],
+        times: &[String],
+    ) -> Result<Vec<Option<Box<RawValue>>>, ConnectorError> {
+        let (table, _) = self.history_table()?;
+        let sql = format!(
+            "SELECT k.n, row_to_json(h)::text FROM unnest($1::text[], $2::text[]) \
+             WITH ORDINALITY AS k(key, at, n) JOIN {table} AS h ON h.{m}::text = k.key \
+             AND h.{vf} <= {at} AND (h.{vt} IS NULL OR {at} < h.{vt}) AND NOT h.{del}",
+            m = quote(&self.match_column),
+            vf = quote(crate::history::VALID_FROM),
+            vt = quote(crate::history::VALID_TO),
+            del = quote(crate::history::DELETED),
+            at = time_of("k.at"),
+        );
+        let mut guard = self.connected().await?;
+        let (client, _) = guard.as_ref().expect("connected");
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let times: Vec<&str> = times.iter().map(String::as_str).collect();
+        let result = match client
+            .prepare_typed(&sql, &[Type::TEXT_ARRAY, Type::TEXT_ARRAY])
+            .await
+        {
+            Ok(statement) => client.query(&statement, &[&keys, &times]).await,
+            Err(error) => Err(error),
+        };
+        let rows = match result {
+            Ok(rows) => rows,
+            Err(error) => {
+                let error = classify("reading the history", error);
+                if error.retryable {
+                    *guard = None;
+                }
+                return Err(error);
+            }
+        };
+        let mut found: Vec<Option<Box<RawValue>>> = vec![None; keys.len()];
+        for row in rows {
+            let n: i64 = row.get(0);
+            let text: String = row.get(1);
+            if let Some(slot) = found.get_mut((n - 1) as usize)
+                && slot.is_none()
+            {
+                *slot = Some(RawValue::from_string(text).map_err(|e| {
+                    ConnectorError::fatal(format!("PostgreSQL lookup: a row is not JSON: {e}"))
+                })?);
+            }
+        }
+        Ok(found)
+    }
+
+    /// Whether the history is through the latest of `times`: every change up to then is in
+    /// it (mageml_history_progress).
+    pub async fn covers(&self, times: &[String]) -> Result<bool, ConnectorError> {
+        let (_, label) = self.history_table()?;
+        let sql = format!(
+            "SELECT coalesce((SELECT through FROM {schema}.{progress} WHERE history_table = $1) \
+             >= (SELECT max({at}) FROM unnest($2::text[]) AS k(at)), false)",
+            schema = quote(label.split('.').next().unwrap_or("public")),
+            progress = quote(crate::history::PROGRESS_TABLE),
+            at = time_of("k.at"),
+        );
+        let mut guard = self.connected().await?;
+        let (client, _) = guard.as_ref().expect("connected");
+        let times: Vec<&str> = times.iter().map(String::as_str).collect();
+        let result = match client
+            .prepare_typed(&sql, &[Type::TEXT, Type::TEXT_ARRAY])
+            .await
+        {
+            Ok(statement) => client.query_one(&statement, &[label, &times]).await,
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(row) => Ok(row.get(0)),
+            // No progress table yet: the history has nothing.
+            Err(error)
+                if error.code() == Some(&tokio_postgres::error::SqlState::UNDEFINED_TABLE) =>
+            {
+                Ok(false)
+            }
+            Err(error) => {
+                let error = classify("reading the history's progress", error);
+                if error.retryable {
+                    *guard = None;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// The matching row of each key that has one, by key, as the JSON object PostgreSQL made.
+    pub async fn rows(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Box<RawValue>>, ConnectorError> {
+        let mut guard = self.connected().await?;
         let (client, statement) = guard.as_ref().expect("connected");
         let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
         let result = client.query(statement, &[&keys]).await;

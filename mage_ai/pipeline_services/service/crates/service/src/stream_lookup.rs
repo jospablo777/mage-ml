@@ -14,6 +14,14 @@
 //!   missing: keep          # keep (the field null), drop, or dead_letter
 //! ```
 //!
+//! A temporal join reads a history table (the PostgreSQL sink's `history` mode) instead of a
+//! query: `history: products_history` and `as_of: ordered_at` give each message the version
+//! of its key valid at its time (ISO 8601 text or Unix milliseconds), in one query per batch.
+//! Before it reads, the batch waits until the history is through its latest time, up to
+//! `max_wait_seconds` (30), so it never joins a version a change not yet written would have
+//! ended; a batch that waited that long joins what there is, and `late_batches` counts it.
+//! Without `as_of`, a history lookup reads each key's current version, cached as a query's.
+//!
 //! A key the query has no row for is cached too, so a batch does not ask for it again until
 //! it expires. Merged columns never replace a field the message has. Messages and rows stay
 //! JSON text field by field, so numbers keep every digit (a value is never read into a
@@ -44,6 +52,20 @@ pub trait Fetch: Send + Sync {
         &'a self,
         keys: &'a [String],
     ) -> BoxFuture<'a, Result<HashMap<String, Row>, ConnectorError>>;
+
+    /// The version of each key valid at its time, in order (a history table).
+    fn rows_as_of<'a>(
+        &'a self,
+        _keys: &'a [String],
+        _times: &'a [String],
+    ) -> BoxFuture<'a, Result<Vec<Option<Row>>, ConnectorError>> {
+        Box::pin(async { Err(ConnectorError::fatal("as_of reads a history table")) })
+    }
+
+    /// Whether the history is through the latest of the times.
+    fn covers<'a>(&'a self, _times: &'a [String]) -> BoxFuture<'a, Result<bool, ConnectorError>> {
+        Box::pin(async { Ok(true) })
+    }
 }
 
 impl Fetch for mage_connector_postgres::lookup::PgLookup {
@@ -52,6 +74,22 @@ impl Fetch for mage_connector_postgres::lookup::PgLookup {
         keys: &'a [String],
     ) -> BoxFuture<'a, Result<HashMap<String, Row>, ConnectorError>> {
         Box::pin(mage_connector_postgres::lookup::PgLookup::rows(self, keys))
+    }
+
+    fn rows_as_of<'a>(
+        &'a self,
+        keys: &'a [String],
+        times: &'a [String],
+    ) -> BoxFuture<'a, Result<Vec<Option<Row>>, ConnectorError>> {
+        Box::pin(mage_connector_postgres::lookup::PgLookup::rows_as_of(
+            self, keys, times,
+        ))
+    }
+
+    fn covers<'a>(&'a self, times: &'a [String]) -> BoxFuture<'a, Result<bool, ConnectorError>> {
+        Box::pin(mage_connector_postgres::lookup::PgLookup::covers(
+            self, times,
+        ))
     }
 }
 
@@ -71,7 +109,16 @@ pub enum Missing {
 pub struct LookupSpec {
     /// PostgreSQL connection settings, as a PostgreSQL sink's.
     pub connection: Value,
+    #[serde(default)]
     pub query: String,
+    /// A history table, instead of `query` (ADR-0043).
+    #[serde(default)]
+    pub history: Option<String>,
+    /// The message field holding its time: each message gets the version valid then.
+    #[serde(default)]
+    pub as_of: Option<String>,
+    #[serde(default = "default_max_wait_seconds")]
+    pub max_wait_seconds: f64,
     pub key: String,
     #[serde(rename = "match")]
     pub match_column: String,
@@ -92,6 +139,13 @@ fn default_cache_seconds() -> f64 {
 fn default_cache_rows() -> usize {
     100_000
 }
+
+fn default_max_wait_seconds() -> f64 {
+    30.0
+}
+
+/// How often a batch asks whether the history reached its times, at most.
+const HISTORY_POLL_MOST: Duration = Duration::from_secs(2);
 
 /// Keys asked in one query, at most.
 const KEYS_PER_QUERY: usize = 5000;
@@ -117,6 +171,8 @@ pub struct LookupSession {
     /// Queries run and keys asked, for the tests and the status.
     pub queries: u64,
     pub keys_asked: u64,
+    /// As-of batches that joined before the history reached their times.
+    pub late_batches: u64,
 }
 
 impl LookupSession {
@@ -132,6 +188,21 @@ impl LookupSession {
         if spec.cache_seconds.is_nan() || spec.cache_seconds < 0.0 {
             return Err("lookup cache_seconds is 0 or more".into());
         }
+        match (&spec.history, spec.query.trim().is_empty()) {
+            (Some(_), false) => {
+                return Err("lookup reads a query or a history table, not both".into());
+            }
+            (None, true) => {
+                return Err("lookup needs query, or history (a history table)".into());
+            }
+            _ => {}
+        }
+        if spec.as_of.is_some() && spec.history.is_none() {
+            return Err("lookup as_of reads a history table: set history".into());
+        }
+        if spec.max_wait_seconds.is_nan() || spec.max_wait_seconds < 0.0 {
+            return Err("lookup max_wait_seconds is 0 or more".into());
+        }
         Ok(LookupSession {
             block: block.to_string(),
             spec,
@@ -141,6 +212,7 @@ impl LookupSession {
             order: VecDeque::new(),
             queries: 0,
             keys_asked: 0,
+            late_batches: 0,
         })
     }
 
@@ -160,32 +232,127 @@ impl LookupSession {
             self.queries += 1;
             match self.fetch.rows(keys).await {
                 Ok(rows) => return Ok(rows),
-                Err(error) if error.retryable => {
-                    attempt += 1;
-                    if let Some(log) = &self.log {
-                        log.write(
-                            "warn",
-                            Some(&self.block),
-                            None,
-                            &format!(
-                                "the lookup query failed (attempt {attempt}), retrying in {:.1} s: \
-                                 {}",
-                                wait.as_secs_f64(),
-                                error.message
-                            ),
-                        );
-                    }
-                    tokio::time::sleep(wait).await;
-                    wait = (wait * 2).min(RETRY_MOST);
-                }
-                Err(error) => {
-                    return Err(TransformError::User(format!(
-                        "{}: the lookup query failed: {}",
-                        self.block, error.message
-                    )));
-                }
+                Err(error) => self.retry_after(error, &mut attempt, &mut wait).await?,
             }
         }
+    }
+
+    /// After a failed query: one the database could not answer is logged and waited out;
+    /// one it refused stops the batch.
+    async fn retry_after(
+        &self,
+        error: ConnectorError,
+        attempt: &mut u32,
+        wait: &mut Duration,
+    ) -> Result<(), TransformError> {
+        if !error.retryable {
+            return Err(TransformError::User(format!(
+                "{}: the lookup query failed: {}",
+                self.block, error.message
+            )));
+        }
+        *attempt += 1;
+        if let Some(log) = &self.log {
+            log.write(
+                "warn",
+                Some(&self.block),
+                None,
+                &format!(
+                    "the lookup query failed (attempt {attempt}), retrying in {:.1} s: {}",
+                    wait.as_secs_f64(),
+                    error.message
+                ),
+            );
+        }
+        tokio::time::sleep(*wait).await;
+        *wait = (*wait * 2).min(RETRY_MOST);
+        Ok(())
+    }
+
+    /// Waits until the history is through the latest of `times`, up to max_wait_seconds.
+    async fn wait_for_history(&mut self, times: &[String]) -> Result<(), TransformError> {
+        let deadline = Instant::now() + Duration::from_secs_f64(self.spec.max_wait_seconds);
+        let mut pause = Duration::from_millis(100);
+        loop {
+            let (mut wait, mut attempt) = (RETRY_FIRST, 0u32);
+            let covered = loop {
+                self.queries += 1;
+                match self.fetch.covers(times).await {
+                    Ok(covered) => break covered,
+                    Err(error) => self.retry_after(error, &mut attempt, &mut wait).await?,
+                }
+            };
+            if covered {
+                return Ok(());
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                self.late_batches += 1;
+                if let Some(log) = &self.log {
+                    log.write(
+                        "warn",
+                        Some(&self.block),
+                        None,
+                        &format!(
+                            "the history {} is not through this batch's latest time after {} s; \
+                             the batch joins the versions it has",
+                            self.spec.history.as_deref().unwrap_or_default(),
+                            self.spec.max_wait_seconds
+                        ),
+                    );
+                }
+                return Ok(());
+            }
+            tokio::time::sleep(pause.min(deadline - now)).await;
+            pause = (pause * 2).min(HISTORY_POLL_MOST);
+        }
+    }
+
+    /// Each message's version as of its time (None without a key, a time or a version).
+    async fn rows_as_of(
+        &mut self,
+        messages: &[Parsed],
+        field: &str,
+    ) -> Result<Vec<Option<Row>>, TransformError> {
+        let mut at: Vec<usize> = Vec::new();
+        let mut keys: Vec<String> = Vec::new();
+        let mut times: Vec<String> = Vec::new();
+        for (index, (_, object, key)) in messages.iter().enumerate() {
+            let time = object
+                .as_ref()
+                .and_then(|o| o.get(field))
+                .and_then(|v| mage_connector_postgres::lookup::key_text(v));
+            if let (Some(key), Some(time)) = (key, time) {
+                at.push(index);
+                keys.push(key.clone());
+                times.push(time);
+            }
+        }
+        let mut rows = vec![None; messages.len()];
+        if keys.is_empty() {
+            return Ok(rows);
+        }
+        self.wait_for_history(&times).await?;
+        for start in (0..keys.len()).step_by(KEYS_PER_QUERY) {
+            let end = (start + KEYS_PER_QUERY).min(keys.len());
+            self.keys_asked += (end - start) as u64;
+            let (mut wait, mut attempt) = (RETRY_FIRST, 0u32);
+            let found = loop {
+                self.queries += 1;
+                match self
+                    .fetch
+                    .rows_as_of(&keys[start..end], &times[start..end])
+                    .await
+                {
+                    Ok(found) => break found,
+                    Err(error) => self.retry_after(error, &mut attempt, &mut wait).await?,
+                }
+            };
+            for (offset, row) in found.into_iter().enumerate() {
+                rows[at[start + offset]] = row;
+            }
+        }
+        Ok(rows)
     }
 
     fn remember(&mut self, key: String, row: Option<Row>, now: Instant) {
@@ -221,10 +388,22 @@ impl LookupSession {
                 .and_then(|v| mage_connector_postgres::lookup::key_text(v));
             messages.push((envelope, object, key));
         }
+        let rows = match self.spec.as_of.clone() {
+            Some(field) => self.rows_as_of(&messages, &field).await?,
+            None => self.rows_by_key(&messages).await?,
+        };
+        self.emit(messages, rows)
+    }
+
+    /// Each message's row by its key, from the cache or one query for the keys it misses.
+    async fn rows_by_key(
+        &mut self,
+        messages: &[Parsed],
+    ) -> Result<Vec<Option<Row>>, TransformError> {
         let now = Instant::now();
         let mut wanted: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
-        for (_, _, key) in &messages {
+        for (_, _, key) in messages {
             if let Some(key) = key
                 && !self.fresh(key, now)
                 && seen.insert(key.clone())
@@ -243,13 +422,26 @@ impl LookupSession {
                 self.remember(key.clone(), row, now);
             }
         }
+        Ok(messages
+            .iter()
+            .map(|(_, _, key)| {
+                key.as_ref().and_then(|k| match asked.get(k) {
+                    Some(row) => row.clone(),
+                    None => self.cache.get(k).and_then(|c| c.row.clone()),
+                })
+            })
+            .collect())
+    }
+
+    /// The messages with their rows, as the spec puts them.
+    fn emit(
+        &self,
+        messages: Vec<Parsed>,
+        rows: Vec<Option<Row>>,
+    ) -> Result<TransformOutput, TransformError> {
         let mut builder = EnvelopeBuilder::new();
         let mut row_errors = Vec::new();
-        for (index, (envelope, object, key)) in messages.into_iter().enumerate() {
-            let row = key.as_ref().and_then(|k| match asked.get(k) {
-                Some(row) => row.clone(),
-                None => self.cache.get(k).and_then(|c| c.row.clone()),
-            });
+        for (index, ((envelope, object, key), row)) in messages.into_iter().zip(rows).enumerate() {
             if row.is_none() {
                 match self.spec.missing {
                     Missing::Keep => {}
@@ -554,5 +746,153 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(asked.lock().unwrap().len(), 3);
+    }
+
+    /// Prices of product 1: 10 from 11-01, 12 from 11-03. The history reaches 11-03 after
+    /// `behind` checks, or never with u32::MAX.
+    struct PriceHistory {
+        behind: Arc<Mutex<u32>>,
+    }
+
+    impl Fetch for PriceHistory {
+        fn rows<'a>(
+            &'a self,
+            _keys: &'a [String],
+        ) -> BoxFuture<'a, Result<HashMap<String, Row>, ConnectorError>> {
+            Box::pin(async { Ok(HashMap::new()) })
+        }
+
+        fn rows_as_of<'a>(
+            &'a self,
+            keys: &'a [String],
+            times: &'a [String],
+        ) -> BoxFuture<'a, Result<Vec<Option<Row>>, ConnectorError>> {
+            Box::pin(async move {
+                Ok(keys
+                    .iter()
+                    .zip(times)
+                    .map(|(key, time)| {
+                        let price = match (key.as_str(), time.as_str()) {
+                            ("1", t) if t >= "2026-11-03" => Some(12),
+                            ("1", t) if t >= "2026-11-01" => Some(10),
+                            _ => None,
+                        };
+                        price.map(|p| {
+                            RawValue::from_string(json!({"id": 1, "price": p}).to_string()).unwrap()
+                        })
+                    })
+                    .collect())
+            })
+        }
+
+        fn covers<'a>(
+            &'a self,
+            _times: &'a [String],
+        ) -> BoxFuture<'a, Result<bool, ConnectorError>> {
+            Box::pin(async move {
+                let mut behind = self.behind.lock().unwrap();
+                if *behind == 0 {
+                    return Ok(true);
+                }
+                if *behind != u32::MAX {
+                    *behind -= 1;
+                }
+                Ok(false)
+            })
+        }
+    }
+
+    fn history_session(spec: Value, behind: u32) -> LookupSession {
+        let mut spec = spec;
+        spec["connection"] = json!({});
+        LookupSession::new(
+            "enrich",
+            serde_json::from_value(spec).unwrap(),
+            Box::new(PriceHistory {
+                behind: Arc::new(Mutex::new(behind)),
+            }),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn each_message_gets_the_version_valid_at_its_time_once_the_history_is_there() {
+        let mut lookup = history_session(
+            json!({"history": "prices", "key": "id", "match": "id", "as_of": "at",
+                   "into": "product", "missing": "drop"}),
+            2,
+        );
+        let output = lookup
+            .transform(batch(&[
+                json!({"id": 1, "at": "2026-11-02T10:00:00Z"}),
+                json!({"id": 1, "at": "2026-11-04T00:00:00Z"}),
+                json!({"id": 1, "at": "2026-10-01T00:00:00Z"}),
+                json!({"id": 1}),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(
+            values(&output),
+            vec![
+                json!({"id": 1, "at": "2026-11-02T10:00:00Z", "product": {"id": 1, "price": 10}}),
+                json!({"id": 1, "at": "2026-11-04T00:00:00Z", "product": {"id": 1, "price": 12}}),
+            ]
+        );
+        // Two checks found the history behind; the third found it there.
+        assert_eq!((lookup.late_batches, lookup.queries), (0, 4));
+    }
+
+    #[tokio::test]
+    async fn a_history_that_does_not_come_is_waited_for_max_wait_seconds_then_joined() {
+        let mut lookup = history_session(
+            json!({"history": "prices", "key": "id", "match": "id", "as_of": "at",
+                   "max_wait_seconds": 0.3}),
+            u32::MAX,
+        );
+        let started = Instant::now();
+        let output = lookup
+            .transform(batch(&[json!({"id": 1, "at": "2026-11-03T00:00:00Z"})]))
+            .await
+            .unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        assert_eq!(
+            values(&output),
+            vec![json!({"id": 1, "at": "2026-11-03T00:00:00Z", "price": 12})]
+        );
+        assert_eq!(lookup.late_batches, 1);
+    }
+
+    #[test]
+    fn a_lookup_reads_a_query_or_a_history_and_as_of_needs_a_history() {
+        let make = |spec: Value| {
+            let mut spec = spec;
+            spec["connection"] = json!({});
+            LookupSession::new(
+                "enrich",
+                serde_json::from_value(spec).unwrap(),
+                Box::new(PriceHistory {
+                    behind: Arc::new(Mutex::new(0)),
+                }),
+                None,
+            )
+            .err()
+        };
+        assert!(
+            make(json!({"key": "id", "match": "id"}))
+                .unwrap()
+                .contains("needs query")
+        );
+        assert!(
+            make(json!({"query": "$1", "history": "h", "key": "id", "match": "id"}))
+                .unwrap()
+                .contains("not both")
+        );
+        assert!(
+            make(json!({"query": "$1", "as_of": "at", "key": "id", "match": "id"}))
+                .unwrap()
+                .contains("set history")
+        );
+        assert!(make(json!({"history": "h", "as_of": "at", "key": "id", "match": "id"})).is_none());
     }
 }

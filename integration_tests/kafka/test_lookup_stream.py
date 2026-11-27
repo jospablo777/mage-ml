@@ -1,7 +1,8 @@
 """
 A lookup block in an exported service: each order read from Kafka gets its product's row
 from PostgreSQL, numbers with every digit, and an order whose product has no row goes on
-with product null.
+with product null. As a temporal join (ADR-0043), each order gets the product's version
+valid when it was ordered, from a history the sink's history mode wrote.
 """
 import json
 import textwrap
@@ -21,7 +22,15 @@ from integration_tests.kafka.test_stream_conformance import wait_for
 ORDERS = 500
 
 
-def make_pipeline(project, topics, schema):
+LOOKUP_QUERY = """
+          query: SELECT id, name, price FROM {schema}.products WHERE id::text = ANY($1)"""
+LOOKUP_AS_OF = """
+          history: {schema}.products_history
+          as_of: ordered_at
+          max_wait_seconds: 2"""
+
+
+def make_pipeline(project, topics, schema, reads=LOOKUP_QUERY):
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.constants import PipelineType
     from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -52,8 +61,7 @@ def make_pipeline(project, topics, schema):
             database: "{{{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}}}"
             username: "{{{{ env_var('MAGE_TEST_POSTGRES_USER') }}}}"
             password: "{{{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}}}"
-            sslmode: disable
-          query: SELECT id, name, price FROM {schema}.products WHERE id::text = ANY($1)
+            sslmode: disable{reads.format(schema=schema)}
           key: product_id
           match: id
           into: product
@@ -117,6 +125,84 @@ def test_each_order_gets_its_product(kafka_bootstrap, mage_project, pg, schema, 
         raw = [r.value.decode() for rs in consumer.poll(timeout_ms=5000).values() for r in rs]
         consumer.close()
         assert any('12345678901234567890.0123456789' in text for text in raw)
+    except AssertionError:
+        if service and service.log.is_file():
+            print(service.log.read_text()[-6000:])
+        raise
+    finally:
+        if service and service.process and service.process.poll() is None:
+            service.stop()
+        pipeline.delete()
+
+
+def test_each_order_gets_the_products_version_when_it_was_ordered(
+    kafka_bootstrap, mage_project, postgres_settings, pg, schema, tmp_path,
+):
+    from kafka import KafkaProducer
+
+    from mage_ai.streaming.sinks.postgres import PostgresSink
+
+    history = PostgresSink(dict(
+        connector_type='postgres', host=postgres_settings['host'],
+        port=postgres_settings['port'], database=postgres_settings['dbname'],
+        username=postgres_settings['user'], password=postgres_settings['password'],
+        schema=schema, table='products_history', history=dict(key='id'),
+    ))
+    history.batch_write([
+        dict(id=1, name='tea', price=10, _mage_operation='insert',
+             _mage_commit_time='2026-11-01T00:00:00Z'),
+        dict(id=1, name='tea', price=12, _mage_operation='update',
+             _mage_commit_time='2026-11-03T00:00:00Z'),
+        dict(id=2, name='cake', price=3, _mage_operation='insert',
+             _mage_commit_time='2026-11-01T00:00:00Z'),
+        dict(id=2, name='cake', price=3, _mage_operation='delete',
+             _mage_commit_time='2026-11-04T00:00:00Z'),
+    ])
+    history.destroy()
+    topics = [f'it_orders_{uuid.uuid4().hex[:8]}', f'it_enriched_{uuid.uuid4().hex[:8]}']
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(t, num_partitions=1, replication_factor=1) for t in topics])
+    admin.close()
+    pipeline = make_pipeline(mage_project, topics, schema, reads=LOOKUP_AS_OF)
+    orders = [
+        dict(order=0, product_id=1, ordered_at='2026-11-02T10:00:00Z'),
+        dict(order=1, product_id=1, ordered_at='2026-11-03T10:00:00Z'),
+        dict(order=2, product_id=2, ordered_at='2026-11-02T00:00:00Z'),
+        dict(order=3, product_id=2, ordered_at='2026-11-04T00:00:00Z'),
+        dict(order=4, product_id=1, ordered_at='2026-10-01T00:00:00Z'),
+    ]
+    service = None
+    try:
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        producer = KafkaProducer(bootstrap_servers=kafka_bootstrap,
+                                 value_serializer=lambda v: json.dumps(v).encode())
+        for order in orders:
+            producer.send(topics[0], order)
+        producer.flush()
+        service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        service.start()
+
+        def enriched(count):
+            assert service.process.poll() is None, service.log.read_text()[-4000:]
+            found = read_committed(kafka_bootstrap, topics[1])
+            return found if len(found) >= count else None
+
+        got = {o['order']: o['product'] for o in wait_for(lambda: enriched(5), timeout=180)}
+        assert {k: v and v['price'] for k, v in got.items()} == {
+            0: 10, 1: 12, 2: 3, 3: None, 4: None,
+        }, got
+        assert got[0]['valid_to'].startswith('2026-11-03')
+
+        # Past the history's progress (11-04): the batch waits max_wait_seconds, then
+        # joins the version there is.
+        producer.send(topics[0], dict(order=5, product_id=1,
+                                      ordered_at='2026-12-01T00:00:00Z'))
+        producer.flush()
+        producer.close()
+        got = {o['order']: o['product'] for o in wait_for(lambda: enriched(6), timeout=60)}
+        assert got[5]['price'] == 12
+        assert 'is not through this batch' in service.log.read_text()
     except AssertionError:
         if service and service.log.is_file():
             print(service.log.read_text()[-6000:])

@@ -688,6 +688,35 @@ sslrootcert: "{{ env_var('PG_CA') }}"   # a file, PEM, or base64 PEM
   table from MageML and from a service. A new field adds a nullable column.
 - With `unique_constraints`, a key that appears twice in one batch keeps its last message.
 
+With `history`, the table keeps every version of each key (a type 2 slowly changing
+dimension), for [temporal joins](../guides/streaming/introduction.md#temporal-joins) and
+point-in-time queries:
+
+```yaml
+history:
+  key: [id]                   # the columns of a row's key
+  time: _mage_commit_time     # when a version starts: ISO 8601 text or Unix milliseconds
+```
+
+| id | price | valid_from | valid_to | _mage_deleted |
+| --- | --- | --- | --- | --- |
+| 1 | 10.5 | 2026-11-01 | 2026-11-02 | false |
+| 1 | 11 | 2026-11-02 | 2026-11-03 | false |
+| 1 | 12 | 2026-11-03 | | false |
+| 2 | 3 | 2026-11-01 | 2026-11-04 | false |
+| 2 | 3 | 2026-11-04 | | true |
+
+- Each message is a version that starts at its `time` and ends where its key's next version
+  starts; `valid_to` is null while it is current. A change capture delete is a version
+  marked `_mage_deleted`.
+- A unique index on the key and `valid_from` makes a replayed batch write nothing twice, and
+  `valid_to` is set again for the batch's keys, so a change that arrives late lands in its
+  place.
+- The same transaction keeps how far the history is in `mageml_history_progress` (the table
+  and its latest time), which temporal joins wait on. With a change capture source, changes
+  come in commit order, so that time is exact.
+- `history` takes no `unique_constraints`. Editor runs write the same versions.
+
 ### ClickHouse
 
 MageML's ClickHouse sink settings export as they are: the `io_config.yaml` profile gives the

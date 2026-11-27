@@ -370,6 +370,54 @@ lookup:
 
 Lookups run on the engine, in exported services and in the Run tab, as windows do.
 
+### Temporal joins
+
+An order should get the product's price when it was ordered, not today's. A lookup of a
+history table does that: `as_of` names the message's time, and each message gets the
+version of its key that was valid then.
+
+The history comes from a stream of the table's changes into a PostgreSQL sink with
+`history` (see [stream services](../../production/stream-services.md#postgresql)):
+
+```yaml
+# Pipeline 1: products' changes, read by change capture, kept as versions.
+connector_type: postgres
+host: "{{ env_var('PG_HOST') }}"
+database: shop
+username: writer
+password: "{{ env_var('PG_PASSWORD') }}"
+table: products_history
+history:
+  key: [id]
+  time: _mage_commit_time
+```
+
+```yaml
+# Pipeline 2: orders, each with its product as of its time.
+lookup:
+  connection: {host: "{{ env_var('PG_HOST') }}", database: shop, username: reader,
+               password: "{{ env_var('PG_PASSWORD') }}"}
+  history: products_history
+  key: product_id
+  match: id
+  as_of: ordered_at       # ISO 8601 text or Unix milliseconds
+  into: product
+  max_wait_seconds: 30    # how long a batch waits for the history to reach its times
+```
+
+| ordered_at | product's version | price |
+| --- | --- | --- |
+| 2026-11-02 | valid 11-01 to 11-03 | 10 |
+| 2026-11-04 | valid from 11-03 | 12 |
+| 2026-10-01 | none yet | `null` |
+
+- Each batch is one query: the keys and times joined on the key and each version's
+  `valid_from` and `valid_to`. A deleted key has no version after its delete.
+- Before it reads, a batch waits until the history is through its latest time (the history
+  keeps how far it is), so an order never joins a version that a change not yet written
+  would have ended. After `max_wait_seconds` it joins what there is, and the log says so.
+- Without `as_of`, a history lookup reads each key's current version, cached as a query's.
+
 ## Keyed state
 
 A stream block in Python, Rust or R can keep a value per key between batches: a count per

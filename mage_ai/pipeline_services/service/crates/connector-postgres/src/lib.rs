@@ -13,7 +13,8 @@
 //! (cleaned, lower case, reserved words prefixed with `_`), so the same stream writes the
 //! same table from MageML and from a service. With `unique_constraints`, rows are upserts
 //! (`unique_conflict_method`: `IGNORE`, the default, or `UPDATE`), so a replayed batch writes
-//! nothing twice.
+//! nothing twice. With `history`, the table keeps every version of each key, for temporal
+//! joins ([`history`]).
 //!
 //! Settings follow MageML's PostgreSQL sink: `host`, `port`, `database`, `username`,
 //! `password`, `schema`, `table`, `unique_constraints`, `unique_conflict_method`,
@@ -21,6 +22,7 @@
 //! (a file, PEM, or base64 PEM), `connect_timeout`.
 
 pub mod cdc;
+pub mod history;
 pub mod lookup;
 mod replication;
 pub mod transaction;
@@ -110,6 +112,8 @@ pub struct Settings {
     sslmode: Option<String>,
     sslrootcert: Option<String>,
     connect_timeout: Option<u64>,
+    /// History mode: versions of each key (history.rs).
+    history: Option<history::History>,
 }
 
 impl Settings {
@@ -137,6 +141,13 @@ impl Settings {
             .unwrap_or_else(|| "5432".into())
             .parse::<u16>()
             .map_err(|_| ConnectorError::fatal("PostgreSQL port is a number."))?;
+        let history = history::History::from_config(config)?;
+        if history.is_some() && !unique.is_empty() {
+            return Err(ConnectorError::fatal(
+                "PostgreSQL history keeps every version of a key; it takes no \
+                 unique_constraints.",
+            ));
+        }
         Ok(Settings {
             host: need("host")?,
             port,
@@ -155,6 +166,7 @@ impl Settings {
             sslmode: text(config, "sslmode"),
             sslrootcert: text(config, "sslrootcert"),
             connect_timeout: text(config, "connect_timeout").and_then(|t| t.parse().ok()),
+            history,
         })
     }
 
@@ -423,6 +435,11 @@ impl PgSink {
                     .map_err(|e| classify("adding columns", e))?;
                 columns = Self::columns(client, settings).await?;
             }
+        }
+        if let Some(history) = &settings.history {
+            return self
+                .write_history(client, history, columns, &keys, &rows, values)
+                .await;
         }
         let names: Vec<&String> = keys.keys().collect();
         let types: Vec<&str> = names
@@ -770,7 +787,7 @@ impl Sink for PgSink {
 
     fn capabilities(&self) -> SinkCapabilities {
         SinkCapabilities {
-            idempotent: !self.settings.unique.is_empty(),
+            idempotent: !self.settings.unique.is_empty() || self.settings.history.is_some(),
             transactional: true,
         }
     }

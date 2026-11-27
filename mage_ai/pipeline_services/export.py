@@ -874,7 +874,7 @@ CLICKHOUSE_EXPORT_SETTINGS = {
 POSTGRES_SINK_SETTINGS = {
     'host', 'port', 'database', 'username', 'password', 'schema', 'table',
     'unique_constraints', 'unique_conflict_method', 'auto_clean_name', 'case_sensitive',
-    'allow_reserved_words', 'sslmode', 'sslrootcert', 'connect_timeout',
+    'allow_reserved_words', 'sslmode', 'sslrootcert', 'connect_timeout', 'history',
 }
 # MageML's PostgreSQL change capture source, and the root certificate services also take.
 POSTGRES_SOURCE_SETTINGS = {
@@ -1332,6 +1332,20 @@ def _postgres_sink_settings(config: Dict, where: str, problems: List[str]) -> Di
     method = str(config.get('unique_conflict_method') or 'IGNORE').upper()
     if method not in ('IGNORE', 'UPDATE'):
         problems.append(f'{where}: unique_conflict_method is IGNORE or UPDATE.')
+    history = config.get('history')
+    if history is not None:
+        key = history.get('key') if isinstance(history, dict) else None
+        keys = [key] if isinstance(key, str) else key
+        if not isinstance(keys, list) or not keys or not all(
+            isinstance(k, str) and k for k in keys
+        ):
+            problems.append(
+                f'{where}: history is {{key: [id], time: _mage_commit_time}}, the columns of a '
+                "row's key and the field its version starts at."
+            )
+        if config.get('unique_constraints'):
+            problems.append(f'{where}: history keeps every version of a key; it takes no '
+                            'unique_constraints.')
     return {k: v for k, v in config.items() if k in POSTGRES_SINK_SETTINGS}
 
 
@@ -2346,10 +2360,11 @@ def _is_lookup(pipeline, block) -> bool:
 
 LOOKUP_SETTINGS = {
     'connection', 'query', 'key', 'match', 'into', 'cache_seconds', 'cache_rows', 'missing',
+    'history', 'as_of', 'max_wait_seconds',
 }
 LOOKUP_CONNECTION_SETTINGS = {
     'host', 'port', 'database', 'username', 'user', 'password', 'sslmode', 'sslrootcert',
-    'connect_timeout',
+    'connect_timeout', 'schema',
 }
 LOOKUP_MISSING = ('keep', 'drop', 'dead_letter')
 
@@ -2373,6 +2388,10 @@ def _lookup_entry(pipeline, block, project: Path, prefix: str, capture_: Capture
           into: product            # optional: without it the row's columns merge
           cache_seconds: 300
           missing: keep            # keep, drop or dead_letter
+
+    A temporal join reads a history table (a PostgreSQL sink's `history` mode) instead of a
+    query: `history: products_history` and `as_of: ordered_at` give each message the version
+    valid at its time, after waiting up to `max_wait_seconds` for the history to reach it.
     """
     where = f'{prefix}, block {block.uuid}'
     path = Path(block.file_path).resolve()
@@ -2408,9 +2427,25 @@ def _lookup_entry(pipeline, block, project: Path, prefix: str, capture_: Capture
             f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
         )
     query = lookup.get('query')
-    if not isinstance(query, str) or '$1' not in query:
+    history = lookup.get('history')
+    if history is not None:
+        if not isinstance(history, str) or not history:
+            problems.append(f'{where}: lookup history is a history table, such as '
+                            'products_history.')
+        if query:
+            problems.append(f'{where}: lookup reads a query or a history table, not both.')
+    elif not isinstance(query, str) or '$1' not in query:
         problems.append(f'{where}: the lookup query reads the keys as $1, a text array, such as '
                         'SELECT id, name FROM products WHERE id::text = ANY($1).')
+    as_of = lookup.get('as_of')
+    if as_of is not None:
+        if not isinstance(as_of, str) or not as_of:
+            problems.append(f'{where}: lookup as_of is the message field with its time.')
+        if history is None:
+            problems.append(f'{where}: lookup as_of reads a history table: set history.')
+    wait = lookup.get('max_wait_seconds', 30)
+    if isinstance(wait, bool) or not isinstance(wait, (int, float)) or wait < 0:
+        problems.append(f'{where}: lookup max_wait_seconds is a number of seconds, 0 or more.')
     for key in ('key', 'match'):
         if not isinstance(lookup.get(key), str) or not lookup.get(key):
             problems.append(f'{where}: lookup needs {key}: the '

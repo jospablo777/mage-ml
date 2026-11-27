@@ -1061,11 +1061,18 @@ fn region_session(
                 .or_else(|| std::env::var(name).ok())
         };
         spec.connection = io_config::render(&spec.connection, &lookup);
-        let fetch = mage_connector_postgres::lookup::PgLookup::new(
-            &spec.connection,
-            &spec.query,
-            &spec.match_column,
-        )
+        let fetch = match &spec.history {
+            Some(table) => mage_connector_postgres::lookup::PgLookup::history(
+                &spec.connection,
+                table,
+                &spec.match_column,
+            ),
+            None => mage_connector_postgres::lookup::PgLookup::new(
+                &spec.connection,
+                &spec.query,
+                &spec.match_column,
+            ),
+        }
         .map_err(|e| named(e.message))?;
         return Ok(Box::new(
             crate::stream_lookup::LookupSession::new(&block.uuid, spec, Box::new(fetch), Some(log))

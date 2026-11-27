@@ -577,6 +577,67 @@ class LookupExportTest(StreamExportTestCase):
         self.assertIsNotNone(pipeline['stream']['errors'].get('dead_letter'))
 
 
+class TemporalJoinExportTest(StreamExportTestCase):
+    """A lookup of a history table as of each message's time, and the sink that keeps one."""
+
+    looked_up = LookupExportTest.looked_up
+    AS_OF = LookupExportTest.LOOKUP.replace(
+        'query: SELECT id, name FROM products WHERE id::text = ANY($1)',
+        'history: products_history\n          as_of: ordered_at\n          max_wait_seconds: 5',
+    )
+
+    def test_a_lookup_as_of_exports_its_history_and_time(self):
+        lookup = self.looked_up(self.AS_OF)
+
+        pipeline = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines'][0]
+
+        [entry] = [b for b in pipeline['blocks'] if b['uuid'] == lookup.uuid]
+        self.assertEqual(
+            {k: entry['lookup'][k] for k in ('history', 'as_of', 'max_wait_seconds')},
+            dict(history='products_history', as_of='ordered_at', max_wait_seconds=5),
+        )
+
+    def test_as_of_needs_a_history_and_a_history_no_query(self):
+        self.looked_up(self.AS_OF
+                       .replace('history: products_history', 'history: products_history\n'
+                                '          query: SELECT 1 WHERE $1 IS NULL')
+                       .replace('max_wait_seconds: 5', 'max_wait_seconds: -1'))
+        problems = self.problems()
+        self.assertIn('a query or a history table, not both', problems)
+        self.assertIn('max_wait_seconds is a number of seconds', problems)
+
+    def test_the_postgres_sink_keeps_a_history(self):
+        sink = '''
+connector_type: postgres
+host: db
+database: shop
+username: writer
+password: "{{ env_var('PG_PASSWORD') }}"
+table: products_history
+history:
+  key: [id]
+'''
+        self.stream(sink=sink)
+        [pipeline] = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines']
+        self.assertEqual(pipeline['stream']['sinks'][0]['config']['history'], dict(key=['id']))
+
+    def test_a_history_without_a_key_or_with_unique_constraints_is_refused(self):
+        self.stream(sink='''
+connector_type: postgres
+host: db
+database: shop
+username: writer
+password: "{{ env_var('PG_PASSWORD') }}"
+table: products_history
+unique_constraints: [id]
+history:
+  time: changed_at
+''')
+        problems = self.problems()
+        self.assertIn("the columns of a row's key", problems)
+        self.assertIn('it takes no unique_constraints', problems)
+
+
 class StreamSqlExportTest(StreamExportTestCase):
     """A stream's SQL transformer runs in the engine (its sql feature), without Python."""
 
