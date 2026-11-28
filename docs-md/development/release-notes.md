@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### Streams on Spark
+
+- `mage spark-stream` runs a streaming pipeline on Spark Structured Streaming over Spark
+  Connect: its Kafka source, Python stream blocks (by the stream engine's own worker code,
+  in `mapInArrow`), Kafka sinks and a Kafka dead-letter sink. Positions live in Spark's
+  checkpoint. What Spark does not run yet is refused with the list; `--check` says so
+  without starting.
+- `mage export spark-stream` writes a container that runs it without MageML.
+
+### Datasets
+
+- The **Datasets** page names the block outputs people rely on (`datasets.yaml`): owner,
+  description, when it was published and by which run, data through its time column,
+  fresh or stale against `max_age`, checks, columns, the datasets it reads and feeds, and
+  the output in ColumnAtlas.
+- A dataset that goes stale sends its pipeline's notifications once, and once more when
+  it is fresh again.
+
+### Change previews
+
+- See what a change does to the data before it ships: the blocks whose code changed since
+  a completed run, and those after them, run again on that run's stored inputs, and their
+  outputs are compared row by row (`mage preview`, the pipeline's **Previews** page).
+  Exporters, sensors and SQL blocks never run. Each output opens in ColumnAtlas, the run's
+  or the preview's.
+
+### Guided ingestion
+
+- The **Ingestion** page sets up a PostgreSQL to PostgreSQL sync: it checks both servers,
+  shows a sample, says what the sync will do and creates a streaming pipeline that copies
+  the tables, then follows every change. Passwords become project secrets. A table that
+  would break the source once published (`REPLICA IDENTITY NOTHING`) cannot be chosen.
+- While the first copy runs, the stream's lag is the rows left to copy.
+
+### Streams
+
+- Apache Iceberg sink (REST catalogs), with `create_table`, `partition_by` and exactly
+  once from Kafka.
+- Temporal joins: the PostgreSQL sink keeps a table's history of versions (`history`), and
+  a lookup reads the version of each key valid at a message's time (`as_of`). A history fed
+  by PostgreSQL changes stays current while its table is idle.
+
+### Scheduling
+
+- A block's `cpu` now waits for free CPUs, as memory and GPUs do; the project's `cpus`
+  defaults to the CPUs the scheduler may run on.
+
+### Incidents
+
+- A failed run of a partition lists the same partition of its upstream pipelines, and the
+  monitors that failed with their checks.
+
 ### R and Rust environments
 
 - A new environment takes the packages or crates to add, the R version and a CRAN snapshot
