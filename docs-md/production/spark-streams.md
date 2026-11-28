@@ -52,13 +52,13 @@ restart it. Its `README.md` lists the variables to set.
 | `batch_size` | `maxOffsetsPerTrigger` |
 | `timeout_ms` | the trigger interval |
 | Python stream transformers: the message list or a DataFrame, pipeline variables | `mapInArrow`, by the engine's worker code |
-| One Kafka sink: `bootstrap_server`, `topic`, `security_protocol`, `sasl_config` | `writeStream.format("kafka")` |
+| Kafka sinks: `bootstrap_server`, `topic`, `security_protocol`, `sasl_config` | one: `writeStream.format("kafka")`; several: `foreachBatch`, each sink its block's messages |
+| A Kafka sink with `dead_letter: true` | the messages a block fails on, as they came, with `mage-error` and `mage-stream` headers |
 | The source's position, committed after the sinks | Spark's checkpoint, written after the sink |
 
 `mage spark-stream --check` says whether a pipeline can run, without starting it. A pipeline
-with anything else is refused with the list: other sources and sinks, more than one sink,
-dead letters, exactly-once delivery, event time, keyed state, SQL, window, lookup, Rust and
-R stream blocks. Those run on the engine. Broadcast values are set through the stream
+with anything else is refused with the list: other sources and sinks, exactly-once
+delivery, event time, keyed state, SQL, window, lookup, Rust and R stream blocks. Those run on the engine. Broadcast values are set through the stream
 service's API, which Spark does not have: blocks read an empty `kwargs['broadcast']`.
 
 ## Positions
@@ -76,6 +76,10 @@ that fails is read again.
 - Its Python workers run your Python's minor version (Spark refuses a Python UDF
   otherwise) with `pyarrow`, and the packages your blocks import. The command checks the
   version and pyarrow when it starts the query.
+- With several sinks or a dead-letter sink, a `foreachBatch` function writes them; it runs
+  in a Python worker that is itself a Spark Connect client, so the workers also need
+  `pyspark-client`'s libraries (`grpcio`, `grpcio-status`, `googleapis-common-protos`,
+  `protobuf`, `zstandard`).
 - Settings that read variables (`{{ env_var('KAFKA_BOOTSTRAP') }}`, secrets) are filled in
   from the environment of the command, and `--env` sets or overrides them: the addresses
   Spark reaches can differ from yours.

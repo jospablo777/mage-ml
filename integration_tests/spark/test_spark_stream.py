@@ -3,16 +3,22 @@ Streaming pipelines on Spark Structured Streaming (ADR-0047), on a Spark Connect
 (services/spark) and Kafka: the pipeline test_exported_stream runs on the engine, with the
 same messages and the same output, its Python block run by the engine's worker code in
 mapInArrow. A restart continues from the checkpoint, a failing block stops the query with
-the block's name and reason, and the export runs the stream from a container of its own.
+the block's name and reason, several sinks and a dead-letter sink each get their messages,
+and the export runs the stream from a container of its own.
 """
 import subprocess
+import textwrap
 import time
 import uuid
+from pathlib import Path
 from urllib.parse import urlparse
 
 from kafka import KafkaConsumer
+from kafka.admin import KafkaAdminClient, NewTopic
 
 from integration_tests.kafka.test_exported_stream import (  # noqa: F401 - fixtures
+    SINK,
+    TRANSFORM,
     consume,
     produce,
     stream_pipeline,
@@ -145,3 +151,51 @@ def test_the_export_runs_the_stream_from_its_own_container_and_stops_on_sigterm(
         out.close()
         subprocess.run(['docker', 'rm', '-f', container], capture_output=True)
         subprocess.run(['docker', 'rmi', '-f', image], capture_output=True)
+
+
+def test_several_sinks_and_dead_letters_each_get_their_messages(
+    kafka_bootstrap, spark_remote, mage_project, stream_pipeline, topics,  # noqa: F811
+):
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    pipeline, _ = stream_pipeline
+    extra = [f'it_copy_{uuid.uuid4().hex[:10]}', f'it_dead_{uuid.uuid4().hex[:10]}']
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(n, num_partitions=1, replication_factor=1) for n in extra])
+    double = pipeline.get_block(f'{pipeline.uuid}_double')
+    for suffix, topic, more in [('copy', extra[0], ''), ('dead', extra[1], 'dead_letter: true\n')]:
+        block = Block.create(f'{pipeline.uuid}_{suffix}', 'data_exporter', mage_project,
+                             language='yaml', pipeline=pipeline)
+        Path(block.file_path).write_text(textwrap.dedent(SINK % dict(topic=topic)) + more)
+        pipeline.add_block(block, upstream_block_uuids=[double.uuid])
+    pipeline = Pipeline.get(pipeline.uuid, repo_path=mage_project)
+    pipeline.variables = dict(reject=[7])
+    pipeline.save()
+    consumers = [KafkaConsumer(t, bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+                               enable_auto_commit=False, group_id=None)
+                 for t in (topics[1], *extra)]
+    produce(kafka_bootstrap, topics[0], range(20))
+
+    query = started(mage_project, pipeline, spark_remote, f'/checkpoints/{uuid.uuid4().hex}')
+    try:
+        kept = expected(i for i in range(20) if i != 7)
+        for consumer in consumers[:2]:
+            got = consume(consumer, len(kept))
+            assert sorted((m['id'], m['doubled']) for m in got) == kept
+        dead = []
+        deadline = time.time() + 60
+        while not dead and time.time() < deadline:
+            for records in consumers[2].poll(timeout_ms=500).values():
+                dead.extend(records)
+        assert [r.value for r in dead] == [b'{"id": 7, "amount": 7}']
+        headers = dict(dead[0].headers)
+        assert headers['mage-stream'] == pipeline.uuid.encode()
+        assert b'message 7 is not accepted' in headers['mage-error']
+        assert dead[0].key == b'7'
+    finally:
+        query.stop()
+        for consumer in consumers:
+            consumer.close()
+        admin.delete_topics(extra)
+        admin.close()

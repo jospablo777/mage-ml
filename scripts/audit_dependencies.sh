@@ -65,6 +65,8 @@ rust_audit() {
   # chrono unmaintained (RUSTSEC-2026-0543), and through it chrono-tz (RUSTSEC-2026-0555)
   # and humantime (RUSTSEC-2026-0542), 2026-11-18: notices, no known vulnerability. Polars
   # 0.55.2 and object_store depend on chrono; MageML's own uses can move to jiff.
+  # paste unmaintained (RUSTSEC-2024-0436), 2026-11-28: a build-time proc macro of arrow's
+  # parquet 58 (the engine's iceberg feature), no known vulnerability, no fixed release.
   local lock
   for lock in $(git ls-files '*Cargo.lock'); do
     echo "== Rust: $lock"
@@ -72,7 +74,8 @@ rust_audit() {
       --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 \
       --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2025-0134 \
       --ignore RUSTSEC-2026-0381 \
-      --ignore RUSTSEC-2026-0543 --ignore RUSTSEC-2026-0555 --ignore RUSTSEC-2026-0542 || status=1
+      --ignore RUSTSEC-2026-0543 --ignore RUSTSEC-2026-0555 --ignore RUSTSEC-2026-0542 \
+      --ignore RUSTSEC-2024-0436 || status=1
   done
 }
 

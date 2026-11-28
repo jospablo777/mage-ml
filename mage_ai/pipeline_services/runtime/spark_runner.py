@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional
 
 HERE = Path(__file__).parent
+# The target of a dead letter in the blocks' output; a sink's is the block it follows.
+DEAD_LETTER = '__dead_letter__'
+OUTPUT_SCHEMA = ('target string, key binary, value binary, '
+                 'headers array<struct<key: string, value: binary>>')
 LOGIN_MODULES = {
     'PLAIN': 'org.apache.kafka.common.security.plain.PlainLoginModule',
     'SCRAM-SHA-256': 'org.apache.kafka.common.security.scram.ScramLoginModule',
@@ -106,10 +110,10 @@ def source_options(plan: Dict[str, Any], environ: Mapping[str, str]) -> Dict[str
     return options
 
 
-def sink_options(plan: Dict[str, Any], environ: Mapping[str, str]) -> Dict[str, str]:
-    """Spark's Kafka writer options for the plan's sink."""
-    where = f"Sink {plan['sink']['name']}"
-    config = resolve(plan['sink']['config'], environ, where)
+def sink_options(sink: Dict[str, Any], environ: Mapping[str, str]) -> Dict[str, str]:
+    """Spark's Kafka writer options for one of the plan's sinks."""
+    where = f"Sink {sink['name']}"
+    config = resolve(sink['config'], environ, where)
     if not config.get('bootstrap_server') or not config.get('topic'):
         raise SparkRunError(f'{where} needs bootstrap_server and topic.')
     return {'kafka.bootstrap.servers': str(config['bootstrap_server']),
@@ -123,13 +127,18 @@ def trigger_seconds(plan: Dict[str, Any]) -> float:
 
 def blocks_function(plan: Dict[str, Any], worker_source: str) -> Callable:
     """
-    The function mapInArrow runs on each partition's batches: the Kafka values in, the sink's
-    messages out as JSON, made by the engine's worker code (runtime/worker.py). Everything it
-    needs travels in it, so Spark's Python workers need only pyarrow.
+    The function mapInArrow runs on each partition's batches: Kafka's key, value and headers
+    in; out, each sink's messages as JSON (`target`: the block it follows), made by the
+    engine's worker code (runtime/worker.py). With a dead-letter sink, a message a block fails
+    on goes out as it came, with `mage-stream` and `mage-error` headers, as on the engine;
+    when every message of a batch fails, or a block does not load, the batch fails. Everything
+    it needs travels in it, so Spark's Python workers need only pyarrow.
     """
     chain = [dict(b) for b in plan['chain']]
-    output = plan['output']
+    outputs = list(dict.fromkeys(s['after'] for s in plan['sinks']))
     variables = dict(plan.get('variables') or {})
+    isolate = bool(plan.get('dead_letter'))
+    stream_name = plan['pipeline_uuid'].encode()
 
     def run(batches: Iterator) -> Iterator:
         import hashlib
@@ -164,33 +173,54 @@ def blocks_function(plan: Dict[str, Any], worker_source: str) -> Callable:
                 uuid=block['uuid'], file=files[key], sha256=key, upstream=block['upstream'],
                 configuration=block['configuration'],
             ))
+        header = pa.struct([('key', pa.string()), ('value', pa.binary())])
+        schema = pa.schema([('target', pa.string()), ('key', pa.binary()),
+                            ('value', pa.binary()), ('headers', pa.list_(header))])
         for batch in batches:
+            raw = batch.column('value').to_pylist()
+            if not raw:
+                continue
             messages = []
-            for value in batch.column('value').to_pylist():
+            for value in raw:
                 text = value.decode('utf-8', errors='replace') if value is not None else ''
                 try:
                     messages.append(json_module.loads(text))
                 except ValueError:
                     # Text that is not JSON reaches the blocks as text, as on the engine.
                     messages.append(text)
-            if not messages:
-                continue
             try:
                 result = worker.run_stream_batch(dict(
-                    chain=request_chain, messages=messages, outputs=[output],
-                    kwargs=variables,
+                    chain=request_chain, messages=messages, outputs=outputs,
+                    kwargs=variables, isolate=isolate,
                 ))
             except worker.BlockError as error:
                 raise RuntimeError(
                     f'Block {error.block_uuid} failed ({error.phase}): {error}\n{error.details}'
                 ) from None
-            values = [
-                json_module.dumps(m, allow_nan=False, default=worker._json_default).encode()
-                for m in result['outputs'].get(output) or []
-            ]
-            yield pa.RecordBatch.from_pydict(
-                {'value': values}, schema=pa.schema([('value', pa.binary())]),
-            )
+            rows = dict(target=[], key=[], value=[], headers=[])
+            for target in outputs:
+                for message in result['outputs'].get(target) or []:
+                    rows['target'].append(target)
+                    rows['key'].append(None)
+                    rows['value'].append(json_module.dumps(
+                        message, allow_nan=False, default=worker._json_default).encode())
+                    rows['headers'].append(None)
+            if result.get('failures'):
+                keys = batch.column('key').to_pylist() if 'key' in batch.schema.names \
+                    else [None] * len(raw)
+                headers = batch.column('headers').to_pylist() \
+                    if 'headers' in batch.schema.names else [None] * len(raw)
+                for failure in result['failures']:
+                    row = failure['row']
+                    error = f"{failure.get('block_uuid') or 'a block'}: {failure['message']}"
+                    rows['target'].append(DEAD_LETTER)
+                    rows['key'].append(keys[row])
+                    rows['value'].append(raw[row])
+                    rows['headers'].append(list(headers[row] or []) + [
+                        dict(key='mage-stream', value=stream_name),
+                        dict(key='mage-error', value=error.encode()),
+                    ])
+            yield pa.RecordBatch.from_pydict(rows, schema=schema)
 
     return run
 
@@ -221,24 +251,54 @@ def start(plan: Dict[str, Any], remote: str, checkpoint: str,
                             'positions there.')
     if worker_source is None:
         worker_source = (HERE / 'worker.py').read_text()
-    source, sink = source_options(plan, environ), sink_options(plan, environ)
+    source = source_options(plan, environ)
+    targets = [(s['after'], sink_options(s, environ)) for s in plan['sinks']]
+    if plan.get('dead_letter'):
+        targets.append((DEAD_LETTER, sink_options(plan['dead_letter'], environ)))
     session = spark_session_class()
     spark = session.builder.remote(remote).getOrCreate()
-    reader = spark.readStream.format('kafka')
+    reader = spark.readStream.format('kafka').option('includeHeaders', 'true')
     for key, value in source.items():
         reader = reader.option(key, value)
-    frame = reader.load().select('value').mapInArrow(
-        blocks_function(plan, worker_source), 'value binary',
+    frame = reader.load().select('key', 'value', 'headers').mapInArrow(
+        blocks_function(plan, worker_source), OUTPUT_SCHEMA,
     )
-    writer = frame.writeStream.format('kafka').option('checkpointLocation', checkpoint)
-    for key, value in sink.items():
-        writer = writer.option(key, value)
+    if len(targets) == 1:
+        writer = frame.select('value').writeStream.format('kafka')
+        for key, value in targets[0][1].items():
+            writer = writer.option(key, value)
+    else:
+        writer = frame.writeStream.foreachBatch(write_targets(targets))
     query = (
-        writer.queryName(plan['pipeline_uuid'])
+        writer.option('checkpointLocation', checkpoint)
+        .queryName(plan['pipeline_uuid'])
         .trigger(processingTime=f'{trigger_seconds(plan)} seconds')
         .start()
     )
     return spark, query
+
+
+def write_targets(targets):
+    """
+    foreachBatch's function for several sinks or dead letters: each target's rows written to
+    its topic. A batch that fails is written again, to every sink: at least once, as on the
+    engine.
+    """
+    def write(frame, _batch_id):
+        frame.persist()
+        try:
+            for target, options in targets:
+                rows = frame.where(frame.target == target)
+                rows = rows.select('key', 'value', 'headers') if target == DEAD_LETTER \
+                    else rows.select('value')
+                writer = rows.write.format('kafka')
+                for key, value in options.items():
+                    writer = writer.option(key, value)
+                writer.save()
+        finally:
+            frame.unpersist()
+
+    return write
 
 
 def progress_line(progress: Optional[Dict[str, Any]]) -> Optional[str]:

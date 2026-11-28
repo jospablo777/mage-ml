@@ -42,12 +42,13 @@ class SparkPlanTest(StreamExportTestCase):
             'org.apache.kafka.common.security.plain.PlainLoginModule required '
             'username="ana" password="p\\"w";',
         )
-        self.assertEqual(spark_runner.sink_options(stream, ENVIRON),
+        self.assertEqual(spark_runner.sink_options(stream['sinks'][0], ENVIRON),
                          {'kafka.bootstrap.servers': 'kafka:9092', 'topic': 'orders_clean'})
         self.assertEqual(spark_runner.trigger_seconds(stream), 0.2)
         self.assertEqual([b['uuid'] for b in stream['chain']], [f'{self.pipeline.uuid}_clean'])
         self.assertIn('@transformer', stream['chain'][0]['code'])
-        self.assertEqual(stream['output'], f'{self.pipeline.uuid}_clean')
+        self.assertEqual(stream['sinks'][0]['after'], f'{self.pipeline.uuid}_clean')
+        self.assertIsNone(stream['dead_letter'])
         self.assertIn('checkpoint', spark_stream.notes(stream)[0])
         # The plan keeps the references; the password is filled in when it starts.
         self.assertNotIn('p\\"w', json.dumps(stream))
@@ -79,7 +80,6 @@ class SparkPlanTest(StreamExportTestCase):
         with self.assertRaises(SparkStreamError) as caught:
             spark_stream.plan(self.repo_path, self.pipeline.uuid)
         self.assertIn('cannot run on Spark as it runs on the engine', str(caught.exception))
-        self.assertIn('The stream has 2 sinks', str(caught.exception))
         self.assertIn('is stdout; Spark writes Kafka', str(caught.exception))
 
 
@@ -93,7 +93,7 @@ class SparkPlanTest(StreamExportTestCase):
             'Dockerfile', 'README.md', 'plan.json', 'spark_runner.py', 'worker.py',
         ])
         plan = json.loads((folder / 'plan.json').read_text())
-        self.assertEqual(plan['output'], f'{self.pipeline.uuid}_clean')
+        self.assertEqual(plan['sinks'][0]['after'], f'{self.pipeline.uuid}_clean')
         self.assertIn('{"env": "KAFKA_PASSWORD"}', json.dumps(plan))
         dockerfile = (folder / 'Dockerfile').read_text()
         self.assertIn('FROM python:3.12-slim', dockerfile)
@@ -120,7 +120,7 @@ class DifferencesTest(TestCase):
             stream=dict(
                 source=dict(kind='kafka', config=dict(topic='a', librdkafka={'x': 1})),
                 sinks=[dict(name='out', kind='postgres', config={})],
-                errors=dict(dead_letter=dict(name='dead')),
+                errors=dict(dead_letter=dict(name='dead', kind='http', config={})),
                 delivery='exactly_once',
                 time=dict(field='at'),
             ),
@@ -135,7 +135,7 @@ class DifferencesTest(TestCase):
         for expected in [
             "settings librdkafka have no Spark equivalent",
             'Sink out is postgres',
-            'Dead letters',
+            'Sink dead is http',
             'Delivery exactly_once',
             'Event time',
             'Block totals is a window transformer',
@@ -181,7 +181,7 @@ WORKER = spark_stream.RUNTIME.joinpath('worker.py').read_text()
 
 
 class BlocksFunctionTest(TestCase):
-    def stream(self, **variables):
+    def stream(self, dead_letter=None, **variables):
         return dict(
             pipeline_uuid='orders',
             chain=[
@@ -189,7 +189,8 @@ class BlocksFunctionTest(TestCase):
                 dict(uuid='keep', code=textwrap.dedent(KEEP), upstream=['double'],
                      configuration={}),
             ],
-            output='keep', variables=dict(least=5, **variables),
+            sinks=[dict(name='out', config={}, after='keep')],
+            dead_letter=dead_letter, variables=dict(least=5, **variables),
         )
 
     def test_the_blocks_run_on_each_arrow_batch_as_the_engine_runs_them(self):
@@ -201,16 +202,15 @@ class BlocksFunctionTest(TestCase):
         ])))
         rows = [v for b in out for v in b.column('value').to_pylist()]
         # A DataFrame block's output goes out as one JSON object per row.
-        import json
         self.assertEqual([json.loads(v) for v in rows], [
             {'id': 2, 'amount': 4, 'doubled': 8}, {'id': 3, 'amount': 3.5, 'doubled': 7.0},
         ])
-        self.assertEqual(out[0].schema, pa.schema([('value', pa.binary())]))
+        self.assertEqual({t for b in out for t in b.column('target').to_pylist()}, {'keep'})
 
     def test_text_that_is_not_json_reaches_the_blocks_as_text(self):
         stream = self.stream()
         stream['chain'] = stream['chain'][:1]
-        stream['output'] = 'double'
+        stream['sinks'] = [dict(name='out', config={}, after='double')]
         run = spark_runner.blocks_function(stream, WORKER)
         [out] = list(run(iter([batch(['plain words'])])))
         self.assertEqual(out.column('value').to_pylist(), [b'{"text": "plain words"}'])
@@ -220,6 +220,32 @@ class BlocksFunctionTest(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r'Block double failed \(run\): .*message 2 is not accepted'):
             list(run(iter([batch(['{"id": 2, "amount": 4}'])])))
+
+    def test_a_message_a_block_fails_on_goes_to_dead_letters_as_it_came(self):
+        run = spark_runner.blocks_function(
+            self.stream(dead_letter=dict(name='dead', config={}), reject=[2]), WORKER,
+        )
+        incoming = pa.RecordBatch.from_pydict({
+            'key': [b'k1', b'k2', b'k3'],
+            'value': [b'{"id": 1, "amount": 4}', b'{"id": 2, "amount": 4}',
+                      b'{"id": 3, "amount": 4}'],
+            'headers': [None, [dict(key='trace', value=b't2')], None],
+        })
+        [out] = list(run(iter([incoming])))
+        rows = out.to_pylist()
+        self.assertEqual([r['target'] for r in rows], ['keep', 'keep', '__dead_letter__'])
+        dead = rows[-1]
+        self.assertEqual((dead['key'], dead['value']), (b'k2', b'{"id": 2, "amount": 4}'))
+        self.assertEqual([h['key'] for h in dead['headers']],
+                         ['trace', 'mage-stream', 'mage-error'])
+        self.assertIn(b'double: ValueError: message 2 is not accepted',
+                      dead['headers'][-1]['value'])
+        # Every message failing is a code problem: the batch fails, nothing is a dead letter.
+        all_bad = spark_runner.blocks_function(
+            self.stream(dead_letter=dict(name='dead', config={}), reject=[1, 2]), WORKER,
+        )
+        with self.assertRaisesRegex(RuntimeError, 'Block double failed'):
+            list(all_bad(iter([batch(['{"id": 1, "amount": 4}', '{"id": 2, "amount": 4}'])])))
 
     def test_progress_reads_as_one_line(self):
         self.assertEqual(

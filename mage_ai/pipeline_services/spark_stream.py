@@ -3,11 +3,12 @@ A streaming pipeline on Spark Structured Streaming, over Spark Connect (ADR-0047
 
 The plan comes from the export's capture, as a service's manifest does. `differences` says
 what Spark cannot run as the engine does; a pipeline with any is refused with the list.
-Version 1 runs a Kafka source, Python stream transformers and one Kafka sink:
+It runs a Kafka source, Python stream transformers, Kafka sinks and a Kafka dead-letter
+sink:
 
     spark.readStream.format('kafka')       the source's topic and start
       .mapInArrow(blocks)                  the blocks, by the engine's own worker code
-      .writeStream.format('kafka')         the sink's topic, positions in the checkpoint
+      .writeStream.format('kafka')         one sink; several, or dead letters: foreachBatch
 
 The blocks run in mapInArrow through runtime/worker.py's run_stream_batch, which the
 function carries with the blocks' sources and loads once per Python worker process, so a
@@ -51,10 +52,8 @@ def differences(pipeline: Dict[str, Any]) -> List[str]:
         if extra:
             found.append(f"The source's settings {', '.join(extra)} have no Spark equivalent "
                          'yet.')
-    sinks = stream.get('sinks') or []
-    if len(sinks) != 1:
-        found.append(f'The stream has {len(sinks)} sinks; Spark runs one for now.')
-    for sink in sinks:
+    dead_letter = (stream.get('errors') or {}).get('dead_letter')
+    for sink in (stream.get('sinks') or []) + ([dead_letter] if dead_letter else []):
         if sink.get('kind') != 'kafka':
             found.append(f"Sink {sink.get('name')} is {sink.get('kind')}; Spark writes Kafka "
                          'for now.')
@@ -63,8 +62,6 @@ def differences(pipeline: Dict[str, Any]) -> List[str]:
             if extra:
                 found.append(f"Sink {sink.get('name')}'s settings {', '.join(extra)} have no "
                              'Spark equivalent yet.')
-    if (stream.get('errors') or {}).get('dead_letter'):
-        found.append('Dead letters run on the engine only for now.')
     if stream.get('delivery'):
         found.append(f"Delivery {stream['delivery']} runs on the engine only.")
     if stream.get('time'):
@@ -102,7 +99,7 @@ def plan(repo_path: str, pipeline_uuid: str) -> Dict[str, Any]:
             f'{pipeline_uuid} cannot run on Spark as it runs on the engine:\n- '
             + '\n- '.join(found)
         )
-    sink = stream['sinks'][0]
+    dead_letter = (stream.get('errors') or {}).get('dead_letter')
     chain = [
         dict(
             uuid=block['uuid'],
@@ -116,9 +113,14 @@ def plan(repo_path: str, pipeline_uuid: str) -> Dict[str, Any]:
         pipeline_uuid=pipeline_uuid,
         source=dict(config=stream['source'].get('config') or {},
                     batch=stream.get('batch') or {}),
-        sink=dict(name=sink['name'], config=sink.get('config') or {}),
+        sinks=[
+            dict(name=sink['name'], config=sink.get('config') or {},
+                 after=sink.get('after') or (chain[-1]['uuid'] if chain else ''))
+            for sink in stream['sinks']
+        ],
+        dead_letter=dict(name=dead_letter['name'], config=dead_letter.get('config') or {})
+        if dead_letter else None,
         chain=chain,
-        output=sink.get('after') or (chain[-1]['uuid'] if chain else ''),
         variables=dict(pipeline.get('variables') or {}),
     )
 
@@ -135,7 +137,8 @@ def notes(plan: Dict[str, Any]) -> List[str]:
 def check(plan: Dict[str, Any], environ: Mapping[str, str]) -> None:
     """Whether the plan's settings resolve with environ; raises with the first that does not."""
     spark_runner.source_options(plan, environ)
-    spark_runner.sink_options(plan, environ)
+    for sink in plan['sinks'] + ([plan['dead_letter']] if plan.get('dead_letter') else []):
+        spark_runner.sink_options(sink, environ)
 
 
 def _version(package: str, fallback: str) -> str:
@@ -174,8 +177,9 @@ docker run --rm \\
 {variables}  {image}
 ```
 
-The Spark server needs Python {python} with pyarrow on its workers, the packages the blocks
-import, and the Kafka connector (org.apache.spark:spark-sql-kafka-0-10_2.13).
+The Spark server needs Python {python} with pyarrow on its workers (with several sinks or
+dead letters, pyspark-client's libraries too), the packages the blocks import, and the
+Kafka connector (org.apache.spark:spark-sql-kafka-0-10_2.13).
 """
 
 
@@ -194,7 +198,8 @@ def _variables(plan: Dict[str, Any]) -> List[str]:
                 walk(item)
 
     walk(plan['source']['config'])
-    walk(plan['sink']['config'])
+    for sink in plan['sinks'] + ([plan['dead_letter']] if plan.get('dead_letter') else []):
+        walk(sink['config'])
     return sorted(set(found))
 
 

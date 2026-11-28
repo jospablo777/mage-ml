@@ -1,6 +1,8 @@
 # Spark Connect for the Spark stream tests (ADR-0047): Spark 4.3.0 in local mode, its Python
 # workers on Python 3.12 with pyarrow and pandas (Spark needs the client's Python version;
-# the image's own is 3.10), and the Kafka connector in its jars, so it starts offline.
+# the image's own is 3.10), and the Kafka connector in its jars, so it starts offline. A
+# foreachBatch function runs in a worker that is itself a Spark Connect client: the workers
+# also have pyspark-client's libraries (grpcio, protobuf, zstandard).
 FROM ghcr.io/astral-sh/uv:0.11.29 AS uv
 
 FROM apache/spark:4.3.0-python3
@@ -10,6 +12,8 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 RUN uv venv --python 3.12 /opt/workers \
     && uv pip install --python /opt/workers/bin/python pyarrow==26.0.0 pandas==3.0.6 \
+        grpcio==1.84.0 grpcio-status==1.84.0 googleapis-common-protos==1.75.5 \
+        protobuf==6.33.6 zstandard==0.25.0 pyyaml==6.0.3 \
     && mkdir -p /opt/ivy /checkpoints \
     && chown -R spark:spark /opt/workers /opt/uv-python /opt/ivy /checkpoints
 ENV PYSPARK_PYTHON=/opt/workers/bin/python
