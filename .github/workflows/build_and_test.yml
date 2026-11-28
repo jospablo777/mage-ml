@@ -728,10 +728,12 @@ jobs:
             mage_ai/tests/data_preparation/git \
             mage_ai/tests/data_preparation/sync
       # Four workers, a file's tests on one (class fixtures and the per-worker test database,
-      # test<worker>.db): 42 minutes in one process.
+      # test<worker>.db): 42 minutes in one process. A test that runs past 15 minutes fails
+      # with every thread's stack, naming where it hangs, instead of holding the job (I-592).
       - name: Run unit tests
+        timeout-minutes: 50
         run: |
-          python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests -n 4 --dist loadfile --junitxml=unit-results.xml
+          python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests -n 4 --dist loadfile --junitxml=unit-results.xml --timeout 900 --timeout-method thread
         env:
           OPENAI_API_KEY: abcdefg
           # Smaller cached target directory; CI builds each block once.
