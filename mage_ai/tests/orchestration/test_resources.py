@@ -140,10 +140,12 @@ class LearnedMemoryTest(TestCase):
 
         with resources.track_memory_peak(interval=0.02) as idle:
             time.sleep(0.1)
+        # Random bytes: zero-filled pages can stay unmapped, and macOS compresses repeated
+        # ones under memory pressure, so neither would count in the resident size.
         with resources.track_memory_peak(interval=0.02) as peak:
-            held = bytearray(300 * 1024**2)
+            held = os.urandom(300 * 1024**2)
             child = subprocess.Popen([sys.executable, '-c', (
-                'import time; b = bytearray(200 * 1024**2); time.sleep(1)')])
+                'import os, time; b = os.urandom(200 * 1024**2); time.sleep(1)')])
             time.sleep(0.8)
             child.wait()
             del held
