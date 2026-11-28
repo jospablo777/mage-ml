@@ -57,7 +57,12 @@ test('a registered output is found and shows its freshness, checks and output', 
   const form = page.getByRole('form', { name: 'Register a dataset' });
   await expect(form).toBeVisible({ timeout: 60_000 });
   await form.getByLabel('Dataset id').fill(DATASET);
+  // The pipeline and, once it is chosen, its blocks are suggested.
+  await expect(form.locator(`#dataset-pipeline-options option[value="${pipelineUUID}"]`))
+    .toHaveCount(1, { timeout: 30_000 });
   await form.getByLabel('Dataset pipeline').fill(pipelineUUID);
+  await expect(form.locator(`#dataset-block-options option[value="${LOADER}"]`))
+    .toHaveCount(1, { timeout: 30_000 });
   await form.getByLabel('Dataset block').fill(LOADER);
   await form.getByLabel('Dataset owner').fill(OWNER);
   await form.getByLabel('Dataset time column').fill('day');

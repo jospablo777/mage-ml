@@ -89,6 +89,19 @@ const REGISTER_FIELDS: { key: string; label: string; placeholder: string }[] = [
 function Register({ draft, onDone }: { draft?: Partial<DatasetType>; onDone: (id: string) => void }) {
   const [entry, setEntry] = useState<{ [key: string]: string }>({});
   const [error, setError] = useState<string>(null);
+  // Suggestions as you type: the project's pipelines, then the chosen pipeline's blocks.
+  const { data: listed } = api.pipelines.list({ _limit: 1000 }, { revalidateOnFocus: false });
+  const pipelineUUIDs: string[] = useMemo(
+    () => (listed?.pipelines || []).map(pipeline => pipeline.uuid).sort(),
+    [listed],
+  );
+  const { data: chosen } = api.pipelines.detail(
+    pipelineUUIDs.includes(entry.pipeline) ? entry.pipeline : null,
+  );
+  const options: { [key: string]: string[] } = useMemo(() => ({
+    block: (chosen?.pipeline?.blocks || []).map(block => block.uuid),
+    pipeline: pipelineUUIDs,
+  }), [chosen, pipelineUUIDs]);
   useEffect(() => {
     if (draft) {
       setEntry({ block: draft.block, id: draft.id, pipeline: draft.pipeline });
@@ -114,10 +127,16 @@ function Register({ draft, onDone }: { draft?: Partial<DatasetType>; onDone: (id
             <Text muted small>{field.label}</Text>
             <TextInput
               aria-label={`Dataset ${field.label.toLowerCase()}`}
+              list={options[field.key] ? `dataset-${field.key}-options` : undefined}
               onChange={e => setEntry({ ...entry, [field.key]: e.target.value })}
               placeholder={field.placeholder}
               value={entry[field.key] || ''}
             />
+            {options[field.key] && (
+              <datalist id={`dataset-${field.key}-options`}>
+                {options[field.key].map(value => <option key={value} value={value} />)}
+              </datalist>
+            )}
           </Spacing>
         ))}
       </FlexContainer>
