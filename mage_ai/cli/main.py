@@ -952,56 +952,44 @@ def spark_stream_run(
     """
     Run a streaming pipeline on Spark Structured Streaming over Spark Connect: its Kafka
     source, Python stream blocks (by the engine's own worker code) and Kafka sink. Positions
-    live in the checkpoint. Prints the query's progress until it stops or Ctrl-C stops it.
+    live in the checkpoint. Prints the query's progress until it fails or Ctrl-C stops it.
     """
-    import time
+    import signal
+    import threading
 
     from mage_ai.pipeline_services import spark_stream
+    from mage_ai.pipeline_services.runtime import spark_runner
 
     project_path = os.path.abspath(project_path)
     _run_records_setup(project_path, pipeline_uuid)
     environ = dict(os.environ)
     for text in env:
-        name, _, value = text.partition('=')
-        if not name or not _:
+        name, equals, value = text.partition('=')
+        if not name or not equals:
             print(f'[red]--env {_e(text)}: use NAME=value.[/red]')
             raise typer.Exit(code=2)
         environ[name] = value
     try:
-        stream = spark_stream.plan(project_path, pipeline_uuid, environ=environ)
+        stream = spark_stream.plan(project_path, pipeline_uuid)
+        spark_stream.check(stream, environ)
     except spark_stream.SparkStreamError as error:
         print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
-    for note in stream.notes:
+    for note in spark_stream.notes(stream):
         typer.echo(note)
     if check:
         typer.echo(f'{pipeline_uuid} can run on Spark.')
         return
+    stop = threading.Event()
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
     try:
-        spark, query = spark_stream.start(stream, remote, checkpoint)
+        code = spark_runner.run(stream, remote, checkpoint, environ=environ, every=every,
+                                log=typer.echo, stop=stop)
     except spark_stream.SparkStreamError as error:
         print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
-    problem = spark_stream.python_version_check(spark)
-    if problem:
-        query.stop()
-        print(f'[red]{_e(problem)}[/red]')
-        raise typer.Exit(code=2)
-    typer.echo(f'Started {pipeline_uuid} on {remote} (query {query.id}).')
-    try:
-        while query.isActive:
-            time.sleep(every)
-            line = spark_stream.progress_line(query.lastProgress)
-            if line:
-                typer.echo(line)
-    except KeyboardInterrupt:
-        query.stop()
-        typer.echo('Stopped; the next run continues from the checkpoint.')
-        return
-    error = query.exception()
-    if error is not None:
-        print(f'[red]The query stopped: {_e(str(error).splitlines()[0])}[/red]')
-        raise typer.Exit(code=1)
+    if code:
+        raise typer.Exit(code=code)
 
 
 @app.command('verify-fusion')
@@ -1679,6 +1667,30 @@ def export_compare(
             print(problem)
         raise typer.Exit(code=1)
     print('\n'.join(lines))
+
+
+@export_app.command('spark-stream')
+def export_spark_stream(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the streaming pipeline.'),
+    output: str = typer.Argument(..., help='the folder to write.'),
+):
+    """
+    Export a streaming pipeline to run on Spark Structured Streaming without MageML: its
+    plan, the runner that starts and watches the query, the worker code and a Dockerfile.
+    """
+    from mage_ai.pipeline_services import spark_stream
+
+    project_path = os.path.abspath(project_path)
+    _run_records_setup(project_path, pipeline_uuid)
+    try:
+        folder = spark_stream.export(project_path, pipeline_uuid, output)
+    except spark_stream.SparkStreamError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    for note in spark_stream.notes(json.loads((folder / 'plan.json').read_text())):
+        typer.echo(note)
+    typer.echo(f'Wrote {folder}: build it with docker build; README.md says how to run it.')
 
 
 @export_app.command('service')

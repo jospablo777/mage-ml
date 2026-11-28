@@ -1,0 +1,339 @@
+"""
+Runs a streaming pipeline's Spark plan (spark_stream.py, ADR-0047) on a Spark Connect server
+and watches it: the process `mage spark-stream` runs, and the container a Spark stream
+export runs. It needs pyspark-client and pyarrow, nothing of MageML:
+
+    python spark_runner.py            # plan.json and worker.py beside it
+
+with MAGE_SPARK_REMOTE (sc://host:15002) and MAGE_SPARK_CHECKPOINT set, and the variables
+the plan's settings read. It starts the query, writes its progress every
+MAGE_SPARK_PROGRESS_SECONDS (10), and on SIGTERM or SIGINT stops it; the next start
+continues from the checkpoint. A query that fails ends the process with 1 and the reason.
+Spark stops an older run of the same checkpoint when a new one starts, so a restarted
+runner never leaves two.
+
+The plan's settings keep their variable references (`{"$parts": [...]}`); they are filled
+in from the environment at start, so an export holds no secret.
+"""
+import json
+import os
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterator, Mapping, Optional
+
+HERE = Path(__file__).parent
+LOGIN_MODULES = {
+    'PLAIN': 'org.apache.kafka.common.security.plain.PlainLoginModule',
+    'SCRAM-SHA-256': 'org.apache.kafka.common.security.scram.ScramLoginModule',
+    'SCRAM-SHA-512': 'org.apache.kafka.common.security.scram.ScramLoginModule',
+}
+
+
+class SparkRunError(Exception):
+    pass
+
+
+def resolve(value: Any, environ: Mapping[str, str], where: str) -> Any:
+    """A setting with its `{"$parts": ...}` references filled in from environ."""
+    if isinstance(value, dict) and '$parts' in value:
+        text = ''
+        for part in value['$parts']:
+            if not isinstance(part, dict):
+                text += str(part)
+                continue
+            name = part.get('env')
+            if name in environ:
+                text += environ[name]
+            elif 'default' in part:
+                text += str(part['default'] or '')
+            else:
+                raise SparkRunError(f'{where} reads the environment variable {name}, which is '
+                                    'not set.')
+        return text
+    if isinstance(value, dict):
+        return {k: resolve(v, environ, where) for k, v in value.items()}
+    if isinstance(value, list):
+        return [resolve(v, environ, where) for v in value]
+    return value
+
+
+def kafka_security(config: Dict[str, Any], where: str) -> Dict[str, str]:
+    """security_protocol and sasl_config as Spark's kafka.* options."""
+    options = {}
+    if config.get('security_protocol'):
+        options['kafka.security.protocol'] = str(config['security_protocol'])
+    sasl = config.get('sasl_config') or {}
+    if sasl:
+        mechanism = str(sasl.get('mechanism') or 'PLAIN').upper()
+        if mechanism not in LOGIN_MODULES:
+            raise SparkRunError(f'{where}: SASL {mechanism} has no Spark equivalent yet; use '
+                                f"{', '.join(LOGIN_MODULES)}.")
+
+        def quoted(value: Any) -> str:
+            return '"' + str(value or '').replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+        options['kafka.sasl.mechanism'] = mechanism
+        options['kafka.sasl.jaas.config'] = (
+            f'{LOGIN_MODULES[mechanism]} required username={quoted(sasl.get("username"))} '
+            f'password={quoted(sasl.get("password"))};'
+        )
+    return options
+
+
+def source_options(plan: Dict[str, Any], environ: Mapping[str, str]) -> Dict[str, str]:
+    """Spark's Kafka reader options for the plan's source."""
+    config = resolve(plan['source']['config'], environ, 'The source')
+    batch = plan['source'].get('batch') or {}
+    topics = config.get('topics') or config.get('topic')
+    if isinstance(topics, list):
+        topics = ','.join(str(t) for t in topics)
+    if not topics or not config.get('bootstrap_server'):
+        raise SparkRunError('The Kafka source needs bootstrap_server and topic.')
+    options = {
+        'kafka.bootstrap.servers': str(config['bootstrap_server']),
+        'subscribe': str(topics),
+        'startingOffsets': 'earliest' if config.get('auto_offset_reset') == 'earliest'
+        else 'latest',
+        # A topic deleted or truncated under the query stops it, as on the engine.
+        'failOnDataLoss': 'true',
+    }
+    if batch.get('max_records'):
+        options['maxOffsetsPerTrigger'] = str(int(batch['max_records']))
+    options.update(kafka_security(config, 'The source'))
+    return options
+
+
+def sink_options(plan: Dict[str, Any], environ: Mapping[str, str]) -> Dict[str, str]:
+    """Spark's Kafka writer options for the plan's sink."""
+    where = f"Sink {plan['sink']['name']}"
+    config = resolve(plan['sink']['config'], environ, where)
+    if not config.get('bootstrap_server') or not config.get('topic'):
+        raise SparkRunError(f'{where} needs bootstrap_server and topic.')
+    return {'kafka.bootstrap.servers': str(config['bootstrap_server']),
+            'topic': str(config['topic']), **kafka_security(config, where)}
+
+
+def trigger_seconds(plan: Dict[str, Any]) -> float:
+    return max(float((plan['source'].get('batch') or {}).get('max_wait_ms') or 1000) / 1000,
+               0.1)
+
+
+def blocks_function(plan: Dict[str, Any], worker_source: str) -> Callable:
+    """
+    The function mapInArrow runs on each partition's batches: the Kafka values in, the sink's
+    messages out as JSON, made by the engine's worker code (runtime/worker.py). Everything it
+    needs travels in it, so Spark's Python workers need only pyarrow.
+    """
+    chain = [dict(b) for b in plan['chain']]
+    output = plan['output']
+    variables = dict(plan.get('variables') or {})
+
+    def run(batches: Iterator) -> Iterator:
+        import hashlib
+        import json as json_module
+        import sys as sys_module
+        import tempfile
+        import types
+
+        import pyarrow as pa
+
+        digest = hashlib.sha256(worker_source.encode()).hexdigest()[:16]
+        name = f'mageml_stream_worker_{digest}'
+        worker = sys_module.modules.get(name)
+        if worker is None:
+            worker = types.ModuleType(name)
+            # Its tracebacks leave out its own frames by this name.
+            worker.__file__ = 'mageml_stream_worker.py'
+            exec(compile(worker_source, worker.__file__, 'exec'), worker.__dict__)
+            worker.mageml_block_files = {}
+            sys_module.modules[name] = worker
+        files = worker.mageml_block_files
+        request_chain = []
+        for block in chain:
+            key = hashlib.sha256(block['code'].encode()).hexdigest()
+            if key not in files:
+                folder = tempfile.mkdtemp(prefix='mageml-block-')
+                path = f"{folder}/{block['uuid']}.py"
+                with open(path, 'w') as file:
+                    file.write(block['code'])
+                files[key] = path
+            request_chain.append(dict(
+                uuid=block['uuid'], file=files[key], sha256=key, upstream=block['upstream'],
+                configuration=block['configuration'],
+            ))
+        for batch in batches:
+            messages = []
+            for value in batch.column('value').to_pylist():
+                text = value.decode('utf-8', errors='replace') if value is not None else ''
+                try:
+                    messages.append(json_module.loads(text))
+                except ValueError:
+                    # Text that is not JSON reaches the blocks as text, as on the engine.
+                    messages.append(text)
+            if not messages:
+                continue
+            try:
+                result = worker.run_stream_batch(dict(
+                    chain=request_chain, messages=messages, outputs=[output],
+                    kwargs=variables,
+                ))
+            except worker.BlockError as error:
+                raise RuntimeError(
+                    f'Block {error.block_uuid} failed ({error.phase}): {error}\n{error.details}'
+                ) from None
+            values = [
+                json_module.dumps(m, allow_nan=False, default=worker._json_default).encode()
+                for m in result['outputs'].get(output) or []
+            ]
+            yield pa.RecordBatch.from_pydict(
+                {'value': values}, schema=pa.schema([('value', pa.binary())]),
+            )
+
+    return run
+
+
+def spark_session_class():
+    import warnings
+
+    try:
+        with warnings.catch_warnings():
+            # pyspark warns about pandas 3 on import; mapInArrow does not use pandas.
+            warnings.filterwarnings('ignore', message='PySpark does not yet fully support pandas')
+            from pyspark.sql import SparkSession
+            from pyspark.sql.connect import (  # noqa: F401 - imported here, warned once
+                functions,
+            )
+    except ImportError:
+        raise SparkRunError('Spark Connect needs pyspark-client: uv pip install pyspark-client '
+                            '(or mage-ml[spark]).') from None
+    return SparkSession
+
+
+def start(plan: Dict[str, Any], remote: str, checkpoint: str,
+          environ: Optional[Mapping[str, str]] = None, worker_source: Optional[str] = None):
+    """Starts the query on the Spark Connect server; returns (session, query)."""
+    environ = os.environ if environ is None else environ
+    if not checkpoint:
+        raise SparkRunError('A checkpoint location is required: Spark keeps the stream\'s '
+                            'positions there.')
+    if worker_source is None:
+        worker_source = (HERE / 'worker.py').read_text()
+    source, sink = source_options(plan, environ), sink_options(plan, environ)
+    session = spark_session_class()
+    spark = session.builder.remote(remote).getOrCreate()
+    reader = spark.readStream.format('kafka')
+    for key, value in source.items():
+        reader = reader.option(key, value)
+    frame = reader.load().select('value').mapInArrow(
+        blocks_function(plan, worker_source), 'value binary',
+    )
+    writer = frame.writeStream.format('kafka').option('checkpointLocation', checkpoint)
+    for key, value in sink.items():
+        writer = writer.option(key, value)
+    query = (
+        writer.queryName(plan['pipeline_uuid'])
+        .trigger(processingTime=f'{trigger_seconds(plan)} seconds')
+        .start()
+    )
+    return spark, query
+
+
+def progress_line(progress: Optional[Dict[str, Any]]) -> Optional[str]:
+    """One line of a query's last progress: its batch, rows and rates."""
+    if not progress:
+        return None
+    if isinstance(progress, str):
+        progress = json.loads(progress)
+    rows = progress.get('numInputRows', 0)
+    rate = progress.get('inputRowsPerSecond') or 0
+    processed = progress.get('processedRowsPerSecond') or 0
+    sink = (progress.get('sink') or {}).get('numOutputRows')
+    line = (f"batch {progress.get('batchId')}: {rows} rows in, {rate:.0f}/s arriving, "
+            f'{processed:.0f}/s processed')
+    if sink is not None and sink >= 0:
+        line += f', {sink} rows out'
+    return line
+
+
+def python_version_check(spark) -> Optional[str]:
+    """Why the server's Python workers cannot run the blocks, or None."""
+    def versions(batches):
+        import sys as sys_module
+
+        import pyarrow as pa
+        for _ in batches:
+            yield pa.RecordBatch.from_pydict({'version': [
+                f'{sys_module.version_info[0]}.{sys_module.version_info[1]}',
+            ]})
+
+    try:
+        found = spark.range(1).mapInArrow(versions, 'version string').collect()[0]['version']
+    except Exception as error:
+        return f'The server could not run Python with pyarrow: {str(error).splitlines()[0]}'
+    mine = f'{sys.version_info[0]}.{sys.version_info[1]}'
+    if found != mine:
+        return f'The server\'s Python workers run {found}; the blocks need {mine}.'
+    return None
+
+
+def run(plan: Dict[str, Any], remote: str, checkpoint: str,
+        environ: Optional[Mapping[str, str]] = None, every: float = 10,
+        log: Callable[[str], None] = print, stop: Optional[threading.Event] = None,
+        worker_source: Optional[str] = None) -> int:
+    """
+    Starts the query and watches it until it fails (1) or `stop` is set (0, the query
+    stopped). Progress every `every` seconds.
+    """
+    stop = stop or threading.Event()
+    spark, query = start(plan, remote, checkpoint, environ, worker_source)
+    problem = python_version_check(spark)
+    if problem:
+        query.stop()
+        log(problem)
+        return 1
+    log(f"Started {plan['pipeline_uuid']} on {remote} (query {query.id}).")
+    last, next_line = None, time.monotonic() + every
+    while query.isActive and not stop.wait(0.5):
+        if time.monotonic() < next_line:
+            continue
+        next_line = time.monotonic() + every
+        progress = query.lastProgress
+        # A line per new batch: an idle stream stays quiet.
+        if progress and progress.get('batchId') != last:
+            log(progress_line(progress))
+            last = progress.get('batchId')
+    if stop.is_set():
+        query.stop()
+        log('Stopped; the next start continues from the checkpoint.')
+        return 0
+    error = query.exception()
+    log(f"The query stopped: {str(error).splitlines()[0] if error else 'without an error'}")
+    return 1
+
+
+def main() -> int:
+    plan_path = Path(os.environ.get('MAGE_SPARK_PLAN') or HERE / 'plan.json')
+    remote = os.environ.get('MAGE_SPARK_REMOTE')
+    checkpoint = os.environ.get('MAGE_SPARK_CHECKPOINT')
+    if not remote or not checkpoint:
+        print('Set MAGE_SPARK_REMOTE (sc://host:15002) and MAGE_SPARK_CHECKPOINT.',
+              file=sys.stderr)
+        return 2
+    plan = json.loads(plan_path.read_text())
+    stop = threading.Event()
+    for signal_number in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signal_number, lambda *_: stop.set())
+    try:
+        return run(plan, remote, checkpoint, every=float(
+            os.environ.get('MAGE_SPARK_PROGRESS_SECONDS') or 10), stop=stop,
+            log=lambda line: print(line, flush=True))
+    except SparkRunError as error:
+        print(str(error), file=sys.stderr, flush=True)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())

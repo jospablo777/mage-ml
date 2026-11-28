@@ -2,11 +2,13 @@
 Streaming pipelines on Spark Structured Streaming (ADR-0047), on a Spark Connect server
 (services/spark) and Kafka: the pipeline test_exported_stream runs on the engine, with the
 same messages and the same output, its Python block run by the engine's worker code in
-mapInArrow. A restart continues from the checkpoint, and a failing block stops the query
-with the block's name and reason.
+mapInArrow. A restart continues from the checkpoint, a failing block stops the query with
+the block's name and reason, and the export runs the stream from a container of its own.
 """
+import subprocess
 import time
 import uuid
+from urllib.parse import urlparse
 
 from kafka import KafkaConsumer
 
@@ -28,10 +30,11 @@ def expected(ids):
 
 def started(mage_project, pipeline, spark_remote, checkpoint):
     from mage_ai.pipeline_services import spark_stream
+    from mage_ai.pipeline_services.runtime import spark_runner
 
-    stream = spark_stream.plan(mage_project, pipeline.uuid, environ=SPARK_ENVIRON)
-    spark, query = spark_stream.start(stream, spark_remote, checkpoint)
-    assert spark_stream.python_version_check(spark) is None
+    stream = spark_stream.plan(mage_project, pipeline.uuid)
+    spark, query = spark_runner.start(stream, spark_remote, checkpoint, environ=SPARK_ENVIRON)
+    assert spark_runner.python_version_check(spark) is None
     return query
 
 
@@ -92,3 +95,53 @@ def test_a_failing_block_stops_the_query_with_its_name_and_reason(
     assert error is not None
     assert f'Block {pipeline.uuid}_double failed (run)' in str(error)
     assert 'message 7 is not accepted' in str(error)
+
+
+def compose_network(spark_remote) -> str:
+    """The network of the container that publishes the Spark Connect port."""
+    port = urlparse(spark_remote.replace('sc://', 'http://')).port
+    found = subprocess.run(
+        ['docker', 'ps', '--filter', f'publish={port}', '--format', '{{.Networks}}'],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert found, f'No container publishes {port}'
+    return found[0].split(',')[0]
+
+
+def test_the_export_runs_the_stream_from_its_own_container_and_stops_on_sigterm(
+    kafka_bootstrap, spark_remote, mage_project, stream_pipeline, topics, tmp_path,  # noqa: F811
+):
+    from mage_ai.pipeline_services import spark_stream
+
+    pipeline, _ = stream_pipeline
+    folder = spark_stream.export(mage_project, pipeline.uuid, str(tmp_path / 'spark'))
+    image = f'mageml-spark-stream-it:{uuid.uuid4().hex[:8]}'
+    subprocess.run(['docker', 'build', '-q', '-t', image, str(folder)], check=True,
+                   capture_output=True, timeout=900)
+    out = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                        auto_offset_reset='earliest', enable_auto_commit=False, group_id=None)
+    produce(kafka_bootstrap, topics[0], range(50))
+    container = subprocess.run([
+        'docker', 'run', '-d', '--network', compose_network(spark_remote),
+        '-e', 'MAGE_SPARK_REMOTE=sc://spark:15002',
+        '-e', f'MAGE_SPARK_CHECKPOINT=/checkpoints/{uuid.uuid4().hex}',
+        '-e', 'MAGE_SPARK_PROGRESS_SECONDS=1',
+        '-e', 'KAFKA_BOOTSTRAP=kafka:9092',
+        image,
+    ], capture_output=True, text=True, check=True).stdout.strip()
+    try:
+        messages = consume(out, len(expected(range(50))))
+        assert sorted((m['id'], m['doubled']) for m in messages) == expected(range(50))
+        subprocess.run(['docker', 'stop', '--time', '60', container], check=True,
+                       capture_output=True, timeout=90)
+        logs = subprocess.run(['docker', 'logs', container], capture_output=True,
+                              text=True).stdout
+        assert f'Started {pipeline.uuid}' in logs, logs
+        assert 'Stopped; the next start continues from the checkpoint.' in logs, logs
+        status = subprocess.run(['docker', 'inspect', '-f', '{{.State.ExitCode}}', container],
+                                capture_output=True, text=True).stdout.strip()
+        assert status == '0', logs
+    finally:
+        out.close()
+        subprocess.run(['docker', 'rm', '-f', container], capture_output=True)
+        subprocess.run(['docker', 'rmi', '-f', image], capture_output=True)

@@ -21,6 +21,29 @@ It starts the query on the server and prints its progress every 10 seconds
 it; the next run continues from the checkpoint. A block that fails stops the query with the
 block's name and reason.
 
+## Run it without MageML
+
+`mage export spark-stream` writes a folder that runs the stream from a container of its own:
+the plan (`plan.json`, whose settings keep their `env_var` and secret references), the
+runner that starts and watches the query, the engine's worker code and a Dockerfile. It
+needs `pyspark-client` and `pyarrow`, nothing of MageML.
+
+```bash
+mage export spark-stream . orders_clean ./orders_clean_spark
+docker build -t orders-clean-spark ./orders_clean_spark
+docker run -d \
+  -e MAGE_SPARK_REMOTE=sc://spark.example.com:15002 \
+  -e MAGE_SPARK_CHECKPOINT=s3a://lake/checkpoints/orders_clean \
+  -e KAFKA_BOOTSTRAP=kafka.internal:9092 \
+  orders-clean-spark
+```
+
+It writes the query's progress every `MAGE_SPARK_PROGRESS_SECONDS` (10). SIGTERM stops the
+query, and the next start continues from the checkpoint; Spark stops an older run of the
+same checkpoint when a new one starts, so a restarted container never leaves two. A query
+that fails ends the container with exit code 1 and the reason, for the orchestrator to
+restart it. Its `README.md` lists the variables to set.
+
 ## What runs on Spark
 
 | Pipeline | On Spark |
