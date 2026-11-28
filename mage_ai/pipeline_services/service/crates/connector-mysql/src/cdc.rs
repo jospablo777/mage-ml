@@ -88,20 +88,35 @@ impl LogPosition {
         format!("{}:{}", self.file, self.offset)
     }
 
-    /// The saved form: the server it is a position of, the file and the offset, and with
-    /// GTIDs on, the transactions handled.
-    fn saved(&self, source: &str, gtids: Option<&GtidSet>) -> String {
+    /// The saved form: the server it is a position of, the file and the offset, with GTIDs
+    /// on the transactions handled, and the tables named.
+    fn saved(&self, source: &str, gtids: Option<&GtidSet>, tables: Option<&[String]>) -> String {
         let mut saved =
             serde_json::json!({"source": source, "file": self.file, "offset": self.offset});
         if let Some(gtids) = gtids {
             saved["gtids"] = gtids.text().into();
         }
+        if let Some(tables) = tables {
+            saved["tables"] = tables.into();
+        }
         saved.to_string()
     }
+}
 
-    /// A saved position of this server, with its GTIDs; None for another server's (its
-    /// settings changed).
-    fn read_saved(text: &str, source: &str) -> Option<(LogPosition, Option<GtidSet>)> {
+/// A saved position of the stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Saved {
+    position: LogPosition,
+    gtids: Option<GtidSet>,
+    /// The tables named when it was saved (`db.table`): a table named since is copied before
+    /// the log is read on. None when every table of the database was read, or saved before
+    /// the tables were kept.
+    tables: Option<Vec<String>>,
+}
+
+impl Saved {
+    /// A saved position of this server; None for another server's (its settings changed).
+    fn read(text: &str, source: &str) -> Option<Saved> {
         let saved: Value = serde_json::from_str(text).ok()?;
         if saved.get("source")?.as_str()? != source {
             return None;
@@ -114,8 +129,26 @@ impl LogPosition {
             Some(text) => Some(GtidSet::parse(text).ok()?),
             None => None,
         };
-        Some((position, gtids))
+        let tables = match saved.get("tables") {
+            Some(Value::Array(names)) => Some(
+                names
+                    .iter()
+                    .map(|n| n.as_str().map(str::to_string))
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            _ => None,
+        };
+        Some(Saved {
+            position,
+            gtids,
+            tables,
+        })
     }
+}
+
+/// `db.table`, as a saved position names it.
+fn dotted((db, table): &Name) -> String {
+    format!("{db}.{table}")
 }
 
 /// What the log reader found.
@@ -186,6 +219,8 @@ pub struct MySqlCdcSource {
     /// Where the log is read from after the copy, or now.
     start: Option<LogPosition>,
     saved: Option<LogPosition>,
+    /// The tables the saved position names.
+    saved_tables: Option<Vec<String>>,
     copy: Option<Copy>,
     copy_tables: Vec<CopyTable>,
     /// The last copied row's position, until the sinks took it.
@@ -222,6 +257,7 @@ impl MySqlCdcSource {
             gtids_changed: false,
             start: None,
             saved: None,
+            saved_tables: None,
             copy: None,
             copy_tables: Vec::new(),
             copy_last: None,
@@ -293,14 +329,35 @@ impl MySqlCdcSource {
         format!("{}:{}", self.settings.host, self.settings.port)
     }
 
+    /// The tables named, as a saved position keeps them; None for every table of the
+    /// database.
+    fn named(&self) -> Option<Vec<String>> {
+        if self.settings.tables.is_empty() {
+            return None;
+        }
+        let mut names: Vec<String> = self.settings.tables.iter().map(dotted).collect();
+        names.sort();
+        names.dedup();
+        Some(names)
+    }
+
     fn save(&mut self, position: LogPosition) -> Result<(), ConnectorError> {
-        if self.saved.as_ref() == Some(&position) && !self.gtids_changed {
+        let tables = self.named();
+        if self.saved.as_ref() == Some(&position)
+            && !self.gtids_changed
+            && self.saved_tables == tables
+        {
             return Ok(());
         }
         if let Some(record) = &self.record {
-            record.save(&position.saved(&self.source_name(), self.gtids.as_ref()))?;
+            record.save(&position.saved(
+                &self.source_name(),
+                self.gtids.as_ref(),
+                tables.as_deref(),
+            ))?;
         }
         self.saved = Some(position);
+        self.saved_tables = tables;
         self.gtids_changed = false;
         Ok(())
     }
@@ -331,7 +388,7 @@ impl MySqlCdcSource {
         let saved = match &self.record {
             Some(record) => record
                 .load()?
-                .and_then(|text| LogPosition::read_saved(&text, &self.source_name())),
+                .and_then(|text| Saved::read(&text, &self.source_name())),
             None => None,
         };
         self.reader = None;
@@ -341,10 +398,34 @@ impl MySqlCdcSource {
         self.end_gtids.clear();
         self.copy_last = None;
         match saved {
-            Some((position, gtids)) => {
-                self.saved = Some(position.clone());
-                self.start = Some(position);
-                self.gtids = gtids;
+            Some(saved) => {
+                // Tables named since the position was saved: copied, then the log is read on
+                // from the position, which replays their changes since as the first copy's are.
+                let added: Vec<Name> = match &saved.tables {
+                    Some(before) if self.settings.snapshot => tables(&mut conn, &self.settings)
+                        .await?
+                        .into_iter()
+                        .filter(|t| !before.contains(&dotted(t)))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                self.saved = Some(saved.position.clone());
+                // Saved before the tables were kept: the tables named now were read.
+                self.saved_tables = saved.tables.or_else(|| self.named());
+                self.gtids = saved.gtids;
+                if !added.is_empty() {
+                    let names: Vec<String> = added.iter().map(dotted).collect();
+                    eprintln!(
+                        "MySQL stream source on {}: {} named since the last run",
+                        self.settings.label(),
+                        names.join(", ")
+                    );
+                    let (copy, progress) =
+                        self.begin_copy(&mut conn, &saved.position, added).await?;
+                    self.copy = Some(copy);
+                    self.copy_tables = progress;
+                }
+                self.start = Some(saved.position);
             }
             None => {
                 let status = log_status(&mut conn).await?;
@@ -355,7 +436,8 @@ impl MySqlCdcSource {
                 self.gtids = status.gtids;
                 self.gtids_changed = true;
                 if self.settings.snapshot {
-                    let (copy, progress) = self.begin_copy(&mut conn, &start).await?;
+                    let names = tables(&mut conn, &self.settings).await?;
+                    let (copy, progress) = self.begin_copy(&mut conn, &start, names).await?;
                     self.copy = Some(copy);
                     self.copy_tables = progress;
                 } else {
@@ -376,14 +458,14 @@ impl MySqlCdcSource {
         })
     }
 
-    /// Starts the copy: the tables' estimates, then a task that reads them in one snapshot on
-    /// a connection of its own.
+    /// Starts the copy of `names`: the tables' estimates, then a task that reads them in one
+    /// snapshot on a connection of its own.
     async fn begin_copy(
         &self,
         conn: &mut Conn,
         start: &LogPosition,
+        names: Vec<Name>,
     ) -> Result<(Copy, Vec<CopyTable>), ConnectorError> {
-        let names = tables(conn, &self.settings).await?;
         let mut progress = Vec::with_capacity(names.len());
         for (db, table) in &names {
             let estimate: Option<Option<i64>> = conn
@@ -1223,9 +1305,9 @@ mod tests {
     use super::*;
 
     #[derive(Default)]
-    struct Saved(Mutex<Option<String>>);
+    struct Record(Mutex<Option<String>>);
 
-    impl PositionRecord for Saved {
+    impl PositionRecord for Record {
         fn load(&self) -> Result<Option<String>, ConnectorError> {
             Ok(self.0.lock().unwrap().clone())
         }
@@ -1242,19 +1324,25 @@ mod tests {
             file: "binlog.000003".into(),
             offset: 4567,
         };
-        let saved = at.saved("db:3306", None);
+        let saved = at.saved("db:3306", None, None);
+        let read = Saved::read(&saved, "db:3306").unwrap();
         assert_eq!(
-            LogPosition::read_saved(&saved, "db:3306"),
-            Some((at.clone(), None))
+            (read.position, read.gtids, read.tables),
+            (at.clone(), None, None)
         );
-        assert_eq!(LogPosition::read_saved(&saved, "other:3306"), None);
-        assert_eq!(LogPosition::read_saved("not json", "db:3306"), None);
-        // With GTIDs on, the transactions handled are saved with it.
+        assert_eq!(Saved::read(&saved, "other:3306"), None);
+        assert_eq!(Saved::read("not json", "db:3306"), None);
+        // With GTIDs on, the transactions handled are saved with it, and the tables named.
         let gtids = GtidSet::parse("3e11fa47-71ca-11e1-9e33-c80aa9429562:1-42").unwrap();
-        let saved = at.saved("db:3306", Some(&gtids));
+        let tables = vec!["shop.orders".to_string()];
+        let saved = at.saved("db:3306", Some(&gtids), Some(&tables));
         assert_eq!(
-            LogPosition::read_saved(&saved, "db:3306"),
-            Some((at, Some(gtids)))
+            Saved::read(&saved, "db:3306"),
+            Some(Saved {
+                position: at,
+                gtids: Some(gtids),
+                tables: Some(tables),
+            })
         );
     }
 
@@ -1450,6 +1538,131 @@ mod tests {
         sql(&mut admin, &format!("DROP DATABASE {database}")).await;
     }
 
+    /// A table added to `tables` of a stream that runs is copied at the next start, then the
+    /// log is read on from the saved position; the tables read before are not copied again.
+    #[tokio::test]
+    async fn a_table_named_later_is_copied_then_followed() {
+        let Some(mut config) = crate::tests::server() else {
+            eprintln!("MAGE_TEST_MYSQL_URL is not set: skipped");
+            return;
+        };
+        let mut admin = connect(&Settings::new(&config).unwrap()).await.unwrap();
+        if !LogSettings::read(&mut admin)
+            .await
+            .unwrap()
+            .problems()
+            .is_empty()
+        {
+            eprintln!("the test server is not ready for change capture: skipped");
+            return;
+        }
+        let id = std::process::id();
+        let (first, added) = (format!("cdc_first_{id}"), format!("cdc_added_{id}"));
+        sql(
+            &mut admin,
+            &format!(
+                "DROP TABLE IF EXISTS {first}, {added}; \
+                 CREATE TABLE {first} (id INT PRIMARY KEY, item VARCHAR(20)); \
+                 CREATE TABLE {added} (id INT PRIMARY KEY, item VARCHAR(20)); \
+                 INSERT INTO {first} VALUES (1, 'tea'), (2, 'cake'); \
+                 INSERT INTO {added} VALUES (10, 'old'), (11, 'kept')"
+            ),
+        )
+        .await;
+        config["tables"] = serde_json::json!([first.clone()]);
+        config["snapshot"] = "initial".into();
+        let limits = BatchLimits {
+            max_records: 100,
+            max_bytes: 1 << 20,
+            max_wait: Duration::from_millis(200),
+        };
+        let record = Arc::new(Record::default());
+        let mut source = MySqlCdcSource::new(&config, limits)
+            .unwrap()
+            .with_position_record(record.clone());
+        source.next_event().await.unwrap();
+        assert_eq!(read(&mut source, 2).await.len(), 2);
+        sql(
+            &mut admin,
+            &format!("INSERT INTO {first} VALUES (3, 'pie')"),
+        )
+        .await;
+        assert_eq!(read(&mut source, 1).await[0]["id"], 3);
+        source.close().await;
+        let database = config["database"].as_str().unwrap().to_string();
+        let saved: Value =
+            serde_json::from_str(&record.0.lock().unwrap().clone().unwrap()).unwrap();
+        assert_eq!(
+            saved["tables"],
+            serde_json::json!([format!("{database}.{first}")])
+        );
+
+        // While it is stopped, both tables change; then the added table is named.
+        sql(
+            &mut admin,
+            &format!(
+                "UPDATE {added} SET item = 'changed' WHERE id = 10; \
+                 INSERT INTO {added} VALUES (12, 'new'); \
+                 UPDATE {first} SET item = 'green tea' WHERE id = 1"
+            ),
+        )
+        .await;
+        config["tables"] = serde_json::json!([first.clone(), added.clone()]);
+        let mut restarted = MySqlCdcSource::new(&config, limits)
+            .unwrap()
+            .with_position_record(record.clone());
+        restarted.next_event().await.unwrap();
+        let copying: Vec<String> = restarted
+            .copy_tables
+            .iter()
+            .map(|t| t.table.clone())
+            .collect();
+        assert_eq!(copying, [format!("{database}.{added}")]);
+        let found = read(&mut restarted, 6).await;
+        let summary: Vec<(String, String, i64, String)> = found
+            .iter()
+            .map(|m| {
+                (
+                    m["_mage_operation"].as_str().unwrap().to_string(),
+                    m["_mage_table"].as_str().unwrap().to_string(),
+                    m["id"].as_i64().unwrap(),
+                    m["item"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let row = |op: &str, table: &str, id: i64, item: &str| {
+            (op.to_string(), table.to_string(), id, item.to_string())
+        };
+        assert_eq!(
+            summary,
+            [
+                // The added table as it is now, then the changes since the saved position.
+                row("snapshot", &added, 10, "changed"),
+                row("snapshot", &added, 11, "kept"),
+                row("snapshot", &added, 12, "new"),
+                row("update", &added, 10, "changed"),
+                row("insert", &added, 12, "new"),
+                row("update", &first, 1, "green tea"),
+            ]
+        );
+        restarted.close().await;
+        let saved: Value =
+            serde_json::from_str(&record.0.lock().unwrap().clone().unwrap()).unwrap();
+        assert_eq!(
+            saved["tables"],
+            serde_json::json!([format!("{database}.{added}"), format!("{database}.{first}")])
+        );
+
+        // The next start copies nothing.
+        let mut again = MySqlCdcSource::new(&config, limits)
+            .unwrap()
+            .with_position_record(record.clone());
+        again.next_event().await.unwrap();
+        assert!(again.copy.is_none());
+        again.close().await;
+        sql(&mut admin, &format!("DROP TABLE {first}, {added}")).await;
+    }
+
     #[tokio::test]
     async fn a_copy_then_its_changes_then_a_restart_from_the_saved_position() {
         let Some(mut config) = crate::tests::server() else {
@@ -1483,7 +1696,7 @@ mod tests {
         .await;
         config["tables"] = serde_json::json!([table.clone()]);
         config["snapshot"] = "initial".into();
-        let saved = Arc::new(Saved::default());
+        let saved = Arc::new(Record::default());
         let limits = BatchLimits {
             max_records: 100,
             max_bytes: 1 << 20,

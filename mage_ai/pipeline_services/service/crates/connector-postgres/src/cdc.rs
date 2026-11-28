@@ -198,10 +198,13 @@ enum Cell<'a> {
     Text(Cow<'a, [u8]>),
 }
 
-/// Where a stream keeps that its initial copy is done: the service's state files.
+/// Where a stream keeps that its initial copy is done, with the tables named then: the
+/// service's state files.
 pub trait CopyRecord: Send + Sync {
-    fn done(&self, slot: &str) -> Result<bool, ConnectorError>;
-    fn mark_done(&self, slot: &str) -> Result<(), ConnectorError>;
+    /// None until the copy is done; then the tables named (none for every table of the
+    /// publication, or a copy done before the tables were kept).
+    fn done(&self, slot: &str) -> Result<Option<Vec<String>>, ConnectorError>;
+    fn mark_done(&self, slot: &str, tables: &[String]) -> Result<(), ConnectorError>;
 }
 
 /// The initial copy under way: a task on a connection of its own reads the tables in one
@@ -389,18 +392,132 @@ impl PgCdcSource {
         Ok(())
     }
 
+    /// Named tables the publication lacks (named after it was made) get no changes: they are
+    /// added to it when the stream makes its publication (`create_slot`), else the stream
+    /// stops with the statement to run.
+    async fn publish_named(&self, client: &Client) -> Result<(), ConnectorError> {
+        let s = &self.settings;
+        if s.tables.is_empty() {
+            return Ok(());
+        }
+        let exists = client
+            .query_opt(
+                "SELECT 1 FROM pg_publication WHERE pubname = $1",
+                &[&s.publication],
+            )
+            .await
+            .map_err(|e| classify("reading publications", e))?;
+        if exists.is_none() {
+            return Ok(());
+        }
+        let published: Vec<String> = client
+            .query(
+                "SELECT schemaname || '.' || tablename FROM pg_publication_tables \
+                 WHERE pubname = $1",
+                &[&s.publication],
+            )
+            .await
+            .map_err(|e| classify("reading the publication's tables", e))?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        let missing: Vec<&String> = s.tables.iter().filter(|t| !published.contains(t)).collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let names: Vec<String> = missing.iter().map(|t| qualified(t)).collect();
+        let statement = format!(
+            "ALTER PUBLICATION {} ADD TABLE {}",
+            identifier(&s.publication),
+            names.join(", ")
+        );
+        if !s.create_slot {
+            return Err(ConnectorError::fatal(format!(
+                "PostgreSQL publication {} does not have {}, so their changes would not come; \
+                 run {statement}",
+                s.publication,
+                names.join(", ")
+            )));
+        }
+        client.batch_execute(&statement).await.map_err(|e| {
+            ConnectorError::fatal(format!(
+                "PostgreSQL: adding {} to publication {}: {e}. The publication's owner can run \
+                 {statement}",
+                names.join(", "),
+                s.publication
+            ))
+        })?;
+        eprintln!(
+            "PostgreSQL stream source on {}: added {} to publication {}",
+            self.label(),
+            names.join(", "),
+            s.publication
+        );
+        Ok(())
+    }
+
+    /// What the copy reads at this start: every table until a copy was done, then the tables
+    /// named since; their changes since the slot's position follow the copy, as the first
+    /// copy's do.
+    async fn to_copy(&self, client: &Client) -> Result<Vec<String>, ConnectorError> {
+        let s = &self.settings;
+        if !s.snapshot {
+            return Ok(Vec::new());
+        }
+        let done = match &self.record {
+            Some(record) => record.done(&s.slot)?,
+            None => None,
+        };
+        match done {
+            None if s.tables.is_empty() => client
+                .query(
+                    "SELECT schemaname || '.' || tablename FROM pg_publication_tables \
+                     WHERE pubname = $1 ORDER BY 1",
+                    &[&s.publication],
+                )
+                .await
+                .map_err(|e| classify("reading the publication's tables", e))
+                .map(|rows| rows.iter().map(|r| r.get(0)).collect()),
+            None => Ok(s.tables.clone()),
+            Some(before) if before.is_empty() => Ok(Vec::new()),
+            Some(before) => Ok(s
+                .tables
+                .iter()
+                .filter(|t| !before.contains(t))
+                .cloned()
+                .collect()),
+        }
+    }
+
+    /// The tables a finished copy records.
+    fn named(&self) -> Vec<String> {
+        let mut names = self.settings.tables.clone();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     async fn connect(&mut self) -> Result<SourceEvent, ConnectorError> {
         let client = self.client().await?;
         if self.settings.create_slot {
             self.prepare(&client).await?;
         }
-        let copy = self.settings.snapshot
-            && !match &self.record {
-                Some(record) => record.done(&self.settings.slot)?,
-                None => false,
-            };
+        self.publish_named(&client).await?;
+        let tables = self.to_copy(&client).await?;
+        let copy = !tables.is_empty();
         if copy {
-            let (copy, tables) = self.begin_copy(&client).await?;
+            let first = match &self.record {
+                Some(record) => record.done(&self.settings.slot)?.is_none(),
+                None => true,
+            };
+            if !first {
+                eprintln!(
+                    "PostgreSQL stream source on {}: {} named since the copy",
+                    self.label(),
+                    tables.join(", ")
+                );
+            }
+            let (copy, tables) = self.begin_copy(&client, tables).await?;
             self.copy = Some(copy);
             self.copy_tables = tables;
         }
@@ -437,23 +554,12 @@ impl PgCdcSource {
     /// Starts the initial copy: the tables (the publication's when none are named) are read
     /// in one read-only snapshot, after the slot was made, so changes made while they are
     /// copied come after them and a mirror ends as the source is.
-    async fn begin_copy(&self, client: &Client) -> Result<(Copy, Vec<CopyTable>), ConnectorError> {
+    async fn begin_copy(
+        &self,
+        client: &Client,
+        tables: Vec<String>,
+    ) -> Result<(Copy, Vec<CopyTable>), ConnectorError> {
         let s = &self.settings;
-        let tables: Vec<String> = if s.tables.is_empty() {
-            client
-                .query(
-                    "SELECT schemaname || '.' || tablename FROM pg_publication_tables \
-                     WHERE pubname = $1 ORDER BY 1",
-                    &[&s.publication],
-                )
-                .await
-                .map_err(|e| classify("reading the publication's tables", e))?
-                .iter()
-                .map(|r| r.get(0))
-                .collect()
-        } else {
-            s.tables.clone()
-        };
         let lsn: Option<String> = client
             .query_opt(
                 "SELECT confirmed_flush_lsn::text FROM pg_replication_slots WHERE slot_name = $1",
@@ -549,7 +655,7 @@ impl PgCdcSource {
                     if self.committed < self.delivered {
                         self.copy_last = Some(self.delivered);
                     } else if let Some(record) = &self.record {
-                        record.mark_done(&self.settings.slot)?;
+                        record.mark_done(&self.settings.slot, &self.named())?;
                     }
                     return Ok(self.take()?.unwrap_or(SourceEvent::Idle));
                 }
@@ -1424,7 +1530,7 @@ impl Source for PgCdcSource {
                 && self.committed >= last
             {
                 if let Some(record) = &self.record
-                    && let Err(error) = record.mark_done(&self.settings.slot)
+                    && let Err(error) = record.mark_done(&self.settings.slot, &self.named())
                 {
                     return CommitOutcome::Failed(error);
                 }
@@ -1790,6 +1896,194 @@ mod tests {
             position: meta.last.clone(),
         }];
         assert_eq!(source.commit(&commits).await, CommitOutcome::Committed);
+    }
+
+    #[derive(Default)]
+    struct Copied(std::sync::Mutex<Option<Vec<String>>>);
+
+    impl CopyRecord for Copied {
+        fn done(&self, _slot: &str) -> Result<Option<Vec<String>>, ConnectorError> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn mark_done(&self, _slot: &str, tables: &[String]) -> Result<(), ConnectorError> {
+            *self.0.lock().unwrap() = Some(tables.to_vec());
+            Ok(())
+        }
+    }
+
+    /// Messages as (operation, table, id, v), acknowledged, until `until` holds of them or 30
+    /// seconds went by.
+    async fn read_until(
+        source: &mut PgCdcSource,
+        until: impl Fn(&[(String, String, i64, String)]) -> bool,
+    ) -> Vec<(String, String, i64, String)> {
+        let mut found = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !until(&found) && Instant::now() < deadline {
+            if let SourceEvent::Batch { batch, meta } = source.next_event().await.unwrap() {
+                for envelope in mage_stream_ports::read_envelope(&batch).unwrap() {
+                    let m: Value = serde_json::from_slice(&envelope.value).unwrap();
+                    found.push((
+                        m["_mage_operation"].as_str().unwrap().to_string(),
+                        m["_mage_table"].as_str().unwrap().to_string(),
+                        m["id"].as_i64().unwrap(),
+                        m["v"].as_str().unwrap_or_default().to_string(),
+                    ));
+                }
+                acknowledge(source, &meta).await;
+            }
+        }
+        found
+    }
+
+    /// I-596: a table added to `tables` after the publication was made got no changes. It is
+    /// added to the publication, copied, then followed; the tables copied before are not.
+    #[tokio::test]
+    async fn a_table_named_later_is_published_copied_then_followed() {
+        let Some(mut config) = crate::history::tests::server() else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let id = std::process::id();
+        let (first, added) = (format!("cdc_first_{id}"), format!("cdc_added_{id}"));
+        let slot = format!("cdc_added_{id}");
+        config["tables"] = serde_json::json!([format!("public.{first}")]);
+        config["replication_slot"] = slot.clone().into();
+        config["publication_name"] = slot.clone().into();
+        config["snapshot"] = "initial".into();
+        let admin = plain_client(&Settings::new(&config).unwrap(), "test")
+            .await
+            .unwrap();
+        let wal_level: String = admin.query_one("SHOW wal_level", &[]).await.unwrap().get(0);
+        if wal_level != "logical" {
+            eprintln!("the test server's wal_level is {wal_level}, not logical: skipped");
+            return;
+        }
+        admin
+            .batch_execute(&format!(
+                "DROP TABLE IF EXISTS {first}, {added}; \
+                 CREATE TABLE {first} (id integer PRIMARY KEY, v text); \
+                 CREATE TABLE {added} (id integer PRIMARY KEY, v text); \
+                 INSERT INTO {first} VALUES (1, 'tea'), (2, 'cake'); \
+                 INSERT INTO {added} VALUES (10, 'old'), (11, 'kept')"
+            ))
+            .await
+            .unwrap();
+        let limits = BatchLimits {
+            max_records: 100,
+            max_bytes: 1 << 20,
+            max_wait: Duration::from_millis(200),
+        };
+        let record = Arc::new(Copied::default());
+        let start = |config: &Value| {
+            PgCdcSource::new(config, limits)
+                .unwrap()
+                .with_copy_record(record.clone())
+        };
+        let row = |op: &str, table: &str, id: i64, v: &str| {
+            (op.to_string(), table.to_string(), id, v.to_string())
+        };
+        let mut source = start(&config);
+        source.next_event().await.unwrap();
+        let copied = read_until(&mut source, |f| f.len() >= 2).await;
+        assert_eq!(copied.len(), 2, "{copied:?}");
+        admin
+            .batch_execute(&format!("INSERT INTO {first} VALUES (3, 'pie')"))
+            .await
+            .unwrap();
+        let changed = read_until(&mut source, |f| !f.is_empty()).await;
+        assert_eq!(changed, [row("insert", &first, 3, "pie")]);
+        source.close().await;
+        assert_eq!(
+            record.0.lock().unwrap().clone(),
+            Some(vec![format!("public.{first}")])
+        );
+
+        // While it is stopped, both tables change; then the added table is named.
+        admin
+            .batch_execute(&format!(
+                "UPDATE {added} SET v = 'changed' WHERE id = 10; \
+                 INSERT INTO {added} VALUES (12, 'new'); \
+                 UPDATE {first} SET v = 'green tea' WHERE id = 1"
+            ))
+            .await
+            .unwrap();
+        config["tables"] =
+            serde_json::json!([format!("public.{first}"), format!("public.{added}")]);
+        let mut restarted = start(&config);
+        restarted.next_event().await.unwrap();
+        let copying: Vec<String> = restarted
+            .copy_tables
+            .iter()
+            .map(|t| t.table.clone())
+            .collect();
+        assert_eq!(copying, [format!("public.{added}")]);
+        let found = read_until(&mut restarted, |f| {
+            f.contains(&row("update", &first, 1, "green tea"))
+        })
+        .await;
+        // The added table as it is now (in the heap's order), then the changes since the
+        // slot's position.
+        let mut copied = found[..3].to_vec();
+        copied.sort_by_key(|r| r.2);
+        assert_eq!(
+            copied,
+            [
+                row("snapshot", &added, 10, "changed"),
+                row("snapshot", &added, 11, "kept"),
+                row("snapshot", &added, 12, "new"),
+            ],
+            "{found:?}"
+        );
+        assert!(
+            found.contains(&row("update", &first, 1, "green tea")),
+            "{found:?}"
+        );
+        // Its changes come now.
+        admin
+            .batch_execute(&format!("UPDATE {added} SET v = 'later' WHERE id = 11"))
+            .await
+            .unwrap();
+        let later = read_until(&mut restarted, |f| !f.is_empty()).await;
+        assert_eq!(later, [row("update", &added, 11, "later")]);
+        restarted.close().await;
+        assert_eq!(
+            record.0.lock().unwrap().clone(),
+            Some(vec![format!("public.{added}"), format!("public.{first}")])
+        );
+
+        // The next start copies nothing.
+        let mut again = start(&config);
+        again.next_event().await.unwrap();
+        assert!(again.copy.is_none());
+        again.close().await;
+
+        // A publication the stream does not make is not changed: the stream says what to run.
+        let other = format!("cdc_other_{id}");
+        admin
+            .batch_execute(&format!("CREATE TABLE {other} (id integer PRIMARY KEY)"))
+            .await
+            .unwrap();
+        config["tables"] =
+            serde_json::json!([format!("public.{first}"), format!("public.{other}")]);
+        config["create_slot"] = false.into();
+        let mut refused = start(&config);
+        let error = refused.next_event().await.unwrap_err();
+        assert!(
+            error.message.contains(&format!(
+                r#"run ALTER PUBLICATION "{slot}" ADD TABLE "public"."{other}""#
+            )),
+            "{}",
+            error.message
+        );
+        admin
+            .batch_execute(&format!(
+                "SELECT pg_drop_replication_slot('{slot}'); DROP PUBLICATION {slot}; \
+                 DROP TABLE {first}, {added}, {other}"
+            ))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

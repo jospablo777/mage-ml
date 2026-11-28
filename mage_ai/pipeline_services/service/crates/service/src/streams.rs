@@ -344,16 +344,30 @@ impl CopyRecordFiles {
 
 #[cfg(feature = "postgres")]
 impl mage_connector_postgres::cdc::CopyRecord for CopyRecordFiles {
-    fn done(&self, slot: &str) -> Result<bool, ConnectorError> {
-        self.0
+    /// `done`, then a table named per line.
+    fn done(&self, slot: &str) -> Result<Option<Vec<String>>, ConnectorError> {
+        let found = self
+            .0
             .read(&Self::name(slot))
-            .map(|found| found.is_some())
-            .map_err(ConnectorError::retryable)
+            .map_err(ConnectorError::retryable)?;
+        Ok(found.map(|text| {
+            String::from_utf8_lossy(&text)
+                .lines()
+                .skip(1)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        }))
     }
 
-    fn mark_done(&self, slot: &str) -> Result<(), ConnectorError> {
+    fn mark_done(&self, slot: &str, tables: &[String]) -> Result<(), ConnectorError> {
+        let mut text = String::from("done\n");
+        for table in tables {
+            text.push_str(table);
+            text.push('\n');
+        }
         self.0
-            .write(&Self::name(slot), b"done\n")
+            .write(&Self::name(slot), text.as_bytes())
             .map_err(ConnectorError::retryable)
     }
 }

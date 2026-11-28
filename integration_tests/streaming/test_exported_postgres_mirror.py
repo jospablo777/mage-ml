@@ -2,7 +2,8 @@
 A database mirrored by an exported stream (ADR-0045): the change capture source copies the
 tables' rows first (snapshot: initial), then streams their changes, and the PostgreSQL sink
 keeps a table per source table (mirror: upserts by key, deletes delete). A restarted service
-does not copy again, and the changes made while it was down arrive.
+does not copy again, and the changes made while it was down arrive. A table added to the
+source's tables joins the publication, is copied at the next start, then followed.
 """
 import json
 import signal
@@ -32,6 +33,8 @@ def source(pg, schema):
         f'CREATE TABLE {schema}.customers (id integer PRIMARY KEY, name text)',
         f"INSERT INTO {schema}.orders SELECT i, 'item ' || i, i FROM generate_series(1, 2500) i",
         f"INSERT INTO {schema}.customers VALUES (7, 'ann'), (8, 'bo')",
+        f'CREATE TABLE {schema}.extra (id integer PRIMARY KEY, v text)',
+        f"INSERT INTO {schema}.extra VALUES (1, 'a'), (2, 'b')",
     )
     names = dict(slot=f'it_{uuid.uuid4().hex[:12]}', publication=f'it_{uuid.uuid4().hex[:12]}')
     yield names
@@ -153,6 +156,24 @@ def test_a_database_is_copied_then_mirrored_and_a_restart_does_not_copy_again(
         assert wait_for(lambda: same(pg, schema, 'orders', 'id, item, qty'), timeout=60)
         time.sleep(2)
         assert query(pg, stamp) == copied_at, 'the rows were copied again'
+
+        # A table added to the source's tables: published, copied at the next start, then
+        # followed.
+        service.process.send_signal(signal.SIGTERM)
+        assert service.process.wait(timeout=60) == 0
+        execute(pg, f"INSERT INTO {schema}.extra VALUES (3, 'c')")
+        path = directory / 'service.json'
+        manifest = json.loads(path.read_text())
+        manifest['pipelines'][0]['stream']['source']['config']['tables'].append(
+            f'{schema}.extra')
+        path.write_text(json.dumps(manifest))
+        service = RunningService(binary, directory, tmp_path / 'data', **env)
+        service.start()
+        assert wait_for(lambda: same(pg, schema, 'extra', 'id, v'), timeout=60)
+        execute(pg, f"UPDATE {schema}.extra SET v = 'later' WHERE id = 1")
+        assert wait_for(lambda: same(pg, schema, 'extra', 'id, v'), timeout=60)
+        assert query(pg, stamp) == copied_at, 'the tables synced already were copied again'
+        assert f'{schema}.extra' in records[0].read_text()
     except AssertionError:
         if service and service.log.is_file():
             print(service.log.read_text()[-6000:])

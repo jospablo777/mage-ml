@@ -78,6 +78,13 @@ mirror:
 See [stream services](/production/stream-services#postgresql-changes) for the source and
 the sink's mirror mode in detail.
 
+### Adding a table later
+
+Add the table to the source block's `tables` (and its key to the sink's `mirror.key` when
+keys are named by table), then restart the stream. The next start copies only that table,
+then follows its changes with the others'; from PostgreSQL the table is added to the
+publication first. The tables synced already are not copied again.
+
 ## From MySQL
 
 Choose **MySQL** as the source's database. The pipeline's source reads the binary log

@@ -3,7 +3,8 @@ A MySQL database mirrored into PostgreSQL by an exported stream (ADR-0048): the 
 capture source copies the tables' rows without a global lock, then reads the binary log from
 the position read before the copy; the PostgreSQL sink keeps a table per source table
 (mirror: upserts by key, deletes delete). The position is saved after the sinks: a restarted
-service does not copy again, and the changes made while it was down arrive.
+service does not copy again, and the changes made while it was down arrive. A table added to
+the source's tables is copied at the next start, then followed.
 """
 import json
 import signal
@@ -138,6 +139,26 @@ def test_a_mysql_database_is_copied_then_mirrored_and_a_restart_does_not_copy_ag
                         == rows(my, 'orders', columns), timeout=60)
         time.sleep(2)
         assert query(pg, stamp) == copied_at, 'the rows were copied again'
+
+        # A table added to the source's tables: copied at the next start, then followed.
+        service.process.send_signal(signal.SIGTERM)
+        assert service.process.wait(timeout=60) == 0
+        run(my, 'INSERT INTO ignored VALUES (2), (3)', 'UPDATE orders SET qty = 7 WHERE id = 2501')
+        path = directory / 'service.json'
+        manifest = json.loads(path.read_text())
+        manifest['pipelines'][0]['stream']['source']['config']['tables'].append('ignored')
+        path.write_text(json.dumps(manifest))
+        service = RunningService(binary, directory, tmp_path / 'data', **env)
+        service.start()
+        assert wait_for(lambda: mirrored(pg, schema, 'ignored', 'id')
+                        == rows(my, 'ignored', 'id'), timeout=60)
+        run(my, 'DELETE FROM ignored WHERE id = 1')
+        assert wait_for(lambda: mirrored(pg, schema, 'ignored', 'id')
+                        == rows(my, 'ignored', 'id'), timeout=60)
+        assert wait_for(lambda: mirrored(pg, schema, 'orders', columns)
+                        == rows(my, 'orders', columns), timeout=60)
+        assert query(pg, stamp) == copied_at, 'the tables synced already were copied again'
+        assert 'named since the last run' in service.log.read_text()
     except AssertionError:
         if service and service.log.is_file():
             print(service.log.read_text()[-6000:])

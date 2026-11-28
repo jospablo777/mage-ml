@@ -667,8 +667,11 @@ sslmode: verify-full
   copy and the copy reads one snapshot, so changes made while the rows are copied come after
   them, and a mirror (upserts by key) ends as the source is. Copied rows have
   `_mage_operation: snapshot` and the slot's position as `_mage_lsn`. The copy is done once:
-  the pipeline's state keeps that it finished, and a copy cut short starts again. It runs on
-  the engine (the Run tab and exported services).
+  the pipeline's state keeps that it finished, with the tables named, and a copy cut short
+  starts again. It runs on the engine (the Run tab and exported services).
+- A table added to `tables` later is added to the publication at the next start (with
+  `create_slot: false` the stream stops and names the `ALTER PUBLICATION` to run), copied,
+  then followed. The tables copied before are not copied again.
 
 ### MySQL changes
 
@@ -718,6 +721,9 @@ sslmode: verify-full          # disable, prefer (the default), require, verify-c
 - When the log is quiet and the sinks took everything, the source says how far it is
   caught up (the server's clock, less a second), so a [history](#postgresql) moves on and
   lookups `as_of` a later time answer, as with PostgreSQL.
+- A table added to `tables` later is copied at the next start, then the log is read on from
+  the saved position, so its changes since come after the copy, as with the first copy. The
+  saved position names the tables; the tables read before are not copied again.
 - Without `tables`, every table of the database is read, a table made after the stream
   started too (from its first row).
 - DDL is not replicated. New and changed columns come with the rows (each change names its

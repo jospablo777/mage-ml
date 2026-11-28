@@ -54,10 +54,15 @@
   table, versioned by commit time, deletes applied, decimals exact.
 - The Ingestion page syncs into ClickHouse too: the destination's check, its database made
   when missing, a mirror table per source table.
+- A table added to a sync's `tables` is copied at the next start, then followed; the
+  tables synced already are not copied again. From PostgreSQL it is added to the
+  publication first.
 - The MySQL source says in the service log when a TRUNCATE, DROP or rename of a table it
   reads goes by, as these are not replicated.
 - Fixed: a MySQL source without `tables` (every table of the database) read a table made
   after it started only after a restart, without the rows before.
+- Fixed: a table added to a PostgreSQL source's `tables` after its publication was made got
+  no changes (the publication kept its first tables).
 
 ### Streams
 
