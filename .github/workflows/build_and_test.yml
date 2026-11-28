@@ -739,6 +739,9 @@ jobs:
           python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests -n 4 --dist loadfile --junitxml=unit-results.xml --timeout 900 --timeout-method thread
         env:
           OPENAI_API_KEY: abcdefg
+          # A worker that crashes (I-592: "node down: Not properly terminated") prints the
+          # Python stack it crashed in.
+          PYTHONFAULTHANDLER: "1"
           # Smaller cached target directory; CI builds each block once.
           CARGO_INCREMENTAL: "0"
       - name: Save the Rust blocks' build directory
