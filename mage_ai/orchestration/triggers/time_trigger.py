@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 
-from mage_ai.orchestration.pipeline_scheduler import check_sla, schedule_all
+from mage_ai.orchestration.pipeline_scheduler import (
+    check_datasets,
+    check_sla,
+    schedule_all,
+)
 
 
 class TimeTrigger(ABC):
@@ -10,6 +14,7 @@ class TimeTrigger(ABC):
     def run(self) -> None:
         schedule_all()
         check_sla()
+        check_datasets()
 
     @abstractmethod
     def start(self) -> None:

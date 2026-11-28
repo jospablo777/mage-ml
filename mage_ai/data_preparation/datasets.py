@@ -23,11 +23,16 @@ its checks failing.
 Dependencies: a dataset depends on the registered datasets its block reads, through the
 blocks between them, and on those of the pipelines that feed its pipeline
 (pipeline_dependencies.py).
+
+Alerts: the scheduler checks the datasets with a max_age every CHECK_EVERY_SECONDS
+(watch_freshness) and sends the pipeline's notifications once when one goes stale and once
+when it is fresh again; what was last seen is kept in the variables folder.
 """
+import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
@@ -37,6 +42,8 @@ AGE = re.compile(r'^\s*(\d+)\s*([mhdw])\s*$')
 UNITS = dict(m='minutes', h='hours', d='days', w='weeks')
 FIELDS = ('id', 'name', 'description', 'owner', 'pipeline', 'block', 'output', 'time_column',
           'max_age')
+CHECK_EVERY_SECONDS = 300
+ALERTS_FILE = 'dataset_alerts.json'
 
 
 class DatasetError(Exception):
@@ -242,7 +249,8 @@ def freshness(entry: Dict[str, Any], published: Optional[datetime],
     )
 
 
-def status(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+def status(repo_path: str, entry: Dict[str, Any],
+           now: Optional[datetime] = None) -> Dict[str, Any]:
     """The dataset as it is now: published run, rows, columns, data through, freshness and
     checks."""
     from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -262,7 +270,7 @@ def status(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
             footer = None
     published = _as_time(getattr(completed, 'completed_at', None))
     through = _as_time((footer or {}).get('through'))
-    fresh = freshness(entry, published, through)
+    fresh = freshness(entry, published, through, now)
     if through is None and (footer or {}).get('through') is not None and entry.get('max_age'):
         fresh = dict(state='unknown', basis='data',
                      reason=f"{entry['time_column']} is not a date or a time.")
@@ -358,3 +366,111 @@ def summary(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     """A search result: the entry with its status, without its runs."""
     found = status(repo_path, entry)
     return dict(entry, **{k: v for k, v in found.items() if k not in ('runs', 'columns')})
+
+
+def describe_age(seconds: int) -> str:
+    for unit, size in (('day', 86400), ('hour', 3600), ('minute', 60)):
+        if seconds >= size:
+            count = seconds // size
+            return f"{count} {unit}{'s' if count != 1 else ''}"
+    return f'{seconds} seconds'
+
+
+def _alerts_path(repo_path: str) -> str:
+    from mage_ai.settings.repo import get_variables_dir
+
+    return os.path.join(get_variables_dir(repo_path=repo_path), ALERTS_FILE)
+
+
+def _read_alerts(repo_path: str) -> Dict[str, Dict[str, Any]]:
+    try:
+        with open(_alerts_path(repo_path)) as file:
+            found = json.load(file)
+        return found if isinstance(found, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_alerts(repo_path: str, alerts: Dict[str, Dict[str, Any]]) -> None:
+    path = _alerts_path(repo_path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary = f'{path}.tmp'
+    with open(temporary, 'w') as file:
+        json.dump(alerts, file, sort_keys=True)
+    os.replace(temporary, path)
+
+
+def watch_freshness(
+    repo_path: str,
+    notify: Callable[[str, Dict[str, Any], str, Dict[str, Any]], None],
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Each dataset with a max_age that went stale, or is fresh again, since the last check:
+    `notify(repo_path, entry, 'stale' or 'fresh', status)` once per change. Unknown states
+    change nothing. Returns the changes.
+    """
+    now = now or datetime.now(timezone.utc)
+    alerts = _read_alerts(repo_path)
+    before_check = json.dumps(alerts, sort_keys=True)
+    changes = []
+    seen = set()
+    for entry in load(repo_path):
+        if not entry.get('max_age'):
+            continue
+        seen.add(entry['id'])
+        found = status(repo_path, entry, now)
+        state = found['freshness']['state']
+        before = (alerts.get(entry['id']) or {}).get('state')
+        if state == 'stale' and before != 'stale' or state == 'fresh' and before == 'stale':
+            changes.append(dict(entry=entry, change=state, status=found))
+        if state in ('fresh', 'stale') and state != before:
+            alerts[entry['id']] = dict(state=state, since=now.isoformat())
+    for dataset_id in set(alerts) - seen:
+        del alerts[dataset_id]
+    if json.dumps(alerts, sort_keys=True) != before_check:
+        _write_alerts(repo_path, alerts)
+    for change in changes:
+        notify(repo_path, change['entry'], change['change'], change['status'])
+    return changes
+
+
+def notification(entry: Dict[str, Any], change: str, found: Dict[str, Any]) -> Dict[str, str]:
+    """The title, summary and details of a dataset going stale or fresh again."""
+    fresh = found['freshness']
+    measured = 'data' if fresh.get('basis') == 'data' else 'last publication'
+    age = describe_age(int(fresh.get('age_seconds') or 0))
+    owner = f" (owner {entry['owner']})" if entry.get('owner') else ''
+    if change == 'stale':
+        title = f"Dataset stale: {entry['id']}"
+        summary = (f"{entry['id']}{owner} is stale: its {measured} is {age} old, "
+                   f"{entry['max_age']} allowed.")
+    else:
+        title = f"Dataset fresh again: {entry['id']}"
+        summary = (f"{entry['id']}{owner} is fresh again: its {measured} is {age} old, "
+                   f"{entry['max_age']} allowed.")
+    published = found.get('published_at')
+    details = '\n'.join(line for line in [
+        summary,
+        f"Pipeline {entry['pipeline']}, block {entry['block']}, output {entry['output']}.",
+        f"Last published {published} by run {found.get('pipeline_run_id')}." if published
+        else 'No run of the block has completed.',
+        f"Data through {found['data_through']}." if found.get('data_through') else None,
+    ] if line)
+    return dict(title=title, summary=summary, details=details)
+
+
+def notify_change(repo_path: str, entry: Dict[str, Any], change: str,
+                  found: Dict[str, Any]) -> None:
+    """Sends the dataset pipeline's notifications (Slack, email, ...) about the change."""
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.orchestration.notification.config import NotificationConfig
+    from mage_ai.orchestration.notification.sender import NotificationSender
+    from mage_ai.shared.hash import merge_dict
+
+    pipeline = Pipeline.get(entry['pipeline'], repo_path=repo_path, check_if_exists=True)
+    if pipeline is None:
+        return
+    NotificationSender(NotificationConfig.load(config=merge_dict(
+        pipeline.repo_config.notification_config, pipeline.notification_config,
+    ))).send(**notification(entry, change, found))

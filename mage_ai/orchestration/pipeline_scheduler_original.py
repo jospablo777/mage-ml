@@ -2269,6 +2269,26 @@ def check_sla():
                 pipeline_run.update(passed_sla=True)
 
 
+_datasets_checked_at = None
+
+
+def check_datasets():
+    """Every datasets.CHECK_EVERY_SECONDS: notifications for datasets that went stale or
+    are fresh again (data_preparation/datasets.py)."""
+    global _datasets_checked_at
+    from mage_ai.data_preparation import datasets
+
+    now = time.monotonic()
+    if _datasets_checked_at is not None and \
+            now - _datasets_checked_at < datasets.CHECK_EVERY_SECONDS:
+        return
+    _datasets_checked_at = now
+    try:
+        datasets.watch_freshness(get_repo_path(), datasets.notify_change)
+    except Exception as error:
+        logger.warning(f'Checking the datasets\' freshness failed: {error}')
+
+
 def schedule_all():
     """One pass of the scheduler, reading each pipeline and the project config once
     (read_cache.py)."""

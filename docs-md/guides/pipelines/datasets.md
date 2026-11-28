@@ -40,3 +40,18 @@ datasets:
 - `id` is lowercase letters, digits and `_`. One output is one dataset.
 - Without `max_age`, freshness is unknown, and the page says so.
 - The outputs of global data products are offered as drafts to register.
+
+## Stale alerts
+
+The scheduler checks every dataset with a `max_age` every 5 minutes. When one goes stale
+it sends the [notifications](../../observability/alerting/alerting-email.md) of the dataset's
+pipeline (Slack, email, Teams and the rest) once:
+
+```text
+Dataset stale: daily_sales
+daily_sales (owner ana@example.com) is stale: its data is 2 days old, 1d allowed.
+```
+
+and once more when it is fresh again. A dataset that stays stale sends nothing more, and a
+pipeline that stopped running is caught as well as one whose runs publish old data. A
+problem in `datasets.yaml` stops no pipeline: the check writes it to the scheduler's log.

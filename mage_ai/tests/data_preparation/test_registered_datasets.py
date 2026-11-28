@@ -154,3 +154,55 @@ class DatasetsTest(DBTestCase):
         self.run_once()
         found = datasets.status(self.repo_path, entry)
         self.assertEqual(found['freshness']['reason'], 'sales is not a date or a time.')
+
+    def test_a_dataset_going_stale_and_fresh_again_notifies_once_each(self):
+        from unittest.mock import patch
+
+        from mage_ai.orchestration import pipeline_scheduler_original
+
+        entry = self.register(id='daily_total', block=self.total_uuid, time_column='day',
+                              max_age='3d', owner='ana@example.com')
+        self.register(id='no_limit', block=self.load_uuid)
+        self.run_once()
+        sent = []
+
+        def notify(repo_path, entry, change, found):
+            sent.append((entry['id'], change, datasets.notification(entry, change, found)))
+
+        # The data ends 2026-11-22: fresh on 11-24, stale on 11-27 (5 days), fresh at 11-24.
+        def at(day):
+            return datetime(2026, 11, day, tzinfo=timezone.utc)
+
+        datasets.watch_freshness(self.repo_path, notify, now=at(24))
+        self.assertEqual(sent, [])
+        datasets.watch_freshness(self.repo_path, notify, now=at(27))
+        datasets.watch_freshness(self.repo_path, notify, now=at(27))
+        self.assertEqual([(i, c) for i, c, _ in sent], [('daily_total', 'stale')])
+        message = sent[0][2]
+        self.assertEqual(message['title'], 'Dataset stale: daily_total')
+        self.assertEqual(message['summary'], 'daily_total (owner ana@example.com) is stale: '
+                                             'its data is 5 days old, 3d allowed.')
+        self.assertIn(f'Pipeline {self.pipeline.uuid}, block {self.total_uuid}',
+                      message['details'])
+
+        datasets.watch_freshness(self.repo_path, notify, now=at(24))
+        self.assertEqual([(i, c) for i, c, _ in sent][-1], ('daily_total', 'fresh'))
+        self.assertEqual(len(sent), 2)
+
+        # A dataset no longer registered is forgotten.
+        datasets.unregister(self.repo_path, entry['id'])
+        datasets.watch_freshness(self.repo_path, notify)
+        self.assertEqual(datasets._read_alerts(self.repo_path), {})
+
+        # The scheduler checks at most every CHECK_EVERY_SECONDS.
+        with patch.object(datasets, 'watch_freshness') as watch, \
+                patch.object(pipeline_scheduler_original, '_datasets_checked_at', None):
+            pipeline_scheduler_original.check_datasets()
+            pipeline_scheduler_original.check_datasets()
+        self.assertEqual(watch.call_count, 1)
+
+    def test_ages_read_in_their_largest_unit(self):
+        self.assertEqual(datasets.describe_age(3 * 86400 + 5), '3 days')
+        self.assertEqual(datasets.describe_age(3600), '1 hour')
+        self.assertEqual(datasets.describe_age(150), '2 minutes')
+        self.assertEqual(datasets.describe_age(9), '9 seconds')
