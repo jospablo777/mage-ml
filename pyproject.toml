@@ -231,10 +231,12 @@ spark = [
   "botocore>=1.42,<2",
 ]
 # Streaming pipelines on Spark Structured Streaming over Spark Connect (spark_stream.py).
-# Not in `all`: pyspark-client is the same `pyspark` package as PySpark, without a Spark
-# home, and libraries that find it (Great Expectations) fail to import.
+# Full PySpark, not pyspark-client: the client is the same `pyspark` package without a Spark
+# home, and MLflow and Great Expectations, which look for a Spark session when pyspark is
+# there, fail next to it. An exported Spark stream's container uses pyspark-client alone.
+# Not in `all` (about 400 MB).
 spark-connect = [
-  "pyspark-client>=4.3,<5",
+  "pyspark[connect]>=4.3,<5",
 ]
 streaming = [
   "confluent-avro~=1.8.0",
@@ -368,6 +370,8 @@ filterwarnings = [
   "error::FutureWarning",
   "error::DeprecationWarning:mage_ai",
   "error::DeprecationWarning:mage_integrations",
+  # PySpark 4.3 says so on import when pandas is 3; Spark streams use Arrow, not pandas.
+  "ignore:PySpark does not yet fully support pandas:FutureWarning",
 ]
 
 [tool.isort]

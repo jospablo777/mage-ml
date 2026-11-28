@@ -16,7 +16,10 @@ mage spark-stream . orders_clean \
   --env KAFKA_BOOTSTRAP=kafka.internal:9092
 ```
 
-It starts the query on the server and prints its progress every 10 seconds
+The `spark-connect` extra installs PySpark with its Connect client (about 400 MB; the
+smaller `pyspark-client` package breaks MLflow and Great Expectations, which look for a
+local Spark when they find `pyspark`). It starts the query on the server and prints its
+progress every 10 seconds
 (`batch 12: 500 rows in, 410/s arriving, 2,300/s processed, 450 rows out`). Ctrl-C stops
 it; the next run continues from the checkpoint. A block that fails stops the query with the
 block's name and reason.
