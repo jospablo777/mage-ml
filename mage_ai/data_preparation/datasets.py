@@ -175,13 +175,10 @@ def _status(block_run) -> str:
     return str(getattr(block_run.status, 'value', block_run.status))
 
 
-def _footer(repo_path: str, entry: Dict[str, Any], block_run) -> Optional[Dict[str, Any]]:
+def _footer(pipeline, entry: Dict[str, Any], block_run) -> Optional[Dict[str, Any]]:
     """Rows, columns and the time column's largest value, from the Parquet footer."""
     import pyarrow.parquet as pq
 
-    from mage_ai.data_preparation.models.pipeline import Pipeline
-
-    pipeline = Pipeline.get(entry['pipeline'], repo_path=repo_path)
     variable = pipeline.variable_manager.get_variable_object(
         entry['pipeline'], entry['block'], entry['output'],
         partition=block_run.pipeline_run.execution_partition,
@@ -248,13 +245,19 @@ def freshness(entry: Dict[str, Any], published: Optional[datetime],
 def status(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     """The dataset as it is now: published run, rows, columns, data through, freshness and
     checks."""
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    try:
+        pipeline = Pipeline.get(entry['pipeline'], repo_path=repo_path, check_if_exists=True)
+    except Exception:
+        pipeline = None
     runs = _latest_runs(entry['pipeline'], entry['block'])
     completed = next((r for r in runs if _status(r) == 'completed'), None)
     latest = runs[0] if runs else None
     footer = None
-    if completed is not None:
+    if completed is not None and pipeline is not None:
         try:
-            footer = _footer(repo_path, entry, completed)
+            footer = _footer(pipeline, entry, completed)
         except Exception:
             footer = None
     published = _as_time(getattr(completed, 'completed_at', None))
@@ -264,12 +267,6 @@ def status(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         fresh = dict(state='unknown', basis='data',
                      reason=f"{entry['time_column']} is not a date or a time.")
     failing = []
-    from mage_ai.data_preparation.models.pipeline import Pipeline
-
-    try:
-        pipeline = Pipeline.get(entry['pipeline'], repo_path=repo_path, check_if_exists=True)
-    except Exception:
-        pipeline = None
     if pipeline is None:
         failing.append(f"its pipeline {entry['pipeline']} does not exist")
     elif pipeline.get_block(entry['block']) is None:
