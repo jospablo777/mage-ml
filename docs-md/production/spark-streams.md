@@ -60,11 +60,38 @@ restart it. Its `README.md` lists the variables to set.
 | Kafka sinks: `bootstrap_server`, `topic`, `security_protocol`, `sasl_config` | one: `writeStream.format("kafka")`; several: `foreachBatch`, each sink its block's messages |
 | A Kafka sink with `dead_letter: true` | the messages a block fails on, as they came, with `mage-error` and `mage-stream` headers |
 | The source's position, committed after the sinks | Spark's checkpoint, written after the sink |
+| A [window block](../guides/streaming/introduction.md#windows) as the last block: tumbling, hopping or session, its key and aggregates | `withWatermark` and `groupBy(window(...))` or `session_window`, written as the engine writes a closed window |
 
 `mage spark-stream --check` says whether a pipeline can run, without starting it. A pipeline
 with anything else is refused with the list: other sources and sinks, exactly-once
-delivery, event time, keyed state, SQL, window, lookup, Rust and R stream blocks. Those run on the engine. Broadcast values are set through the stream
-service's API, which Spark does not have: blocks read an empty `kwargs['broadcast']`.
+delivery, keyed state, SQL, lookup, Rust and R stream blocks, and event time without a
+window. Those run on the engine. Broadcast values are set through the stream service's
+API, which Spark does not have: blocks read an empty `kwargs['broadcast']`.
+
+## Windows
+
+A window block runs as Spark's own aggregation over the same event time (the source's
+`event_time`, or the Kafka timestamp), with the engine's aggregates and results: the key
+(or `key_as`), `window_start` and `window_end` in UTC, then each aggregate, nulls kept.
+`count` counts every event, `sum` is 0.0 without numbers, `min`, `max` and `avg` are null
+without them, and a number may be text.
+
+```json
+{"key":"a","window_start":"2026-11-28T10:00:00.000Z","window_end":"2026-11-28T10:00:10.000Z","payments":3,"total":30.0}
+```
+
+On Spark a window is the last block, with every sink after it and Python blocks before it
+(they need `event_time` with a `field`: the Kafka timestamp does not pass through them).
+Late messages need `on_late: pass`: dead letters for late messages run on the engine only.
+What differs, which `--check` and the start print:
+
+| | Engine | Spark |
+| --- | --- | --- |
+| Watermark | one per Kafka partition | one for the query: with partitions far apart in time, Spark drops as late events the engine would count |
+| When it moves | with each message | at the end of each batch: an event late by less than a batch still counts, and a result is written one batch later |
+| A result's Kafka timestamp | the window's end | when it is written |
+| Late events | counted in the stream's numbers | in the query's progress, `numRowsDroppedByWatermark` |
+| `distinct` | `1` and `"1"` apart | by text: `1` and `"1"` once |
 
 ## Positions
 

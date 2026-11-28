@@ -10,6 +10,8 @@
   checkpoint. What Spark does not run yet is refused with the list; `--check` says so
   without starting.
 - `mage export spark-stream` writes a container that runs it without MageML.
+- A window block runs on Spark as its own aggregation over event time, with the engine's
+  aggregates and results; where Spark's single watermark differs, `--check` says so.
 
 ### Datasets
 

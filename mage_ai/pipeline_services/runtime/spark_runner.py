@@ -135,7 +135,9 @@ def blocks_function(plan: Dict[str, Any], worker_source: str) -> Callable:
     it needs travels in it, so Spark's Python workers need only pyarrow.
     """
     chain = [dict(b) for b in plan['chain']]
-    outputs = list(dict.fromkeys(s['after'] for s in plan['sinks']))
+    # With a window, the blocks' output is the window's input.
+    outputs = list(plan['window']['upstream']) if plan.get('window') else \
+        list(dict.fromkeys(s['after'] for s in plan['sinks']))
     variables = dict(plan.get('variables') or {})
     isolate = bool(plan.get('dead_letter'))
     stream_name = plan['pipeline_uuid'].encode()
@@ -225,6 +227,89 @@ def blocks_function(plan: Dict[str, Any], worker_source: str) -> Callable:
     return run
 
 
+# A window's start and end as the engine writes them: UTC, milliseconds, Z.
+ISO_MILLIS = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+
+
+def window_frame(frame, plan: Dict[str, Any]):
+    """
+    The window block as Spark's aggregation (the session's time zone is UTC): the event time
+    the stream reads, a watermark its lateness behind, and per key and window the engine's
+    aggregates, written as the engine writes them: the key (`key`, or key_as), window_start,
+    window_end, then each aggregate. A key is its field's text (a string as it is, other
+    values as JSON, "null" when missing); count counts every event, sum is 0.0 without
+    numbers, min, max and avg are null without them; a number may be text.
+    """
+    from pyspark.sql import functions as F
+
+    spec = plan['window']['spec']
+    time = plan.get('time') or {}
+    value = F.col('value').cast('string')
+
+    def field(column, path):
+        return F.get_json_object(column, f'$.{path}')
+
+    if time.get('field'):
+        raw = field(value, time['field'])
+        if time.get('format') == 'rfc3339':
+            event = raw.try_cast('timestamp')
+        else:
+            number = raw.try_cast('double')
+            if time.get('format') == 'epoch_s':
+                number = number * 1000
+            event = F.timestamp_millis(number.cast('bigint'))
+    else:
+        event = F.col('timestamp')
+    key = F.coalesce(field(value, spec['key']), F.lit('null')) if spec.get('key') \
+        else F.lit('')
+    events = (
+        frame.select(event.alias('_event'), key.alias('_key'), value.alias('_value'))
+        .where(F.col('_event').isNotNull())
+        .withWatermark('_event', f"{int(time.get('lateness_ms') or 0)} milliseconds")
+    )
+    kind = spec['kind']
+    if kind['type'] == 'tumbling':
+        window = F.window('_event', f"{kind['size_ms']} milliseconds")
+    elif kind['type'] == 'hopping':
+        window = F.window('_event', f"{kind['size_ms']} milliseconds",
+                          f"{kind['slide_ms']} milliseconds")
+    else:
+        window = F.session_window('_event', f"{kind['gap_ms']} milliseconds")
+    aggregates = []
+    for index, (_name, function) in enumerate(spec['aggregates']):
+        if function == 'count':
+            aggregate = F.count(F.lit(1))
+        else:
+            ((kind_of, path),) = function.items()
+            text = field(F.col('_value'), path)
+            number = text.try_cast('double')
+            if kind_of == 'sum':
+                aggregate = F.coalesce(F.sum(number), F.lit(0.0))
+            elif kind_of == 'min':
+                aggregate = F.min(number)
+            elif kind_of == 'max':
+                aggregate = F.max(number)
+            elif kind_of == 'avg':
+                aggregate = F.avg(number)
+            else:
+                aggregate = F.size(F.collect_set(text))
+        aggregates.append(aggregate.alias(f'_a{index}'))
+    grouped = events.groupBy(window.alias('_window'), F.col('_key')).agg(*aggregates)
+    fields = []
+    if spec.get('key'):
+        fields.append(F.col('_key').alias(spec.get('key_as') or 'key'))
+    fields += [
+        F.date_format(F.col('_window.start'), ISO_MILLIS).alias('window_start'),
+        F.date_format(F.col('_window.end'), ISO_MILLIS).alias('window_end'),
+    ]
+    fields += [F.col(f'_a{index}').alias(name)
+               for index, (name, _) in enumerate(spec['aggregates'])]
+    return grouped.select(
+        (F.col('_key') if spec.get('key') else F.lit(None).cast('string')).alias('key'),
+        F.to_json(F.struct(*fields), {'ignoreNullFields': 'false'}).alias('value'),
+    )
+
+
 def spark_session_class():
     import warnings
 
@@ -260,6 +345,23 @@ def start(plan: Dict[str, Any], remote: str, checkpoint: str,
     reader = spark.readStream.format('kafka').option('includeHeaders', 'true')
     for key, value in source.items():
         reader = reader.option(key, value)
+    if plan.get('window'):
+        # Window boundaries and their text are in UTC, as on the engine.
+        spark.conf.set('spark.sql.session.timeZone', 'UTC')
+        frame = reader.load()
+        if plan['window']['upstream']:
+            frame = frame.select('key', 'value', 'headers').mapInArrow(
+                blocks_function(plan, worker_source), OUTPUT_SCHEMA,
+            )
+        frame = window_frame(frame, plan)
+        if len(targets) == 1:
+            writer = frame.writeStream.format('kafka').outputMode('append')
+            for key, value in targets[0][1].items():
+                writer = writer.option(key, value)
+        else:
+            writer = frame.writeStream.outputMode('append').foreachBatch(
+                write_each([options for _, options in targets]))
+        return spark, _started(writer, plan, checkpoint)
     frame = reader.load().select('key', 'value', 'headers').mapInArrow(
         blocks_function(plan, worker_source), OUTPUT_SCHEMA,
     )
@@ -269,13 +371,33 @@ def start(plan: Dict[str, Any], remote: str, checkpoint: str,
             writer = writer.option(key, value)
     else:
         writer = frame.writeStream.foreachBatch(write_targets(targets))
-    query = (
+    return spark, _started(writer, plan, checkpoint)
+
+
+def _started(writer, plan: Dict[str, Any], checkpoint: str):
+    return (
         writer.option('checkpointLocation', checkpoint)
         .queryName(plan['pipeline_uuid'])
         .trigger(processingTime=f'{trigger_seconds(plan)} seconds')
         .start()
     )
-    return spark, query
+
+
+def write_each(targets):
+    """foreachBatch's function for a window's results and several sinks: every sink gets
+    every result. A batch that fails is written again: at least once, as on the engine."""
+    def write(frame, _batch_id):
+        frame.persist()
+        try:
+            for options in targets:
+                writer = frame.write.format('kafka')
+                for key, value in options.items():
+                    writer = writer.option(key, value)
+                writer.save()
+        finally:
+            frame.unpersist()
+
+    return write
 
 
 def write_targets(targets):

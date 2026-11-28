@@ -4,8 +4,10 @@ Streaming pipelines on Spark Structured Streaming (ADR-0047), on a Spark Connect
 same messages and the same output, its Python block run by the engine's worker code in
 mapInArrow. A restart continues from the checkpoint, a failing block stops the query with
 the block's name and reason, several sinks and a dead-letter sink each get their messages,
-and the export runs the stream from a container of its own.
+and the export runs the stream from a container of its own. A window block runs as Spark's
+aggregation over event time, with the engine's results.
 """
+import json
 import subprocess
 import textwrap
 import time
@@ -13,11 +15,12 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, KafkaProducer
 from kafka.admin import KafkaAdminClient, NewTopic
 
 from integration_tests.kafka.test_exported_stream import (  # noqa: F401 - fixtures
     SINK,
+    SOURCE,
     TRANSFORM,
     consume,
     produce,
@@ -199,3 +202,195 @@ def test_several_sinks_and_dead_letters_each_get_their_messages(
             consumer.close()
         admin.delete_topics(extra)
         admin.close()
+
+
+WINDOW_SOURCE = '''
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: %(topic)s
+consumer_group: %(group)s
+auto_offset_reset: earliest
+batch_size: 50
+timeout_ms: 200
+event_time:
+  field: at
+  format: epoch_ms
+  lateness_seconds: 0
+  on_late: pass
+'''
+KEEP = '''
+from typing import Dict, List
+
+
+@transformer
+def keep(messages: List[Dict], *args, **kwargs):
+    return [m for m in messages if not m.get('skip')]
+'''
+WINDOW = '''
+window:
+  key: card
+  type: tumbling
+  size_seconds: 10
+  aggregate:
+    payments: count
+    total: {sum: amount}
+    low: {min: amount}
+    high: {max: amount}
+    mean: {avg: amount}
+    shops: {distinct: shop}
+'''
+# Events in the first ten seconds: a number given as text counts as one, true does not; a
+# key that is a number reads as its JSON, a missing one as null; skipped never reaches the
+# window.
+FIRST_WINDOW = [
+    dict(card='a', at=1000, amount=10, shop='s1'),
+    dict(card='a', at=2000, amount='20', shop='s2'),
+    dict(card='a', at=3000, amount=True, shop='s1'),
+    dict(card='b', at=4000, amount=5, shop=None),
+    dict(card=7, at=5000, shop='s1'),
+    dict(at=6000, amount=1),
+    dict(card='a', at=7000, amount=1000, skip=True),
+]
+
+
+def send(bootstrap, topic, events):
+    producer = KafkaProducer(bootstrap_servers=bootstrap,
+                             value_serializer=lambda v: json.dumps(v).encode())
+    for event in events:
+        producer.send(topic, value=event)
+    producer.flush()
+    producer.close()
+
+
+def window_result(key, payments, total, low, high, mean, shops):
+    # As the engine writes a closed window: compact JSON, fields in this order.
+    return json.dumps(dict(
+        key=key, window_start='1970-01-01T00:00:00.000Z',
+        window_end='1970-01-01T00:00:10.000Z', payments=payments, total=total, low=low,
+        high=high, mean=mean, shops=shops,
+    ), separators=(',', ':'))
+
+
+def test_a_window_block_runs_as_sparks_aggregation_with_the_engines_results(
+    kafka_bootstrap, spark_remote, mage_project, topics,  # noqa: F811
+):
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'spark_window_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+
+    def add(suffix, kind, code, language, upstream=()):
+        block = Block.create(f'{name}_{suffix}', kind, mage_project, language=language,
+                             pipeline=pipeline)
+        Path(block.file_path).write_text(textwrap.dedent(code))
+        pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+        return block
+
+    source = add('source', 'data_loader',
+                 WINDOW_SOURCE % dict(topic=topics[0], group=f'{name}_group'), 'yaml')
+    keep = add('keep', 'transformer', KEEP, 'python', [source])
+    window = add('totals', 'transformer', WINDOW, 'yaml', [keep])
+    add('sink', 'data_exporter', SINK % dict(topic=topics[1]), 'yaml', [window])
+    out = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                        auto_offset_reset='earliest', enable_auto_commit=False, group_id=None)
+    send(kafka_bootstrap, topics[0], FIRST_WINDOW)
+
+    query = started(mage_project, pipeline, spark_remote, f'/checkpoints/{uuid.uuid4().hex}')
+    try:
+        wait_until_idle(query, timeout=120)
+        # Nothing closes before the watermark passes the window's end.
+        assert out.poll(timeout_ms=2000) == {}
+        send(kafka_bootstrap, topics[0], [dict(card='c', at=25000, amount=1, shop='s9')])
+        records = []
+        deadline = time.time() + 120
+        while len(records) < 4 and time.time() < deadline:
+            for found in out.poll(timeout_ms=500).values():
+                records.extend(found)
+        assert sorted(r.value.decode() for r in records) == sorted([
+            window_result('a', 3, 30.0, 10.0, 20.0, 15.0, 2),
+            window_result('b', 1, 5.0, 5.0, 5.0, 5.0, 0),
+            window_result('7', 1, 0.0, None, None, None, 1),
+            window_result('null', 1, 1.0, 1.0, 1.0, 1.0, 0),
+        ])
+        assert sorted(r.key for r in records) == [b'7', b'a', b'b', b'null']
+
+        # Late for a closed window: dropped, and nothing is written again.
+        send(kafka_bootstrap, topics[0], [dict(card='a', at=1500, amount=100, shop='s3')])
+        wait_until_idle(query, timeout=120)
+        assert out.poll(timeout_ms=3000) == {}
+    finally:
+        query.stop()
+        out.close()
+        pipeline.delete()
+
+
+SESSION = '''
+window:
+  key: card
+  key_as: card_id
+  type: session
+  gap_seconds: 5
+  aggregate:
+    payments: count
+'''
+
+
+def test_a_session_window_reads_the_kafka_timestamp_without_blocks(
+    kafka_bootstrap, spark_remote, mage_project, topics,  # noqa: F811
+):
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'spark_session_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+
+    def add(suffix, kind, code, upstream=()):
+        block = Block.create(f'{name}_{suffix}', kind, mage_project, language='yaml',
+                             pipeline=pipeline)
+        Path(block.file_path).write_text(textwrap.dedent(code))
+        pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+        return block
+
+    source = add('source', 'data_loader', SOURCE % dict(topic=topics[0], group=f'{name}_g'))
+    window = add('sessions', 'transformer', SESSION, [source])
+    add('sink', 'data_exporter', SINK % dict(topic=topics[1]), [window])
+    out = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                        auto_offset_reset='earliest', enable_auto_commit=False, group_id=None)
+    producer = KafkaProducer(bootstrap_servers=kafka_bootstrap,
+                             value_serializer=lambda v: json.dumps(v).encode())
+    # Without event_time, a message's time is its Kafka timestamp: a's first two are one
+    # session, its third another.
+    for card, at in [('a', 1000), ('b', 2000), ('a', 3000), ('a', 20000)]:
+        producer.send(topics[0], value=dict(card=card), timestamp_ms=at)
+    producer.flush()
+
+    query = started(mage_project, pipeline, spark_remote, f'/checkpoints/{uuid.uuid4().hex}')
+    try:
+        wait_until_idle(query, timeout=120)
+        producer.send(topics[0], value=dict(card='z'), timestamp_ms=60000)
+        producer.flush()
+        records = []
+        deadline = time.time() + 120
+        while len(records) < 3 and time.time() < deadline:
+            for found in out.poll(timeout_ms=500).values():
+                records.extend(found)
+
+        def session(card, start, end, payments):
+            return json.dumps(dict(
+                card_id=card, window_start=f'1970-01-01T00:00:{start:02d}.000Z',
+                window_end=f'1970-01-01T00:00:{end:02d}.000Z', payments=payments,
+            ), separators=(',', ':'))
+
+        assert sorted(r.value.decode() for r in records) == sorted([
+            session('a', 1, 8, 2), session('b', 2, 7, 1), session('a', 20, 25, 1),
+        ])
+    finally:
+        query.stop()
+        producer.close()
+        out.close()
+        pipeline.delete()

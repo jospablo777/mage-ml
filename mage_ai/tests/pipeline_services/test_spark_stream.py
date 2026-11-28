@@ -18,11 +18,34 @@ from mage_ai.pipeline_services.runtime import spark_runner
 from mage_ai.pipeline_services.spark_stream import SparkStreamError
 from mage_ai.tests.base_test import TestCase
 from mage_ai.tests.pipeline_services.test_export_streams import (
+    CLEAN,
     PRINT,
+    SINK,
     StreamExportTestCase,
 )
 
 ENVIRON = dict(KAFKA_BOOTSTRAP='kafka:9092', KAFKA_USER='ana', KAFKA_PASSWORD='p"w')
+SOURCE_WITH_TIME = '''
+    connector_type: kafka
+    bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+    topic: payments
+    consumer_group: payment-totals
+    event_time:
+      field: paid_at
+      format: rfc3339
+      lateness_seconds: 30
+      on_late: pass
+'''
+WINDOW = '''
+    window:
+      key: card_id
+      type: session
+      gap_seconds: 300
+      aggregate:
+        payments: count
+        total: {sum: amount}
+        shops: {distinct: shop_id}
+'''
 
 
 class SparkPlanTest(StreamExportTestCase):
@@ -53,6 +76,28 @@ class SparkPlanTest(StreamExportTestCase):
         self.assertIn('checkpoint', spark_stream.notes(stream)[0])
         # The plan keeps the references; the password is filled in when it starts.
         self.assertNotIn('p\\"w', json.dumps(stream))
+
+    def test_a_window_block_is_planned_with_its_event_time(self):
+        source = self.add('source', 'data_loader', SOURCE_WITH_TIME, language='yaml')
+        clean = self.add('clean', 'transformer', CLEAN, upstream=[source])
+        window = self.add('window', 'transformer', WINDOW, upstream=[clean], language='yaml')
+        self.add('totals', 'data_exporter', SINK, upstream=[window], language='yaml')
+
+        stream = spark_stream.plan(self.repo_path, self.pipeline.uuid)
+
+        self.assertEqual([b['uuid'] for b in stream['chain']], [clean.uuid])
+        self.assertEqual(stream['window'], dict(
+            uuid=window.uuid, upstream=[clean.uuid], spec=dict(
+                key='card_id', kind=dict(type='session', gap_ms=300000),
+                aggregates=[['payments', 'count'], ['total', {'sum': 'amount'}],
+                            ['shops', {'distinct': 'shop_id'}]],
+            )))
+        self.assertEqual(stream['time'], dict(field='paid_at', format='rfc3339',
+                                              on_late='pass', lateness_ms=30000))
+        self.assertEqual(stream['sinks'][0]['after'], window.uuid)
+        notes = '\n'.join(spark_stream.notes(stream))
+        self.assertIn('one watermark for the query', notes)
+        self.assertIn('Distinct counts compare values by their text', notes)
 
     def test_the_command_checks_a_pipeline_without_starting_it(self):
         from typer.testing import CliRunner
@@ -139,8 +184,8 @@ class DifferencesTest(TestCase):
             'Sink out is postgres',
             'Sink dead is http',
             'Delivery exactly_once',
-            'Event time',
-            'Block totals is a window transformer',
+            'Late messages go to the dead-letter sink (on_late: dead_letter)',
+            'A dead-letter sink next to window totals',
             'Block score uses state_key',
         ]:
             self.assertIn(expected, found)
@@ -150,6 +195,49 @@ class DifferencesTest(TestCase):
                         sinks=[dict(name='out', kind='kafka', config=dict(topic='b'))]),
             blocks=[dict(uuid='fine', language='python', type='transformer')],
         )), [])
+        # Event time without a window.
+        self.assertIn('Event time and late messages without a window', '\n'.join(
+            spark_stream.differences(dict(
+                stream=dict(source=dict(kind='kafka', config=dict(topic='a')),
+                            sinks=[dict(name='out', kind='kafka', config=dict(topic='b'))],
+                            time=dict(field='at', on_late='pass')),
+                blocks=[],
+            ))))
+
+    def test_a_window_runs_last_after_python_blocks_with_a_field_time(self):
+        def window(uuid='totals', upstream=(), key='card_id', field='amount'):
+            return dict(uuid=uuid, language='window', type='transformer',
+                        upstream=list(upstream), window=dict(
+                            key=key, kind=dict(type='tumbling', size_ms=60000),
+                            aggregates=[['payments', 'count'], ['total', {'sum': field}]]))
+
+        def found(blocks, sinks=None, time=None):
+            return '\n'.join(spark_stream.differences(dict(
+                stream=dict(source=dict(kind='kafka', config=dict(topic='a')),
+                            sinks=sinks or [dict(name='out', kind='kafka',
+                                                 config=dict(topic='b'))],
+                            time=time),
+                blocks=blocks,
+            )))
+
+        clean = dict(uuid='clean', language='python', type='transformer')
+        passed = dict(field='at', format='rfc3339', on_late='pass', lateness_ms=5000)
+        self.assertEqual(found([clean, window(upstream=['clean'])], time=passed), '')
+        # The source's timestamp, without blocks before the window.
+        self.assertEqual(found([window()]), '')
+        for blocks, sinks, time, expected in [
+            ([window(), window('more')], None, passed, 'one window block per stream'),
+            ([window(), dict(clean, upstream=['totals'])], None, passed,
+             'Block clean follows window totals'),
+            ([clean, window(upstream=['clean'])],
+             [dict(name='raw', kind='kafka', config=dict(topic='b'), after='clean')], passed,
+             'Sink raw follows clean, not window totals'),
+            ([clean, window(upstream=['clean'])], None, None,
+             'Spark reads event time from a field'),
+            ([window(key='card id')], None, passed, 'Field card id: Spark reads fields'),
+            ([window(field='a[0]')], None, passed, 'Field a[0]: Spark reads fields'),
+        ]:
+            self.assertIn(expected, found(blocks, sinks, time))
 
 
 DOUBLE = '''
