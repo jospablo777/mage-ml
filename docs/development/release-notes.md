@@ -19,6 +19,8 @@
   the output in ColumnAtlas.
 - A dataset that goes stale sends its pipeline's notifications once, and once more when
   it is fresh again.
+- A block output in the editor names the dataset it is published as, with its freshness,
+  and opens it on the Datasets page.
 
 ### Change previews
 

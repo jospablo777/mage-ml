@@ -14,7 +14,8 @@ def _first(query, key):
 class DatasetResource(GenericResource):
     """
     Datasets (data_preparation/datasets.py, ADR-0046): GET /api/datasets?query= lists the
-    matching ones with their status (drafts=1: global data products' outputs to register);
+    matching ones with their status (drafts=1: global data products' outputs to register;
+    pipeline_uuid= and block_uuid=: those a block publishes, for its output in the editor);
     GET /api/datasets/<id> returns one with its columns, runs and dependencies; POST
     registers one in datasets.yaml; DELETE removes it.
     """
@@ -27,6 +28,13 @@ class DatasetResource(GenericResource):
         try:
             if _first(query, 'drafts') in ('1', 'true'):
                 rows = await asyncio.to_thread(datasets.suggestions, repo_path)
+            elif _first(query, 'pipeline_uuid'):
+                found = datasets.published_by(datasets.load(repo_path),
+                                              _first(query, 'pipeline_uuid'),
+                                              _first(query, 'block_uuid'))
+                rows = await asyncio.to_thread(
+                    lambda: [datasets.summary(repo_path, e) for e in found],
+                )
             else:
                 found = datasets.search(datasets.load(repo_path), _first(query, 'query'))
                 rows = await asyncio.to_thread(

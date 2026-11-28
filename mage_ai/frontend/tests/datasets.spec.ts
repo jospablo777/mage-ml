@@ -80,7 +80,29 @@ test('a registered output is found and shows its freshness, checks and output', 
   await expect(detail.getByText('The published output')).toBeVisible();
 
   await page.getByLabel('Search datasets').fill(OWNER);
-  await expect(page.getByRole('link', { name: DATASET, exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { exact: true, name: DATASET })).toBeVisible();
   await page.getByLabel('Search datasets').fill(`nothing_${SUFFIX}`);
   await expect(page.getByText(`No dataset matches nothing_${SUFFIX}.`)).toBeVisible();
+});
+
+test('a block output shows the dataset it is published as', async ({ page }) => {
+  test.setTimeout(180_000);
+  // Registered by the test above; again here when it runs alone.
+  await api.call('POST', 'datasets', {
+    dataset: { block: LOADER, id: DATASET, max_age: '1d', pipeline: pipelineUUID,
+      time_column: 'day' },
+  }).catch(() => null);
+  await api.restartKernel();
+  await page.goto(`/pipelines/${pipelineUUID}/edit`);
+  const editor = page.locator('.monaco-editor .view-lines').first();
+  await expect(editor).toBeVisible({ timeout: 60_000 });
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+Enter');
+
+  await expect(page.getByRole('region', { name: `Output ${LOADER} / output_0` }))
+    .toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText(/Stale: data \d+ days old, 1d allowed/)).toBeVisible();
+  await page.getByRole('link', { exact: true, name: DATASET }).click();
+  await expect(page).toHaveURL(new RegExp(`/datasets\\?id=${DATASET}`));
+  await expect(page.getByRole('region', { name: `Dataset ${DATASET}` })).toBeVisible();
 });

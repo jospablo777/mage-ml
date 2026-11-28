@@ -53,6 +53,23 @@ class DatasetResourceTest(AsyncDBTestCase):
         missing = await self.call(OperationType.DETAIL, pk='orders')
         self.assertEqual(missing['error']['code'], 404)
 
+    async def test_a_blocks_datasets_are_found_by_pipeline_and_block(self):
+        await self.call(OperationType.CREATE, id='orders', pipeline=self.pipeline.uuid,
+                        block='block1')
+        await self.call(OperationType.CREATE, id='scores', pipeline=self.pipeline.uuid,
+                        block='block2')
+
+        async def listed(**query):
+            rows = (await self.call(OperationType.LIST,
+                                    query={k: [v] for k, v in query.items()}))['datasets']
+            return [(d['id'], d['output'], d['freshness']['state']) for d in rows]
+
+        self.assertEqual(await listed(pipeline_uuid=self.pipeline.uuid, block_uuid='block1'),
+                         [('orders', 'output_0', 'unknown')])
+        self.assertEqual([d for d, _, _ in await listed(pipeline_uuid=self.pipeline.uuid)],
+                         ['orders', 'scores'])
+        self.assertEqual(await listed(pipeline_uuid='other', block_uuid='block1'), [])
+
     async def test_a_user_who_is_no_editor_cannot_register(self):
         refused = await self.call(OperationType.CREATE, user=create_user(), id='orders',
                                   pipeline=self.pipeline.uuid, block='block1')

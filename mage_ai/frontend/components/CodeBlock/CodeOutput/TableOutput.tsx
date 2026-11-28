@@ -1,8 +1,12 @@
 import InnerHTML from 'dangerously-set-html-content';
-import { useMemo } from 'react';
+import NextLink from 'next/link';
+import { useEffect, useMemo } from 'react';
 
 import DataTable from '@components/DataTable';
+import Link from '@oracle/elements/Link';
+import api from '@api';
 import { AtlasSource, ColumnAtlasOutput } from '@components/ColumnAtlas';
+import { DatasetType, freshnessText } from '@components/DatasetWorkspace';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
@@ -40,8 +44,6 @@ function PlainTableOutput({
   order,
   output,
   selected,
-  setShapeCallback,
-  uuid,
 }: TableOutputProps) {
   const { data, resource_usage: resourceUsage, sample_data: sampleData } = output;
   const shape = useMemo(
@@ -74,52 +76,7 @@ function PlainTableOutput({
     [data, sampleData],
   );
 
-  if (columns?.some(header => header === '')) {
-    return (
-      <Spacing mx={5} my={3}>
-        <Text monospace warning>
-          Block output table could not be rendered due to empty string headers. Please check your
-          data’s column headers for empty strings.
-        </Text>
-      </Spacing>
-    );
-  }
-
-  if (
-    Array.isArray(rows) &&
-    rows.length >= 1 &&
-    // @ts-ignore
-    rows.every(
-      row =>
-        Array.isArray(row) && row.every(cell => typeof cell === 'string' && containsHTML(cell)),
-    )
-  ) {
-    return (
-      <Spacing pb={PADDING_UNITS} px={PADDING_UNITS}>
-        <HTMLOutputStyle monospace>
-          {rows.map((row, idx) => (
-            <div key={`html-row-${idx}`}>
-              {row.map((cell, cellIdx) => (
-                <InnerHTML html={String(cell)} key={`html-cell-${cellIdx}`} />
-              ))}
-            </div>
-          ))}
-        </HTMLOutputStyle>
-      </Spacing>
-    );
-  }
-
-  if (!columns?.length) {
-    return (
-      <Spacing mx={5} my={3}>
-        <Text monospace warning>
-          Block output table could not be rendered due to missing column headers. Please check your
-          data’s column headers.
-        </Text>
-      </Spacing>
-    );
-  }
-
+  // Before the early returns: hooks run in the same order on every render.
   const resourcesDisplay = useMemo(() => {
     const arr1 = [];
     const arr2 = [];
@@ -167,6 +124,52 @@ function PlainTableOutput({
       </>
     );
   }, [shape, resourceUsage]);
+
+  if (columns?.some(header => header === '')) {
+    return (
+      <Spacing mx={5} my={3}>
+        <Text monospace warning>
+          Block output table could not be rendered due to empty string headers. Please check your
+          data’s column headers for empty strings.
+        </Text>
+      </Spacing>
+    );
+  }
+
+  if (
+    Array.isArray(rows) &&
+    rows.length >= 1 &&
+    // @ts-ignore
+    rows.every(
+      row =>
+        Array.isArray(row) && row.every(cell => typeof cell === 'string' && containsHTML(cell)),
+    )
+  ) {
+    return (
+      <Spacing pb={PADDING_UNITS} px={PADDING_UNITS}>
+        <HTMLOutputStyle monospace>
+          {rows.map((row, idx) => (
+            <div key={`html-row-${idx}`}>
+              {row.map((cell, cellIdx) => (
+                <InnerHTML html={String(cell)} key={`html-cell-${cellIdx}`} />
+              ))}
+            </div>
+          ))}
+        </HTMLOutputStyle>
+      </Spacing>
+    );
+  }
+
+  if (!columns?.length) {
+    return (
+      <Spacing mx={5} my={3}>
+        <Text monospace warning>
+          Block output table could not be rendered due to missing column headers. Please check your
+          data’s column headers.
+        </Text>
+      </Spacing>
+    );
+  }
 
   return (
     <>
@@ -228,6 +231,44 @@ function PlainTableOutput({
 
 const OUTPUT_VARIABLE = /^output_\d+$/;
 
+// The datasets this output is registered as, with their freshness, each opening on the
+// Datasets page; read again each time the block runs.
+function PublishedAs({ refreshKey, source, variableUuid }: {
+  refreshKey: string;
+  source: TableOutputSource;
+  variableUuid: string;
+}) {
+  const { data, mutate } = api.datasets.list(
+    { block_uuid: source.block_uuid, pipeline_uuid: source.pipeline_uuid },
+    { revalidateOnFocus: false },
+  );
+  useEffect(() => {
+    mutate();
+  }, [mutate, refreshKey]);
+  const datasets: DatasetType[] = (data?.datasets || [])
+    .filter((dataset: DatasetType) => dataset.output === variableUuid);
+  if (!datasets.length) {
+    return null;
+  }
+  return (
+    <Spacing mb={1}>
+      {datasets.map(dataset => (
+        <FlexContainer alignItems="center" flexWrap="wrap" key={dataset.id}>
+          <Text small>Published as dataset&nbsp;</Text>
+          <NextLink href={`/datasets?id=${dataset.id}`} legacyBehavior passHref>
+            <Link small>{dataset.name}</Link>
+          </NextLink>
+          <Spacing ml={1}>
+            <Text danger={dataset.freshness.state === 'stale'} muted small>
+              {freshnessText(dataset.freshness)}
+            </Text>
+          </Spacing>
+        </FlexContainer>
+      ))}
+    </Spacing>
+  );
+}
+
 function TableOutput(props: TableOutputProps) {
   const { atlasSource, output } = props;
   const variableUuid = output?.variable_uuid;
@@ -241,12 +282,15 @@ function TableOutput(props: TableOutputProps) {
   const sample: any = isObject(output?.data) ? output?.data : null;
   const refreshKey = JSON.stringify([shape, sample?.columns, sample?.rows?.slice?.(0, 3)]);
   return (
-    <ColumnAtlasOutput
-      fallback={plain}
-      refreshKey={refreshKey}
-      rowCountHint={Array.isArray(shape) ? shape[0] : undefined}
-      source={{ ...atlasSource, variable_uuid: variableUuid }}
-    />
+    <>
+      <PublishedAs refreshKey={refreshKey} source={atlasSource} variableUuid={variableUuid} />
+      <ColumnAtlasOutput
+        fallback={plain}
+        refreshKey={refreshKey}
+        rowCountHint={Array.isArray(shape) ? shape[0] : undefined}
+        source={{ ...atlasSource, variable_uuid: variableUuid }}
+      />
+    </>
   );
 }
 

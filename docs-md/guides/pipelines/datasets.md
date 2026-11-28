@@ -41,6 +41,13 @@ datasets:
 - Without `max_age`, freshness is unknown, and the page says so.
 - The outputs of global data products are offered as drafts to register.
 
+## In the editor
+
+A block output that is a dataset says so above its table: **Published as dataset
+daily_sales**, with its freshness, and the name opens it on the Datasets page.
+`GET /api/datasets?pipeline_uuid=<pipeline>&block_uuid=<block>` returns the datasets a
+block publishes, with their state.
+
 ## Stale alerts
 
 The scheduler checks every dataset with a `max_age` every 5 minutes. When one goes stale

@@ -362,6 +362,13 @@ def search(entries: List[Dict[str, Any]], query: Optional[str]) -> List[Dict[str
     return sorted(found, key=lambda e: e['id'])
 
 
+def published_by(entries: List[Dict[str, Any]], pipeline: str,
+                 block: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The datasets a pipeline's block publishes (any block's, without one)."""
+    return sorted((e for e in entries if e.get('pipeline') == pipeline and
+                   (block is None or e.get('block') == block)), key=lambda e: e['id'])
+
+
 def summary(repo_path: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     """A search result: the entry with its status, without its runs."""
     found = status(repo_path, entry)
