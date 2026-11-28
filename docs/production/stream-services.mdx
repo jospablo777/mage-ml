@@ -150,6 +150,8 @@ Read from other sources into Kafka through a Python block:
 | --- | --- |
 | NATS JetStream (one pull consumer) | 242,000 |
 | PostgreSQL changes (one slot, through Docker's network) | 205,000 |
+| MySQL changes (the binary log, through Docker's network; 200,000 rows, 2026-11-28) | 262,000 |
+| MySQL initial copy (one consistent snapshot; 200,000 rows, 2026-11-28) | 299,000 |
 | RabbitMQ (one queue) | 16,000 to 27,000 |
 | IBM MQ, one connection (emulated amd64 server) | 1,900 |
 | IBM MQ, four connections | 4,600 |

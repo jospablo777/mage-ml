@@ -10,7 +10,8 @@ test_sink_throughput measures the sinks after the identity block: PostgreSQL, Cl
 Parquet files, RabbitMQ and IBM MQ, each with its services' settings; it skips those not
 running. test_source_throughput measures the RabbitMQ, IBM MQ and NATS sources, into Kafka,
 from a queue their sink filled; test_postgres_change_throughput, PostgreSQL changes read by
-logical replication.
+logical replication; test_mysql_change_throughput and test_mysql_copy_throughput, MySQL's
+binary log and its initial copy (ADR-0048).
 
 MAGE_BENCHMARK_MESSAGES sets the messages (200,000 by default); MAGE_BENCHMARK_RESULTS names
 a JSON file for the results.
@@ -528,5 +529,106 @@ def test_postgres_change_throughput(request, mage_project, kafka_bootstrap, bina
     assert written >= MESSAGES, status
     result = dict(source='postgres_changes', messages=MESSAGES, seconds=round(seconds, 2),
                   messages_per_second=round(MESSAGES / seconds))
+    print(f'\nsource benchmark: {json.dumps(result)}')
+    _record(result)
+
+
+def _mysql_orders(request):
+    """A database with an orders table, and the MySQL connection that made it."""
+    import mysql.connector
+
+    settings = request.getfixturevalue('mysql_settings')
+    database = f'bench_{uuid.uuid4().hex[:8]}'
+    my = mysql.connector.connect(autocommit=True, **settings)
+    with my.cursor() as cursor:
+        cursor.execute(f'CREATE DATABASE {database}')
+        cursor.execute(f'CREATE TABLE {database}.orders (order_id BIGINT PRIMARY KEY, '
+                       'customer VARCHAR(20), region VARCHAR(20), price DECIMAL(10, 2), '
+                       'units INT, at DATETIME(6))')
+    return settings, database, my
+
+
+def _mysql_insert(my, database):
+    """MESSAGES orders, in transactions of 10,000."""
+    with my.cursor() as cursor:
+        for start in range(0, MESSAGES, 10_000):
+            rows = ', '.join(
+                f"({i}, 'c{i % 5000}', 'north', {12.5 + i % 100}, {i % 9}, "
+                "'2026-10-14 10:00:00')"
+                for i in range(start, min(start + 10_000, MESSAGES))
+            )
+            cursor.execute(f'INSERT INTO {database}.orders VALUES {rows}')
+
+
+def _mysql_stream(request, mage_project, kafka_bootstrap, binary, tmp_path, snapshot):
+    """The orders read from MySQL into Kafka; with snapshot never, from the binary log
+    position read before the inserts. Returns the measured result."""
+    from kafka import KafkaConsumer, TopicPartition
+    from kafka.admin import KafkaAdminClient, NewTopic
+
+    settings, database, my = _mysql_orders(request)
+    with my.cursor() as cursor:
+        cursor.execute('SHOW BINARY LOG STATUS')
+        file, offset = cursor.fetchone()[:2]
+    _mysql_insert(my, database)
+    topic = f'bench_out_{uuid.uuid4().hex[:8]}'
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
+    source = (f'connector_type: mysql\nhost: "{settings["host"]}"\nport: {settings["port"]}\n'
+              f'database: {database}\nuser: {settings["user"]}\n'
+              'password: "{{ env_var(\'MYSQL_PASSWORD\') }}"\nsslmode: disable\n'
+              f'tables: [orders]\nsnapshot: {snapshot}\nbatch_size: 5000\n'
+              'batch_timeout: 0.1\n')
+    pipeline = _stream(mage_project, f'bench_mysql_{uuid.uuid4().hex[:6]}', source, f'''
+        connector_type: kafka
+        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+        topic: {topic}
+    ''')
+    data = tmp_path / pipeline.uuid / 'data'
+    if snapshot == 'never':
+        # Where the stream starts: before the inserts, so reading them is measured.
+        state = data / 'state' / pipeline.uuid
+        state.mkdir(parents=True)
+        (state / 'mysql-binlog-position.json').write_text(json.dumps(dict(
+            source=f'{settings["host"]}:{settings["port"]}', file=file, offset=offset,
+        )))
+    consumer = KafkaConsumer(bootstrap_servers=kafka_bootstrap)
+    directory = export_service(mage_project, pipeline.uuid, tmp_path / pipeline.uuid)
+    service = RunningService(binary, directory, data, MYSQL_PASSWORD=settings['password'],
+                             KAFKA_BOOTSTRAP=kafka_bootstrap)
+    try:
+        service.start()
+        written, seconds = _timed(
+            lambda: sum(consumer.end_offsets([TopicPartition(topic, 0)]).values()), MESSAGES,
+            900, lambda: service.streams()[0]['state'] == 'failed', every=0.1,
+        )
+        status = service.streams()[0]
+    finally:
+        service.stop()
+        consumer.close()
+        pipeline.delete()
+        admin.delete_topics([topic])
+        with my.cursor() as cursor:
+            cursor.execute(f'DROP DATABASE {database}')
+        my.close()
+    assert written >= MESSAGES, status
+    return dict(messages=MESSAGES, seconds=round(seconds, 2),
+                messages_per_second=round(MESSAGES / seconds))
+
+
+def test_mysql_change_throughput(request, mage_project, kafka_bootstrap, binary, tmp_path):
+    """MySQL changes read from the binary log into Kafka: rows inserted in transactions of
+    10,000 before the stream starts at the position read before them."""
+    result = dict(source='mysql_changes', **_mysql_stream(
+        request, mage_project, kafka_bootstrap, binary, tmp_path, 'never'))
+    print(f'\nsource benchmark: {json.dumps(result)}')
+    _record(result)
+
+
+def test_mysql_copy_throughput(request, mage_project, kafka_bootstrap, binary, tmp_path):
+    """A MySQL table's initial copy into Kafka (snapshot: initial), in one consistent
+    snapshot."""
+    result = dict(source='mysql_copy', **_mysql_stream(
+        request, mage_project, kafka_bootstrap, binary, tmp_path, 'initial'))
     print(f'\nsource benchmark: {json.dumps(result)}')
     _record(result)
