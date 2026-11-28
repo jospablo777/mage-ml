@@ -12,6 +12,7 @@ import { expect, test } from './base';
  * (MAGE_E2E_MYSQL=host:port:user:password), PostgreSQL (MAGE_E2E_POSTGRES=host:port:database:
  * user:password) and an engine built with the mysql feature (MAGE_ENGINE_PATH on the server).
  * With MAGE_E2E_CLICKHOUSE=host:port:user:password, a second sync goes into ClickHouse.
+ * Then a table is added to the first sync: its next start copies that table only.
  */
 
 const MYSQL = process.env.MAGE_E2E_MYSQL;
@@ -207,4 +208,47 @@ test('a MySQL table is copied into ClickHouse as a ReplacingMergeTree', async ({
   )).toBe('2.5\n4');
   await page.getByRole('button', { name: 'Stop' }).click();
   await expect(page.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 60_000 });
+});
+
+test('a table added to a sync is copied at its next start, the others not', async ({ page }) => {
+  test.setTimeout(180_000);
+  mysql([
+    `CREATE TABLE ${DATABASE}.customers (id INT PRIMARY KEY, label VARCHAR(20))`,
+    `INSERT INTO ${DATABASE}.customers VALUES (7, 'ann'), (8, 'bo')`,
+  ]);
+  await page.goto('/ingestion');
+  const sync = page.getByRole('group', { name: `Sync ${PIPELINE}` });
+  await expect(sync.getByText('1 table', { exact: false })).toBeVisible({ timeout: 60_000 });
+  await sync.getByRole('button', { name: 'Add tables' }).click();
+  await expect(sync.getByRole('group', { name: `${DATABASE}.orders` }).getByText('synced'))
+    .toBeVisible({ timeout: 30_000 });
+  await expect(sync.getByRole('group', { name: `${DATABASE}.notes` })
+    .getByText('no primary key')).toBeVisible();
+  await expect(sync.getByRole('button', { name: 'Add the table' })).toBeDisabled();
+  await sync.getByText(`${DATABASE}.customers`, { exact: true }).click();
+  await sync.getByRole('button', { name: 'Add the table' }).click();
+  await expect(sync.getByRole('list', { name: 'What adding does' })
+    .getByText('the next start copies every row of it', { exact: false })).toBeVisible();
+  await expect(sync.getByText('2 tables', { exact: false })).toBeVisible();
+
+  page.on('dialog', dialog => dialog.accept());
+  await sync.getByRole('button', { name: 'Start on the local engine' }).click();
+  // Only the added table is copied; orders goes on from where the sync stopped.
+  await expect(sync.getByText('Initial copy done: 1 table, 2 rows'))
+    .toBeVisible({ timeout: 90_000 });
+  expect(postgres(`SELECT label FROM ${SCHEMA}.copy_customers ORDER BY id`)).toBe('ann\nbo');
+  mysql([
+    `UPDATE ${DATABASE}.customers SET label = 'cy' WHERE id = 8`,
+    `UPDATE ${DATABASE}.orders SET item = 'pie' WHERE id = 2`,
+  ]);
+  await expect.poll(
+    () => postgres(`SELECT label FROM ${SCHEMA}.copy_customers WHERE id = 8`),
+    { intervals: [1000], timeout: 30_000 },
+  ).toBe('cy');
+  await expect.poll(
+    () => postgres(`SELECT item FROM ${SCHEMA}.copy_orders WHERE id = 2`),
+    { intervals: [1000], timeout: 30_000 },
+  ).toBe('pie');
+  await sync.getByRole('button', { name: 'Stop' }).click();
+  await expect(sync.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 60_000 });
 });

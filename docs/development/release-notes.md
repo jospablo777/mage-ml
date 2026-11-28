@@ -57,6 +57,8 @@
 - A table added to a sync's `tables` is copied at the next start, then followed; the
   tables synced already are not copied again. From PostgreSQL it is added to the
   publication first.
+- The Ingestion page lists the syncs made there, and adds tables to one: the source's
+  tables with those synced marked, the blocks updated, and the Run panel to restart it.
 - The MySQL source says in the service log when a TRUNCATE, DROP or rename of a table it
   reads goes by, as these are not replicated.
 - Fixed: a MySQL source without `tables` (every table of the database) read a table made

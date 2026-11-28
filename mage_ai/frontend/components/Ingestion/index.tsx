@@ -2,6 +2,7 @@ import NextLink from 'next/link';
 import { useMutation } from 'react-query';
 import { useState } from 'react';
 
+import AddTables from './AddTables';
 import Button from '@oracle/elements/Button';
 import Checkbox from '@oracle/elements/Checkbox';
 import FlexContainer from '@oracle/components/FlexContainer';
@@ -208,6 +209,8 @@ function Ingestion() {
           or from its Run tab, and export as a service.
         </Text>
       </Spacing>
+
+      <AddTables />
 
       {error && (
         <Spacing mb={2}><Text danger>{error}</Text></Spacing>

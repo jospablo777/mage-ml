@@ -11,7 +11,8 @@ class IngestionSetupResource(GenericResource):
     Guided ingestion (data_preparation/ingestion.py, ADR-0045): POST /api/ingestion_setups
     with an action: check_source (source), check_destination (destination, schema), sample
     (source, table), review (tables, deletes, schema, prefix, kind) or create (name, source,
-    destination, tables, deletes, schema, prefix), which writes the streaming pipeline. A
+    destination, tables, deletes, schema, prefix), which writes the streaming pipeline. For
+    syncs made: syncs, sync_tables (pipeline_uuid) and add_tables (pipeline_uuid, tables). A
     source's `kind` is postgres or mysql. Passwords are used to connect and stored as
     secrets; responses never hold them.
     """
@@ -49,11 +50,24 @@ class IngestionSetupResource(GenericResource):
                     destination, tables, deletes, schema, prefix,
                     getattr(user, 'username', None) if user else None,
                 )
+            elif action == 'syncs':
+                result = dict(syncs=await asyncio.to_thread(
+                    ingestion.syncs, get_repo_path(user=user),
+                ))
+            elif action == 'sync_tables':
+                result = await asyncio.to_thread(
+                    ingestion.sync_tables, get_repo_path(user=user), payload.get('pipeline_uuid'),
+                )
+            elif action == 'add_tables':
+                result = await asyncio.to_thread(
+                    ingestion.add_tables, get_repo_path(user=user), payload.get('pipeline_uuid'),
+                    tables,
+                )
             else:
                 raise ApiError(dict(
                     code=400,
-                    message='action is check_source, check_destination, sample, review or '
-                            'create.',
+                    message='action is check_source, check_destination, sample, review, '
+                            'create, syncs, sync_tables or add_tables.',
                 ))
         except ingestion.IngestionError as error:
             raise ApiError(dict(code=400, message=str(error)))

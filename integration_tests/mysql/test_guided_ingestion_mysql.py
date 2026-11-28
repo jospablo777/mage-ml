@@ -99,3 +99,52 @@ def test_a_user_without_replication_grants_is_told_what_to_grant(
     finally:
         with my.cursor() as cursor:
             cursor.execute(f"DROP USER '{user}'@'%'")
+
+
+def test_a_table_with_another_key_is_added_to_a_sync_with_one_key(
+    mage_project, mysql_settings, mysql_database, my, tmp_path, monkeypatch,
+):
+    """A sink keyed by one list for every table (as written by hand) gets keys by table when
+    a table with another key is added; tables written as a YAML list are read and rewritten."""
+    from pathlib import Path
+
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.pipeline_services import export
+
+    monkeypatch.setenv('MAGE_DATA_DIR', str(tmp_path / 'mage_data'))
+    with my.cursor() as cursor:
+        cursor.execute('CREATE TABLE orders (id INT PRIMARY KEY, item VARCHAR(20))')
+        cursor.execute('CREATE TABLE order_lines (order_id INT, line INT, qty INT, '
+                       'PRIMARY KEY (order_id, line))')
+    source = connection(mysql_settings, mysql_database)
+    tables = {t['table']: t for t in ingestion.check_source(source)['tables']}
+    created = ingestion.create(mage_project, f'add_{mysql_database}', source,
+                               dict(kind='postgres', host='db', database='copy', user='u'),
+                               [tables[f'{mysql_database}.orders']], schema='raw')
+    pipeline_uuid = created['pipeline_uuid']
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=mage_project)
+    try:
+        blocks = pipeline.blocks_by_uuid
+        source_path = Path(blocks[f'{pipeline_uuid}_source'].file_path)
+        sink_path = Path(blocks[f'{pipeline_uuid}_copy'].file_path)
+        source_path.write_text(ingestion._set(
+            source_path.read_text(), 'tables', None,
+        ).replace('tables: null', f'tables:\n  - {mysql_database}.orders  # by hand'))
+        sink_path.write_text(ingestion._set(
+            sink_path.read_text(), 'mirror', dict(key=['id'], deletes='delete'),
+        ))
+
+        added = ingestion.add_tables(mage_project, pipeline_uuid,
+                                     [dict(table=f'{mysql_database}.order_lines')])
+        assert added['added'] == [f'{mysql_database}.order_lines']
+        assert not any('publication' in line for line in added['review'])
+        stream = export.capture(mage_project, [pipeline_uuid]).manifest['pipelines'][0]['stream']
+        assert stream['source']['config']['tables'] == [
+            f'{mysql_database}.orders', f'{mysql_database}.order_lines',
+        ]
+        assert stream['sinks'][0]['config']['mirror'] == dict(
+            key=dict(orders=['id'], order_lines=['order_id', 'line']), deletes='delete',
+        )
+        assert source_path.read_text().count('tables:') == 1
+    finally:
+        Pipeline.get(pipeline_uuid, repo_path=mage_project).delete()

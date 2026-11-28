@@ -111,3 +111,68 @@ def test_checks_tables_sample_and_the_pipeline_it_creates(
         assert json.dumps(sink['password']).count('$parts') == 1
     finally:
         pipeline.delete()
+
+
+def test_tables_are_added_to_a_sync_and_exported_with_their_keys(
+    mage_project, postgres_settings, pg, schema, tmp_path, monkeypatch,
+):
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.pipeline_services import export
+
+    monkeypatch.setenv('MAGE_DATA_DIR', str(tmp_path / 'mage_data'))
+    with pg.cursor() as cursor:
+        cursor.execute(f'''
+            CREATE TABLE {schema}.orders (id integer PRIMARY KEY, item text);
+            CREATE TABLE {schema}.lines (order_id integer, line integer, qty integer,
+                                         PRIMARY KEY (order_id, line));
+            CREATE TABLE {schema}.notes (body text);
+        ''')
+    pg.commit()
+    source = connection(postgres_settings)
+    tables = {t['table']: t for t in ingestion.check_source(source)['tables']}
+    created = ingestion.create(mage_project, f'add_{schema}', source, source,
+                               [tables[f'{schema}.orders']], schema=f'{schema}_copy',
+                               prefix='copy_')
+    pipeline_uuid = created['pipeline_uuid']
+    try:
+        listed = [s for s in ingestion.syncs(mage_project) if s['pipeline_uuid'] == pipeline_uuid]
+        assert listed == [dict(
+            pipeline_uuid=pipeline_uuid, kind='postgres', destination='postgres',
+            source=f"{postgres_settings['host']}:{postgres_settings['port']}/"
+                   f"{postgres_settings['dbname']}",
+            tables=[f'{schema}.orders'],
+        )]
+        found = ingestion.sync_tables(mage_project, pipeline_uuid)['tables']
+        found = {t['table']: t for t in found}
+        assert found[f'{schema}.orders']['synced'] is True
+        assert found[f'{schema}.lines']['synced'] is False
+
+        for chosen, message in [
+            ([f'{schema}.orders'], 'a table the sync does not have yet'),
+            ([f'{schema}.notes'], 'no primary key'),
+            ([f'{schema}.missing'], 'is not a table of the source'),
+        ]:
+            try:
+                ingestion.add_tables(mage_project, pipeline_uuid, chosen)
+                raise AssertionError(f'{chosen} was accepted')
+            except ingestion.IngestionError as error:
+                assert message in str(error), error
+
+        added = ingestion.add_tables(mage_project, pipeline_uuid, [f'{schema}.lines'])
+        assert added['added'] == [f'{schema}.lines']
+        assert added['review'][0].startswith(f'Adds {schema}.lines: the next start copies')
+        assert "publication" in added['review'][1]
+        assert any(f'{schema}_copy.copy_<table>' in line for line in added['review'])
+
+        pipeline = Pipeline.get(pipeline_uuid, repo_path=mage_project)
+        stream = export.capture(mage_project, [pipeline_uuid]).manifest['pipelines'][0]['stream']
+        assert stream['source']['config']['tables'] == [f'{schema}.orders', f'{schema}.lines']
+        assert stream['sinks'][0]['config']['mirror'] == dict(
+            key=dict(orders=['id'], lines=['order_id', 'line']), deletes='delete',
+        )
+        # The password stays a secret's template in the block.
+        source_file = open(pipeline.blocks_by_uuid[f'{pipeline_uuid}_source'].file_path).read()
+        passwords = [line for line in source_file.splitlines() if line.startswith('password:')]
+        assert len(passwords) == 1 and 'mage_secret_var' in passwords[0], passwords
+    finally:
+        Pipeline.get(pipeline_uuid, repo_path=mage_project).delete()

@@ -14,6 +14,8 @@ ingestion_clickhouse.py).
    (snapshot: initial), and a PostgreSQL sink that mirrors each table (upsert by key,
    deletes applied or marked). Passwords are kept as project secrets and read with
    mage_secret_var(); no file holds them.
+6. syncs, sync_tables, add_tables: the syncs made, a sync's source tables, and tables added
+   to a sync, which its next start copies, then follows.
 """
 import json
 import re
@@ -427,4 +429,181 @@ def create(
                       destination['database'] if target == 'clickhouse' else schema, prefix,
                       kind, target),
         created_by=user,
+    )
+
+
+# Adding tables to a sync made here: the source's tables and the sink's keys are written in
+# its blocks, and the next start copies the tables named since, then follows them with the
+# others (ADR-0045).
+
+
+def _yaml(block) -> Dict[str, Any]:
+    import yaml
+
+    try:
+        found = yaml.safe_load(block.content or '')
+    except yaml.YAMLError:
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def _is(block, kind: str) -> bool:
+    return str(getattr(block.type, 'value', block.type)) == kind and \
+        str(getattr(block.language, 'value', block.language)) == 'yaml'
+
+
+def _sync_blocks(pipeline) -> Optional[tuple]:
+    """A sync's source and sink blocks: a change capture source (snapshot: initial) and a
+    mirror sink after it; None for any other pipeline."""
+    for block in pipeline.blocks_by_uuid.values():
+        if not _is(block, 'data_loader'):
+            continue
+        source = _yaml(block)
+        if source.get('connector_type') not in SOURCE_KINDS or \
+                not isinstance(source.get('tables'), list):
+            continue
+        for after in block.downstream_blocks:
+            if _is(after, 'data_exporter') and isinstance(_yaml(after).get('mirror'), dict):
+                return block, after
+    return None
+
+
+def _sync(repo_path: str, pipeline_uuid: str) -> tuple:
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    try:
+        pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
+    except Exception:
+        raise IngestionError(f'There is no pipeline {pipeline_uuid}.') from None
+    found = _sync_blocks(pipeline)
+    if not found:
+        raise IngestionError(
+            f'{pipeline_uuid} is not a sync: it has no change capture source with a mirror '
+            'sink after it.'
+        )
+    return (pipeline, *found)
+
+
+def _source_connection(pipeline, block) -> Dict[str, Any]:
+    """The source's connection, with its password rendered from the block."""
+    from mage_ai.data_preparation.models.block.streaming import streaming_config
+
+    config = streaming_config(block.content or '', pipeline.variables or {})
+    return dict(
+        kind=config['connector_type'],
+        host=config.get('host'),
+        port=config.get('port'),
+        database=config.get('database'),
+        user=config.get('user') or config.get('username'),
+        password=config.get('password'),
+        sslmode=config.get('sslmode'),
+    )
+
+
+def syncs(repo_path: str) -> List[Dict[str, Any]]:
+    """The project's syncs: each streaming pipeline with a change capture source and a mirror
+    sink, with its source and tables."""
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    found = []
+    for uuid in sorted(Pipeline.get_all_pipelines(repo_path)):
+        try:
+            pipeline = Pipeline.get(uuid, repo_path=repo_path)
+        except Exception:
+            continue
+        if pipeline.type != PipelineType.STREAMING:
+            continue
+        blocks = _sync_blocks(pipeline)
+        if not blocks:
+            continue
+        source, sink = (_yaml(b) for b in blocks)
+        found.append(dict(
+            pipeline_uuid=uuid,
+            kind=source['connector_type'],
+            source=f"{source.get('host')}:{source.get('port')}/{source.get('database')}",
+            destination=sink.get('connector_type'),
+            tables=source['tables'],
+        ))
+    return found
+
+
+def sync_tables(repo_path: str, pipeline_uuid: str) -> Dict[str, Any]:
+    """The tables of a sync's source, each marked synced or not."""
+    pipeline, source, _ = _sync(repo_path, pipeline_uuid)
+    synced = set(_yaml(source)['tables'])
+    found = check_source(_source_connection(pipeline, source))
+    for table in found['tables']:
+        table['synced'] = table['table'] in synced
+    return dict(found, pipeline_uuid=pipeline_uuid)
+
+
+def _set(content: str, key: str, value: Any) -> str:
+    """`content` with the top-level `key` set to `value` (one line of JSON, as create writes);
+    the lines of its old value go."""
+    line = f'{key}: {json.dumps(value)}'
+    pattern = re.compile(rf'^{re.escape(key)}:[^\n]*(?:\n(?:[ \t]+|-)[^\n]*)*', re.M)
+    if pattern.search(content):
+        return pattern.sub(lambda _: line, content, count=1)
+    return content.rstrip('\n') + f'\n{line}\n'
+
+
+def add_tables(repo_path: str, pipeline_uuid: str, tables: List[Any]) -> Dict[str, Any]:
+    """Adds tables to a sync: the source reads them and the sink mirrors them by their keys.
+    The next start copies them, then follows them with the others."""
+    pipeline, source_block, sink_block = _sync(repo_path, pipeline_uuid)
+    source, sink = _yaml(source_block), _yaml(sink_block)
+    kind = source['connector_type']
+    target = sink.get('connector_type') or 'postgres'
+    synced = list(source['tables'])
+    names = [t['table'] if isinstance(t, dict) else str(t) for t in tables or []]
+    names = [n for n in dict.fromkeys(names) if n not in synced]
+    if not names:
+        raise IngestionError('Choose a table the sync does not have yet.')
+    connection = _source_connection(pipeline, source_block)
+    added = _from_source(connection, [dict(table=n) for n in names])
+    mirror = dict(sink['mirror'])
+    deletes = mirror.get('deletes') or 'delete'
+    _validate(added, deletes, target)
+    by_name: Dict[str, str] = {}
+    for name in synced + names:
+        short = name.split('.', 1)[-1]
+        if short in by_name:
+            raise IngestionError(
+                f'{by_name[short]} and {name} would both be written to the table {short}: '
+                'a sync has one of them.'
+            )
+        by_name[short] = name
+    key = mirror.get('key')
+    if isinstance(key, dict):
+        key = dict(key, **{t['table'].split('.', 1)[1]: list(t['key']) for t in added})
+    else:
+        same = [key] if isinstance(key, str) else list(key or [])
+        if any(list(t['key']) != same for t in added):
+            # One key for every table no longer fits: each table by its own.
+            every = _from_source(connection, [dict(table=n) for n in synced]) + added
+            key = {t['table'].split('.', 1)[1]: list(t['key']) for t in every}
+    mirror['key'] = key
+    Path(source_block.file_path).write_text(
+        _set(source_block.content or '', 'tables', synced + names),
+    )
+    Path(sink_block.file_path).write_text(_set(sink_block.content or '', 'mirror', mirror))
+    template = sink.get('table') or (sink.get('config') or {}).get('table_name') or ''
+    prefix = template.split('{_mage_table}')[0]
+    schema = sink.get('database') if target == 'clickhouse' else sink.get('schema') or 'public'
+    lines = review(added, deletes, schema, prefix, kind, target)
+    lines[0] = (
+        f"Adds {', '.join(names)}: the next start copies every row of "
+        f"{'them' if len(names) > 1 else 'it'}, then keeps "
+        f"{'them' if len(names) > 1 else 'it'} in step with the other tables. The tables "
+        'synced already are not copied again.'
+    )
+    if kind == 'postgres':
+        lines.insert(1, "The next start adds the tables to the sync's publication.")
+    return dict(
+        pipeline_uuid=pipeline_uuid,
+        added=names,
+        blocks=[dict(uuid=b.uuid, type=getattr(b.type, 'value', b.type))
+                for b in (source_block, sink_block)],
+        review=lines,
     )

@@ -3164,6 +3164,7 @@
    "IngestionSetup": {
     "properties": {
      "action": {},
+     "added": {},
      "blocks": {},
      "checks": {},
      "columns": {},
@@ -3171,6 +3172,7 @@
      "ready": {},
      "review": {},
      "rows": {},
+     "syncs": {},
      "table": {},
      "tables": {}
     },

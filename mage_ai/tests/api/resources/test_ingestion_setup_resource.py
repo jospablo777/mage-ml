@@ -67,6 +67,29 @@ class IngestionSetupResourceTest(AsyncDBTestCase):
         self.assertEqual(found['blocks'], made['blocks'])
         self.assertNotIn('hunter2', str(found))
 
+    async def test_tables_are_added_to_a_sync_made_here(self):
+        listed = [dict(pipeline_uuid='sync_shop', kind='postgres', source='db:5432/shop',
+                       destination='postgres', tables=['public.orders'])]
+        with patch.object(ingestion, 'syncs', return_value=listed):
+            found = (await self.call(action='syncs'))['ingestion_setup']
+        self.assertEqual(found['syncs'], listed)
+
+        tables = dict(checks=[], ready=True, pipeline_uuid='sync_shop',
+                      tables=[dict(table='public.orders', key=['id'], synced=True),
+                              dict(table='public.lines', key=['id'], synced=False)])
+        with patch.object(ingestion, 'sync_tables', return_value=tables) as listing:
+            found = (await self.call(action='sync_tables', pipeline_uuid='sync_shop'))
+        self.assertEqual(listing.call_args.args[1], 'sync_shop')
+        self.assertEqual(found['ingestion_setup']['tables'], tables['tables'])
+
+        added = dict(pipeline_uuid='sync_shop', added=['public.lines'], review=['Adds'],
+                     blocks=[dict(uuid='sync_shop_source', type='data_loader')])
+        with patch.object(ingestion, 'add_tables', return_value=added) as adding:
+            found = (await self.call(action='add_tables', pipeline_uuid='sync_shop',
+                                     tables=['public.lines']))['ingestion_setup']
+        self.assertEqual(adding.call_args.args[1:], ('sync_shop', ['public.lines']))
+        self.assertEqual((found['added'], found['blocks']), (added['added'], added['blocks']))
+
     async def test_a_user_who_is_no_editor_cannot_set_ingestion_up(self):
         refused = await self.call(user=create_user(), action='check_source', source=SOURCE)
         self.assertEqual(refused['error']['code'], 403)
