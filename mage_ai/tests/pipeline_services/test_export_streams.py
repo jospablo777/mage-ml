@@ -1359,6 +1359,37 @@ class ClickHouseSinkExportTest(StreamExportTestCase):
         sink_file.write_text(sink_file.read_text() + '  deletes: soft\n')
         self.assertIn('a ClickHouse mirror takes deletes: delete', self.problems())
 
+    def test_a_sink_may_name_its_connection_instead_of_a_profile(self):
+        self.stream(sink='''
+            connector_type: clickhouse
+            host: ch.example.com
+            port: 8443
+            secure: true
+            username: loader
+            password: "{{ env_var('CH_PASSWORD') }}"
+            database: analytics
+            config:
+              table_name: "{_mage_table}"
+            mirror:
+              key: [id]
+        ''')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]['config']
+        self.assertEqual((sink['host'], sink['port'], sink['secure'], sink['database']),
+                         ('ch.example.com', 8443, True, 'analytics'))
+        self.assertEqual(sink['password'], {'$parts': [{'env': 'CH_PASSWORD'}]})
+        self.assertEqual(sink['table'], '{_mage_table}')
+        self.assertEqual(sink['mirror'], {'key': ['id']})
+
+    def test_a_written_password_is_refused(self):
+        self.stream(sink='''
+            connector_type: clickhouse
+            host: ch.example.com
+            password: hunter2
+            config: {table_name: events}
+        ''')  # pragma: allowlist secret
+        self.assertIn('password is written in the file', self.problems())
+
     def test_a_missing_table_or_profile_is_refused(self):
         self.stream(sink='connector_type: clickhouse\nprofile: nowhere\nconfig: {}\n')
         problems = self.problems()

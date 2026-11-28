@@ -842,7 +842,9 @@ mirror:
   always beats a copy, also when the copy runs again. Of a key's changes in one batch, the
   last is written.
 - Numbers with a fraction are `Decimal(76, 30)`, so DECIMAL and NUMERIC values copy exactly;
-  the key's columns are not Nullable.
+  the key's columns are not Nullable. Compare them with decimals, not floats: ClickHouse
+  matches `price IN (2.5, 4)` against a float loosely; `price = toDecimal256('2.5', 30)`
+  is exact.
 - Only `deletes: delete`: ClickHouse replaces whole rows, and a PostgreSQL delete carries only
   the key, so a soft delete would lose the row's other columns.
 - An existing table needs `_mage_version` and `_mage_is_deleted`; the sink says so when they

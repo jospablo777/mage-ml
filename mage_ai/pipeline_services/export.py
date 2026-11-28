@@ -1663,8 +1663,26 @@ def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
     MageML's ClickHouse sink names an io_config.yaml profile and export settings
     (`config: {table_name: ...}`): the profile's connection, with its variables kept as
     references, and the table become the engine's sink settings. `mirror` keeps a change
-    capture source's tables (ADR-0049).
+    capture source's tables (ADR-0049). A sink the Ingestion page makes names its connection
+    instead (host, port, username, password, database, secure): the engine reads it.
     """
+    direct = {'host', 'port', 'username', 'password', 'database', 'secure'}
+    if config.get('host'):
+        unknown = sorted(set(config) - direct - {'config', 'mirror'})
+        if unknown:
+            problems.append(f'{where}: unknown ClickHouse sink settings {", ".join(unknown)}.')
+        if _literal(config.get('password')):
+            problems.append(
+                f"{where}: password is written in the file; use "
+                f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+            )
+        export_config = config.get('config') or {}
+        if not export_config.get('table_name'):
+            problems.append(f'{where}: the ClickHouse sink needs config.table_name.')
+        settings = {k: config[k] for k in direct if config.get(k) is not None}
+        settings['table'] = export_config.get('table_name')
+        _clickhouse_mirror(config, settings, where, problems)
+        return {k: v for k, v in settings.items() if v is not None}
     unknown = sorted(set(config) - {'profile', 'config', 'mirror'})
     if unknown:
         problems.append(f'{where}: unknown ClickHouse sink settings {", ".join(unknown)}.')
@@ -1703,17 +1721,22 @@ def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
     }
     if not settings['host']:
         problems.append(f'{where}: profile {profile} has no CLICKHOUSE_HOST.')
-    mirror = config.get('mirror')
-    if mirror is not None:
-        if not isinstance(mirror, dict) or not mirror.get('key'):
-            problems.append(f'{where}: mirror is {{key: [id], deletes: delete}}.')
-        elif (mirror.get('deletes') or 'delete') != 'delete':
-            problems.append(
-                f'{where}: a ClickHouse mirror takes deletes: delete; ClickHouse replaces '
-                'whole rows, and a soft delete would lose the columns a delete does not carry.'
-            )
-        settings['mirror'] = mirror
+    _clickhouse_mirror(config, settings, where, problems)
     return {k: v for k, v in settings.items() if v is not None}
+
+
+def _clickhouse_mirror(config: Dict, settings: Dict, where: str, problems: List[str]) -> None:
+    mirror = config.get('mirror')
+    if mirror is None:
+        return
+    if not isinstance(mirror, dict) or not mirror.get('key'):
+        problems.append(f'{where}: mirror is {{key: [id], deletes: delete}}.')
+    elif (mirror.get('deletes') or 'delete') != 'delete':
+        problems.append(
+            f'{where}: a ClickHouse mirror takes deletes: delete; ClickHouse replaces '
+            'whole rows, and a soft delete would lose the columns a delete does not carry.'
+        )
+    settings['mirror'] = mirror
 
 
 def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:

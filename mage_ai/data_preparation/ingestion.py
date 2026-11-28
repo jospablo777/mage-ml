@@ -1,7 +1,9 @@
 """
 Guided ingestion (ADR-0045): a PostgreSQL or MySQL database's tables copied into PostgreSQL
-and kept in sync, set up after checks and a review, as a streaming pipeline the project
-keeps. A source's `kind` is postgres (the default) or mysql (ADR-0048, ingestion_mysql.py).
+or ClickHouse and kept in sync, set up after checks and a review, as a streaming pipeline the
+project keeps. A source's `kind` is postgres (the default) or mysql (ADR-0048,
+ingestion_mysql.py); a destination's is postgres or clickhouse (ADR-0049,
+ingestion_clickhouse.py).
 
 1. check_source: can the source be read by change capture (logical replication, a role
    that may replicate, a free slot), and its tables with their keys and sizes.
@@ -27,13 +29,18 @@ class IngestionError(Exception):
 
 
 SOURCE_KINDS = ('postgres', 'mysql')
+DESTINATION_KINDS = ('postgres', 'clickhouse')
 
 
-def _kind(connection: Dict[str, Any]) -> str:
+def _kind(connection: Dict[str, Any], kinds=SOURCE_KINDS, role: str = 'source') -> str:
     kind = (connection or {}).get('kind') or 'postgres'
-    if kind not in SOURCE_KINDS:
-        raise IngestionError(f'A source is one of {", ".join(SOURCE_KINDS)}, not {kind}.')
+    if kind not in kinds:
+        raise IngestionError(f'A {role} is one of {", ".join(kinds)}, not {kind}.')
     return kind
+
+
+def _destination_kind(connection: Dict[str, Any]) -> str:
+    return _kind(connection, DESTINATION_KINDS, 'destination')
 
 
 def _connect(connection: Dict[str, Any]):
@@ -153,6 +160,10 @@ def check_source(connection: Dict[str, Any]) -> Dict[str, Any]:
 
 def check_destination(connection: Dict[str, Any], schema: str) -> Dict[str, Any]:
     """Whether the destination's schema exists or can be made, and tables written in it."""
+    if _destination_kind(connection) == 'clickhouse':
+        from mage_ai.data_preparation import ingestion_clickhouse
+
+        return ingestion_clickhouse.check_destination(connection)
     db = _connect(connection)
     try:
         with db.cursor() as cursor:
@@ -213,15 +224,24 @@ def sample(connection: Dict[str, Any], table: str, rows: int = SAMPLE_ROWS) -> D
 
 
 def review(tables: List[Dict[str, Any]], deletes: str, schema: str, prefix: str,
-           kind: str = 'postgres') -> List[str]:
+           kind: str = 'postgres', destination: str = 'postgres') -> List[str]:
     """What the sync will do, in sentences."""
     names = ', '.join(t['table'] for t in tables)
     how = 'the binary log' if kind == 'mysql' else 'logical replication'
+    keys = '; '.join(f"{t['table']} by {', '.join(t['key'])}" for t in tables)
+    if destination == 'clickhouse':
+        writes = [
+            f'Writes each table to the ClickHouse table {schema}.{prefix}<table>, a '
+            f'ReplacingMergeTree by its key ({keys}): each key keeps its latest change.',
+            'Read it with FINAL (SELECT ... FROM table FINAL) for one row per key before '
+            'ClickHouse merges.',
+        ]
+    else:
+        writes = [f'Writes each table to {schema}.{prefix}<table>, upserting rows by {keys}.']
     lines = [
         f'Copies every row of {names} first, then keeps each table in step with its changes '
         f'as they happen ({how}).',
-        f'Writes each table to {schema}.{prefix}<table>, upserting rows by '
-        + '; '.join(f"{t['table']} by {', '.join(t['key'])}" for t in tables) + '.',
+        *writes,
         'A row deleted in the source is deleted in the copy.' if deletes == 'delete' else
         'A row deleted in the source stays in the copy, with _mage_deleted_at set.',
         'A column added in the source is added to the copy with its next change. A column '
@@ -233,7 +253,12 @@ def review(tables: List[Dict[str, Any]], deletes: str, schema: str, prefix: str,
     return lines
 
 
-def _validate(tables: List[Dict[str, Any]], deletes: str) -> None:
+def _validate(tables: List[Dict[str, Any]], deletes: str, destination: str = 'postgres') -> None:
+    if destination == 'clickhouse' and deletes != 'delete':
+        raise IngestionError(
+            'A ClickHouse copy deletes the rows deleted in the source: ClickHouse replaces '
+            'whole rows, and a kept row would lose the columns a delete does not carry.'
+        )
     if not tables:
         raise IngestionError('Choose at least one table.')
     for table in tables:
@@ -302,7 +327,8 @@ def create(
 
     if not name or not str(name).strip():
         raise IngestionError('Name the pipeline.')
-    _validate(tables, deletes)
+    target = _destination_kind(destination)
+    _validate(tables, deletes, target)
     # Keys and replica identities from the source, not from the request.
     tables = _from_source(source, tables)
     pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING, repo_path=repo_path)
@@ -363,21 +389,42 @@ def create(
             batch_size=5000,
             batch_timeout=1,
         ))
-    write = write_block('copy', 'data_exporter', dict(
-        connector_type='postgres',
-        **connection_yaml(destination, 'destination', 'username'),
-        schema=schema,
-        table=f'{prefix}{{_mage_table}}',
-        mirror=dict(
-            key={t['table'].split('.', 1)[1]: list(t['key']) for t in tables},
-            deletes=deletes,
-        ),
-    ), [read])
+    mirror = dict(
+        key={t['table'].split('.', 1)[1]: list(t['key']) for t in tables},
+        deletes=deletes,
+    )
+    if target == 'clickhouse':
+        from mage_ai.data_preparation import ingestion_clickhouse
+
+        settings = dict(
+            connector_type='clickhouse',
+            host=destination['host'],
+            port=ingestion_clickhouse.port(destination),
+            secure=ingestion_clickhouse.secure(destination),
+            username=destination.get('user') or 'default',
+            database=destination['database'],
+        )
+        secret = password('destination', destination)
+        if secret:
+            settings['password'] = secret
+        write = write_block('copy', 'data_exporter', dict(
+            settings, config=dict(table_name=f'{prefix}{{_mage_table}}'), mirror=mirror,
+        ), [read])
+    else:
+        write = write_block('copy', 'data_exporter', dict(
+            connector_type='postgres',
+            **connection_yaml(destination, 'destination', 'username'),
+            schema=schema,
+            table=f'{prefix}{{_mage_table}}',
+            mirror=mirror,
+        ), [read])
     return dict(
         pipeline_uuid=pipeline.uuid,
         # For the run panel, which names the sinks a start writes to.
         blocks=[dict(uuid=b.uuid, type=getattr(b.type, 'value', b.type))
                 for b in (read, write)],
-        review=review(tables, deletes, schema, prefix, kind),
+        review=review(tables, deletes,
+                      destination['database'] if target == 'clickhouse' else schema, prefix,
+                      kind, target),
         created_by=user,
     )

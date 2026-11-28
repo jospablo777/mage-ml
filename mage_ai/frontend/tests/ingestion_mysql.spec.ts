@@ -11,6 +11,7 @@ import { expect, test } from './base';
  * progress shown until it is done. Needs MySQL with binlog_row_metadata=FULL
  * (MAGE_E2E_MYSQL=host:port:user:password), PostgreSQL (MAGE_E2E_POSTGRES=host:port:database:
  * user:password) and an engine built with the mysql feature (MAGE_ENGINE_PATH on the server).
+ * With MAGE_E2E_CLICKHOUSE=host:port:user:password, a second sync goes into ClickHouse.
  */
 
 const MYSQL = process.env.MAGE_E2E_MYSQL;
@@ -19,6 +20,9 @@ const SUFFIX = Date.now().toString(36);
 const DATABASE = `ui_mysql_${SUFFIX}`;
 const SCHEMA = `ui_mysql_copy_${SUFFIX}`;
 const PIPELINE = `ui_mysql_sync_${SUFFIX}`;
+const CLICKHOUSE = process.env.MAGE_E2E_CLICKHOUSE;
+const CH_DATABASE = `ui_mysql_ch_${SUFFIX}`;
+const CH_PIPELINE = `ui_mysql_ch_sync_${SUFFIX}`;
 const PYTHON = process.env.MAGE_E2E_PYTHON
   || path.resolve(__dirname, '../../../.venv/bin/python');
 
@@ -49,6 +53,20 @@ if cursor.description:
 `, host, port, database, user, password, statement]).toString().trim();
 }
 
+// A ClickHouse query's first column, one row per line.
+function clickhouse(statement: string): string {
+  const [host, port, user, password] = CLICKHOUSE.split(':');
+  return execFileSync(PYTHON, ['-c', `
+import base64, sys, urllib.parse, urllib.request
+host, port, user, password, query = sys.argv[1:6]
+request = urllib.request.Request(
+    f'http://{host}:{port}/?' + urllib.parse.urlencode(dict(query=query)), data=b'')
+request.add_header('Authorization', 'Basic ' + base64.b64encode(
+    f'{user}:{password}'.encode()).decode())
+print(urllib.request.urlopen(request).read().decode().strip())
+`, host, port, user, password, statement]).toString().trim();
+}
+
 let apiContext: APIRequestContext;
 let api: MageApi;
 
@@ -70,8 +88,13 @@ test.afterAll(async () => {
   if (!MYSQL || !POSTGRES) {
     return;
   }
-  await api.call('DELETE', `pipelines/${PIPELINE}/stream_runs/current`).catch(() => null);
-  await api.deletePipeline(PIPELINE).catch(() => null);
+  for (const name of [PIPELINE, CH_PIPELINE]) {
+    await api.call('DELETE', `pipelines/${name}/stream_runs/current`).catch(() => null);
+    await api.deletePipeline(name).catch(() => null);
+  }
+  if (CLICKHOUSE) {
+    clickhouse(`DROP DATABASE IF EXISTS ${CH_DATABASE}`);
+  }
   await apiContext.dispose();
   mysql([`DROP DATABASE IF EXISTS ${DATABASE}`]);
   postgres(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
@@ -134,6 +157,54 @@ test('a MySQL table is checked, copied into PostgreSQL and kept in step', async 
     () => postgres(`SELECT item FROM ${SCHEMA}.copy_orders WHERE id = 1`),
     { intervals: [1000], timeout: 30_000 },
   ).toBe('green tea');
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(page.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 60_000 });
+});
+
+test('a MySQL table is copied into ClickHouse as a ReplacingMergeTree', async ({ page }) => {
+  test.skip(!CLICKHOUSE, 'MAGE_E2E_CLICKHOUSE names no ClickHouse server');
+  test.setTimeout(180_000);
+  const [host, port, user, password] = MYSQL.split(':');
+  const [chHost, chPort, chUser, chPassword] = CLICKHOUSE.split(':');
+  await page.goto('/ingestion');
+  await page.getByLabel('Source type').selectOption('mysql');
+  await page.getByLabel('Source host').fill(host);
+  await page.getByLabel('Source port').fill(port);
+  await page.getByLabel('Source database').fill(DATABASE);
+  await page.getByLabel('Source user').fill(user);
+  await page.getByLabel('Source password').fill(password);
+  await page.getByLabel('Source TLS').selectOption('disable');
+  await page.getByRole('button', { name: 'Check the source' }).click();
+  await page.getByText(`${DATABASE}.orders`, { exact: true }).click({ timeout: 30_000 });
+
+  await page.getByLabel('Destination type').selectOption('clickhouse');
+  await expect(page.getByLabel('Destination port')).toHaveValue('8123');
+  await expect(page.getByLabel('Destination schema')).toHaveCount(0);
+  await expect(page.getByLabel('Deletes').locator('option')).toHaveCount(1);
+  await page.getByLabel('Destination host').fill(chHost);
+  await page.getByLabel('Destination port').fill(chPort);
+  await page.getByLabel('Destination database').fill(CH_DATABASE);
+  await page.getByLabel('Destination user').fill(chUser);
+  await page.getByLabel('Destination password').fill(chPassword);
+  await page.getByLabel('Destination TLS').selectOption('disable');
+  await page.getByRole('button', { name: 'Check the destination' }).click();
+  await expect(page.getByText(/does not exist; it will be made/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Review what the sync will do' }).click();
+  await expect(page.getByRole('list', { name: 'What the sync does' })
+    .getByText('ReplacingMergeTree', { exact: false })).toBeVisible();
+  await page.getByLabel('Pipeline name').fill(CH_PIPELINE);
+  await page.getByRole('button', { name: 'Create the pipeline' }).click();
+  await expect(page.getByText(`Created ${CH_PIPELINE}.`, { exact: false })).toBeVisible();
+
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Start on the local engine' }).click();
+  await expect(page.getByText('Initial copy done: 1 table, 2 rows'))
+    .toBeVisible({ timeout: 90_000 });
+  // Exact decimals, compared as text: ClickHouse compares a Decimal with a float loosely.
+  expect(clickhouse(
+    `SELECT toString(price) FROM ${CH_DATABASE}.copy_orders FINAL ORDER BY id`,
+  )).toBe('2.5\n4');
   await page.getByRole('button', { name: 'Stop' }).click();
   await expect(page.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 60_000 });
 });

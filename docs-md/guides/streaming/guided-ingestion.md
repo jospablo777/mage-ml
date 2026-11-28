@@ -1,10 +1,10 @@
 # Copy a database and keep it in step
 
-*Guided ingestion: a PostgreSQL or MySQL database's tables copied into PostgreSQL and kept in sync by change capture.*
+*Guided ingestion: a PostgreSQL or MySQL database's tables copied into PostgreSQL or ClickHouse and kept in sync by change capture.*
 
 The **Ingestion** page, in the left navigation, sets up a sync from a PostgreSQL or MySQL
-database into PostgreSQL: the tables you choose are copied, then every insert, update and
-delete follows within seconds. It checks both servers, shows a sample, says what the sync will do, and
+database into PostgreSQL or ClickHouse: the tables you choose are copied, then every insert,
+update and delete follows within seconds. It checks both servers, shows a sample, says what the sync will do, and
 creates a streaming pipeline you can read, run from its Run tab and export as a service.
 
 ## Steps
@@ -13,7 +13,7 @@ creates a streaming pipeline you can read, run from its Run tab and export as a 
 | --- | --- |
 | Source | PostgreSQL: `wal_level` is `logical`, the user may replicate (`REPLICATION`), a replication slot is free. MySQL: the binary log is on with `binlog_format=ROW`, `binlog_row_image=FULL` and `binlog_row_metadata=FULL`, compression and partial JSON off, and the user has REPLICATION SLAVE and REPLICATION CLIENT. Then each table with its primary key and size |
 | Tables | Choose them. A table cannot be chosen, and says why, without a primary key (rows upsert and delete by it), or with `REPLICA IDENTITY NOTHING` (once published, its updates and deletes would fail on the source) or `USING INDEX` (its deletes would not carry the key). Two tables of the same name in different schemas go in separate syncs, as both would be written to one table. **Sample** shows its first rows |
-| Destination | PostgreSQL: the same server as a PostgreSQL source, or another; the schema, and a prefix for the copies' names; whether a deleted row is deleted or kept with `_mage_deleted_at` |
+| Destination | PostgreSQL (the same server as a PostgreSQL source, or another) or ClickHouse; the schema (PostgreSQL) or the connection's database (ClickHouse, made when missing), and a prefix for the copies' names; whether a deleted row is deleted or, in PostgreSQL, kept with `_mage_deleted_at` |
 | Review | What the sync will do, in sentences: copy, keys, deletes, new columns, restarts |
 | Create | The pipeline; the passwords become project secrets |
 | Run | Start it on the local engine from the page and watch the copy table by table, as on the pipeline's Run tab |
@@ -100,3 +100,20 @@ snapshot: initial
 - MySQL keeps no reader's position: the stream saves where it is in its own state once the
   destination committed, and a restart continues from there.
 - See [stream services](../../production/stream-services.md#mysql-changes) for the source in detail.
+
+## Into ClickHouse
+
+Choose **ClickHouse** as the destination's database (HTTP, port 8123; TLS on 8443). Each
+source table becomes a `ReplacingMergeTree` ordered by its key in the connection's database,
+versioned by each change's commit time:
+
+```sql
+SELECT * FROM copy_orders FINAL   -- one row per key, deleted keys gone
+```
+
+- Read with `FINAL` until ClickHouse merges the parts: before a merge a key can have more
+  than one row.
+- A deleted row is deleted; keeping it with `_mage_deleted_at` is PostgreSQL only, as
+  ClickHouse replaces whole rows and a PostgreSQL delete carries only the key.
+- Decimals are `Decimal(76, 30)`, exact. See
+  [stream services](../../production/stream-services.md#clickhouse) for the sink's mirror mode.

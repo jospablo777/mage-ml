@@ -41,6 +41,7 @@ class IngestionSetupResource(GenericResource):
                 result = dict(review=ingestion.review(
                     tables, deletes, schema, prefix,
                     payload.get('kind') or source.get('kind') or 'postgres',
+                    destination.get('kind') or 'postgres',
                 ))
             elif action == 'create':
                 result = await asyncio.to_thread(

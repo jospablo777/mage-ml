@@ -172,11 +172,22 @@ impl Client {
         body: Option<&[u8]>,
         parameters: &[(&str, &str)],
     ) -> Result<String, ConnectorError> {
+        self.run_in(&self.settings.database, query, body, parameters)
+    }
+
+    /// Runs a statement in `database`, the default for names without one.
+    fn run_in(
+        &self,
+        database: &str,
+        query: &str,
+        body: Option<&[u8]>,
+        parameters: &[(&str, &str)],
+    ) -> Result<String, ConnectorError> {
         let mut request = self
             .agent
             .post(&self.settings.url)
             .header("X-ClickHouse-User", &self.settings.user)
-            .header("X-ClickHouse-Database", &self.settings.database);
+            .header("X-ClickHouse-Database", database);
         if let Some(password) = &self.settings.password {
             request = request.header("X-ClickHouse-Key", password);
         }
@@ -224,7 +235,28 @@ impl Client {
         }
     }
 
+    /// The table's columns; the database is made when it does not exist (a missing table is
+    /// made from the batch).
     fn columns(&self, table: &str) -> Result<BTreeMap<String, String>, ConnectorError> {
+        match self.read_columns(table) {
+            // UNKNOWN_DATABASE: requests naming it fail until it exists.
+            Err(error) if error.message.contains("Code: 81") => {
+                self.run_in(
+                    "default",
+                    &format!(
+                        "CREATE DATABASE IF NOT EXISTS {}",
+                        quote(&self.settings.database)
+                    ),
+                    None,
+                    &[],
+                )?;
+                self.read_columns(table)
+            }
+            found => found,
+        }
+    }
+
+    fn read_columns(&self, table: &str) -> Result<BTreeMap<String, String>, ConnectorError> {
         let text = self.run(
             "SELECT name, type FROM system.columns WHERE database = {db:String} AND table = \
              {table:String} FORMAT JSONCompact",

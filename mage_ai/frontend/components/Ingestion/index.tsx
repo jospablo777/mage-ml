@@ -19,7 +19,7 @@ import { UNIT } from '@oracle/styles/units/spacing';
 type ConnectionType = {
   database: string;
   host: string;
-  kind?: 'postgres' | 'mysql';
+  kind?: 'postgres' | 'mysql' | 'clickhouse';
   password: string;
   port: string;
   sslmode: string;
@@ -138,9 +138,25 @@ function Ingestion() {
   const [error, setError] = useState<string>(null);
 
   const kind = source.kind || 'postgres';
-  // A MySQL source goes into PostgreSQL: another server.
-  const same = sameServer && kind === 'postgres';
+  const destinationKind = destination.kind || 'postgres';
+  // The same server only for PostgreSQL into PostgreSQL.
+  const same = sameServer && kind === 'postgres' && destinationKind === 'postgres';
   const target = same ? { ...source, kind: undefined } : destination;
+  const chooseDestination = (next: 'postgres' | 'clickhouse') => {
+    const port = { clickhouse: '8123', postgres: '5432' };
+    setDestination({
+      ...destination,
+      kind: next,
+      port: destination.port === port[destinationKind] || !destination.port
+        ? port[next] : destination.port,
+    });
+    // ClickHouse replaces whole rows: deleted rows are deleted.
+    if (next === 'clickhouse') {
+      setDeletes('delete');
+    }
+    setDestinationFound(null);
+    setReview(null);
+  };
   const chooseKind = (next: 'postgres' | 'mysql') => {
     const port = { mysql: '3306', postgres: '5432' };
     setSource({
@@ -286,8 +302,19 @@ function Ingestion() {
       )}
 
       {tables.length > 0 && (
-        <Step title="3. Destination: PostgreSQL">
-          {kind === 'postgres' && (
+        <Step title="3. Destination">
+          <Spacing mb={1} style={{ width: UNIT * 24 }}>
+            <Text muted small>Database</Text>
+            <Select
+              aria-label="Destination type"
+              onChange={e => chooseDestination(e.target.value as 'postgres' | 'clickhouse')}
+              value={destinationKind}
+            >
+              <option value="postgres">PostgreSQL</option>
+              <option value="clickhouse">ClickHouse</option>
+            </Select>
+          </Spacing>
+          {kind === 'postgres' && destinationKind === 'postgres' && (
             <Checkbox
               checked={sameServer}
               label="The same server as the source"
@@ -304,14 +331,16 @@ function Ingestion() {
             </Spacing>
           )}
           <FlexContainer flexWrap="wrap">
-            <Spacing mr={1} mt={1} style={{ width: UNIT * 24 }}>
-              <Text muted small>Schema</Text>
-              <TextInput
-                aria-label="Destination schema"
-                onChange={e => setSchema(e.target.value)}
-                value={schema}
-              />
-            </Spacing>
+            {destinationKind === 'postgres' && (
+              <Spacing mr={1} mt={1} style={{ width: UNIT * 24 }}>
+                <Text muted small>Schema</Text>
+                <TextInput
+                  aria-label="Destination schema"
+                  onChange={e => setSchema(e.target.value)}
+                  value={schema}
+                />
+              </Spacing>
+            )}
             <Spacing mr={1} mt={1} style={{ width: UNIT * 24 }}>
               <Text muted small>Table names start with</Text>
               <TextInput
@@ -328,10 +357,18 @@ function Ingestion() {
                 value={deletes}
               >
                 <option value="delete">is deleted in the copy</option>
-                <option value="soft">stays, marked _mage_deleted_at</option>
+                {destinationKind === 'postgres' && (
+                  <option value="soft">stays, marked _mage_deleted_at</option>
+                )}
               </Select>
             </Spacing>
           </FlexContainer>
+          {destinationKind === 'clickhouse' && (
+            <Text muted small>
+              Each table is a ReplacingMergeTree by its key, in the connection&apos;s database:
+              read it with FINAL for one row per key.
+            </Text>
+          )}
           <Spacing mt={1}>
             <Button
               loading={isLoading}
@@ -351,7 +388,9 @@ function Ingestion() {
           <Button
             loading={isLoading}
             onClick={() => call({
-              ingestion_setup: { action: 'review', kind, ...choices },
+              ingestion_setup: {
+                action: 'review', destination: { kind: destinationKind }, kind, ...choices,
+              },
             } as any)}
           >
             Review what the sync will do

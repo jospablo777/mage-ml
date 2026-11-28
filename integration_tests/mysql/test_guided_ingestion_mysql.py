@@ -51,15 +51,15 @@ def test_checks_tables_sample_and_the_pipeline_it_creates(
     chosen = [tables[f'{mysql_database}.orders'], tables[f'{mysql_database}.order_lines']]
     lines = ingestion.review(chosen, 'delete', 'raw', 'copy_', 'mysql')
     assert '(the binary log)' in lines[0]
+    destination = dict(host='pg.example.com', port=5432, database='warehouse',
+                       user='loader', password='secret', sslmode='disable')
     try:
-        ingestion.create(mage_project, 'nope', source, source,
+        ingestion.create(mage_project, 'nope', source, destination,
                          [tables[f'{mysql_database}.notes']])
         raise AssertionError('a table without a key was accepted')
     except ingestion.IngestionError as error:
         assert 'no primary key' in str(error) or 'has no key' in str(error), error
 
-    destination = dict(host='pg.example.com', port=5432, database='warehouse',
-                       user='loader', password='secret', sslmode='disable')
     created = ingestion.create(
         mage_project, f'sync_{mysql_database}', source, destination, chosen,
         schema='raw', prefix='copy_',

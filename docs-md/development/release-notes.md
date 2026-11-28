@@ -51,6 +51,8 @@
   user's grants, and syncs the chosen tables into PostgreSQL.
 - The ClickHouse sink mirrors change capture (`mirror:`): a ReplacingMergeTree per source
   table, versioned by commit time, deletes applied, decimals exact.
+- The Ingestion page syncs into ClickHouse too: the destination's check, its database made
+  when missing, a mirror table per source table.
 
 ### Streams
 
