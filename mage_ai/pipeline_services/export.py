@@ -1460,7 +1460,8 @@ def _search_connector(block, connector_type: str, config: Dict, where: str,
 INFLUXDB_SETTINGS = {'url', 'token', 'org', 'bucket', 'measurement', 'batch_size', 'timeout_ms'}
 
 
-ICEBERG_SETTINGS = {'catalog', 'table', 'create_table', 'columns', 'partition_by'}
+ICEBERG_SETTINGS = {'catalog', 'table', 'create_table', 'columns', 'partition_by',
+                    'expire_snapshots'}
 # Catalog properties that hold credentials (a catalog may also vend the storage's).
 ICEBERG_SECRETS = re.compile(r'token|credential|secret|password|key', re.IGNORECASE)
 
@@ -1491,7 +1492,11 @@ def _iceberg_connector(block, config: Dict, where: str, problems: List[str]) -> 
         problems.append(
             f'{where}: Iceberg settings need table with its namespace, such as analytics.events.'
         )
-    from mage_ai.streaming.sinks.iceberg import partition_field, rejoined
+    from mage_ai.streaming.sinks.iceberg import (
+        expire_settings,
+        partition_field,
+        rejoined,
+    )
 
     partition_by = config.get('partition_by')
     if partition_by is not None:
@@ -1504,6 +1509,10 @@ def _iceberg_connector(block, config: Dict, where: str, problems: List[str]) -> 
                     partition_field(text)
                 except ValueError as error:
                     problems.append(f'{where}: {error}')
+    try:
+        expire_settings(config.get('expire_snapshots'))
+    except ValueError as error:
+        problems.append(f'{where}: {error}')
     settings = {k: v for k, v in config.items() if k in ICEBERG_SETTINGS}
     return dict(name=block.uuid, kind='iceberg', config=settings)
 

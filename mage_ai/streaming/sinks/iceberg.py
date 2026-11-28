@@ -7,10 +7,15 @@ have are left out, columns a message does not have are null, and a list or an ob
 text column is written as its JSON text. With create_table, a missing table is created from
 the first batch: integers as long, other numbers as double, booleans, the rest as text;
 columns overrides any of them, and partition_by partitions it (day(ts), bucket(16, id)).
+With expire_snapshots ({older_than: 1d, keep: 100, every: 10m}), snapshots older than
+older_than leave the table's metadata after a commit, at most once per every, but for the
+newest keep, as the engine does.
 """
 import json
 import re
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from mage_ai.shared.config import BaseConfig
@@ -32,6 +37,41 @@ class IcebergConfig(BaseConfig):
     create_table: bool = False
     columns: Dict = field(default_factory=dict)
     partition_by: List[str] = field(default_factory=list)
+    expire_snapshots: Optional[Dict] = None
+
+
+DURATION = re.compile(r'^\s*(\d+)\s*([smhdw])\s*$')
+SECONDS = dict(s=1, m=60, h=3600, d=86400, w=604800)
+
+
+def duration(text, what: str) -> timedelta:
+    """`30s`, `10m`, `6h`, `1d`, `2w`."""
+    found = DURATION.match(str(text or ''))
+    if not found:
+        raise ValueError(f'Iceberg {what}: a number and s, m, h, d or w, such as 1d; not '
+                         f'{text!r}.')
+    return timedelta(seconds=int(found[1]) * SECONDS[found[2]])
+
+
+def expire_settings(value) -> Optional[Dict]:
+    """expire_snapshots as older_than, keep and every; the engine reads it the same way."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or 'older_than' not in value:
+        raise ValueError('Iceberg expire_snapshots: {older_than: 1d, keep: 100, every: 10m}; '
+                         'older_than is required.')
+    unknown = sorted(set(value) - {'older_than', 'keep', 'every'})
+    if unknown:
+        raise ValueError(f'Iceberg expire_snapshots: unknown setting {unknown[0]}; older_than, '
+                         'keep, every.')
+    keep = value.get('keep', 1)
+    if isinstance(keep, bool) or not isinstance(keep, int) or keep < 1:
+        raise ValueError('Iceberg expire_snapshots keep: a whole number, 1 or more.')
+    return dict(
+        older_than=duration(value['older_than'], 'expire_snapshots older_than'),
+        keep=keep,
+        every=duration(value.get('every', '10m'), 'expire_snapshots every'),
+    )
 
 
 def rejoined(items: List[str]) -> List[str]:
@@ -173,6 +213,8 @@ class IcebergSink(BaseSink):
             partition_field(text)
         for name, text in (self.config.columns or {}).items():
             _iceberg_type(name, text)
+        self.expire = expire_settings(self.config.expire_snapshots)
+        self.expired_at = None
         self.catalog = load_catalog('mageml', **properties)
         self.table = None
 
@@ -262,3 +304,25 @@ class IcebergSink(BaseSink):
         self._open(rows)
         self.table.append(self._arrow(rows))
         self._print(f'Appended {len(rows)} rows to {self.config.table}.')
+        if self.expire and (self.expired_at is None or time.monotonic() - self.expired_at
+                            >= self.expire['every'].total_seconds()):
+            self.expired_at = time.monotonic()
+            try:
+                self._expire()
+            except Exception as error:
+                self._print(f'Expiring snapshots failed, tried again later: {error}')
+
+    def _expire(self) -> None:
+        """Snapshots older than older_than, but the newest keep and the current one."""
+        cutoff = datetime.now(timezone.utc) - self.expire['older_than']
+        cutoff_ms = int(cutoff.timestamp() * 1000)
+        snapshots = sorted(self.table.metadata.snapshots, key=lambda s: s.timestamp_ms,
+                           reverse=True)
+        kept = {s.snapshot_id for s in snapshots[:self.expire['keep']]}
+        current = self.table.metadata.current_snapshot_id
+        expired = [s.snapshot_id for s in snapshots
+                   if s.timestamp_ms < cutoff_ms and s.snapshot_id not in kept
+                   and s.snapshot_id != current]
+        if expired:
+            self.table.maintenance.expire_snapshots().by_ids(expired).commit()
+            self.table = self.catalog.load_table(self.config.table)

@@ -50,6 +50,87 @@ pub(crate) struct Settings {
     /// Column types that override the inferred ones when the table is created.
     pub columns: BTreeMap<String, String>,
     pub partition_by: Vec<String>,
+    /// Snapshots expired after commits (`expire_snapshots`), off unless set.
+    pub expire: Option<Expire>,
+}
+
+/// `expire_snapshots: {older_than: 1d, keep: 100, every: 10m}`: after a commit, at most once
+/// per `every`, snapshots older than `older_than` leave the table's metadata, but for the
+/// newest `keep`. Data and manifest files are not deleted (the catalog's or Spark's
+/// remove_orphan_files does that).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Expire {
+    pub older_than: std::time::Duration,
+    pub keep: usize,
+    pub every: std::time::Duration,
+}
+
+/// `30s`, `10m`, `6h`, `1d`, `2w`.
+pub(crate) fn duration(text: &str, what: &str) -> Result<std::time::Duration, ConnectorError> {
+    let text = text.trim();
+    let split = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let seconds = match unit.trim() {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86400,
+        "w" => 604800,
+        _ => 0,
+    };
+    match number.parse::<u64>() {
+        Ok(n) if seconds > 0 => Ok(std::time::Duration::from_secs(n * seconds)),
+        _ => Err(fatal(format!(
+            "Iceberg {what}: a number and s, m, h, d or w, such as 1d; not {text:?}."
+        ))),
+    }
+}
+
+fn expire_settings(value: Option<&Value>) -> Result<Option<Expire>, ConnectorError> {
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let bad = || {
+        fatal(
+            "Iceberg expire_snapshots: {older_than: 1d, keep: 100, every: 10m}; older_than is \
+             required.",
+        )
+    };
+    let object = value.as_object().ok_or_else(bad)?;
+    if let Some(unknown) = object
+        .keys()
+        .find(|k| !["older_than", "keep", "every"].contains(&k.as_str()))
+    {
+        return Err(fatal(format!(
+            "Iceberg expire_snapshots: unknown setting {unknown}; older_than, keep, every."
+        )));
+    }
+    let older_than = duration(
+        object
+            .get("older_than")
+            .and_then(Value::as_str)
+            .ok_or_else(bad)?,
+        "expire_snapshots older_than",
+    )?;
+    let keep = match object.get("keep") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .filter(|n| *n >= 1)
+            .ok_or_else(|| fatal("Iceberg expire_snapshots keep: a whole number, 1 or more."))?
+            as usize,
+    };
+    let every = match object.get("every").and_then(Value::as_str) {
+        None => std::time::Duration::from_secs(600),
+        Some(text) => duration(text, "expire_snapshots every")?,
+    };
+    Ok(Some(Expire {
+        older_than,
+        keep,
+        every,
+    }))
 }
 
 fn fatal(message: impl Into<String>) -> ConnectorError {
@@ -155,7 +236,9 @@ impl Settings {
         for (name, t) in &columns {
             primitive(name, t)?;
         }
+        let expire = expire_settings(config.get("expire_snapshots"))?;
         Ok(Settings {
+            expire,
             kind,
             props,
             ident,
@@ -659,6 +742,29 @@ pub(crate) async fn append(
     tx.commit(catalog)
         .await
         .map_err(|e| classify("committing", e))
+}
+
+/// Expires the snapshots `expire` selects (iceberg-rust's ExpireSnapshotsAction); returns
+/// the table after the commit.
+pub(crate) async fn expire_snapshots(
+    catalog: &dyn Catalog,
+    table: &Table,
+    expire: &Expire,
+) -> Result<Table, ConnectorError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    let cutoff = now - expire.older_than.as_millis() as i64;
+    let tx = Transaction::new(table);
+    let tx = tx
+        .expire_snapshots()
+        .expire_older_than_ms(cutoff)
+        .retain_last(expire.keep)
+        .apply(tx)
+        .map_err(|e| classify("preparing the snapshot expiry", e))?;
+    tx.commit(catalog)
+        .await
+        .map_err(|e| classify("expiring snapshots", e))
 }
 
 #[cfg(test)]

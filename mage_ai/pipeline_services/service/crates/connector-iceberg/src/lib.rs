@@ -154,15 +154,28 @@ impl IcebergSink {
             .get_or_try_init(|| async {
                 let shared = Arc::new(Shared::open(&self.settings, first).await?);
                 let (jobs, rx) = mpsc::unbounded_channel();
-                tokio::spawn(commit_loop(shared.clone(), self.scope.clone(), rx));
+                tokio::spawn(commit_loop(
+                    shared.clone(),
+                    self.scope.clone(),
+                    self.settings.expire.clone(),
+                    rx,
+                ));
                 Ok(Running { shared, jobs })
             })
             .await
     }
 }
 
-/// Commits the files of every batch waiting, in one snapshot, and answers each batch.
-async fn commit_loop(shared: Arc<Shared>, scope: String, mut jobs: mpsc::UnboundedReceiver<Job>) {
+/// Commits the files of every batch waiting, in one snapshot, and answers each batch. With
+/// `expire`, snapshots are expired after a commit at most once per `expire.every`; an expiry
+/// that fails is written to the log and tried again later, never failing the stream.
+async fn commit_loop(
+    shared: Arc<Shared>,
+    scope: String,
+    expire: Option<table::Expire>,
+    mut jobs: mpsc::UnboundedReceiver<Job>,
+) {
+    let mut expired_at: Option<std::time::Instant> = None;
     while let Some(first) = jobs.recv().await {
         let mut waiting = vec![first];
         while let Ok(job) = jobs.try_recv() {
@@ -188,8 +201,22 @@ async fn commit_loop(shared: Arc<Shared>, scope: String, mut jobs: mpsc::Unbound
         }
         if !replies.is_empty() {
             let outcome = commit(&shared, &scope, files, &names).await;
+            let committed = outcome.is_ok();
             for reply in replies {
                 let _ = reply.send(outcome.clone());
+            }
+            if let Some(expire) = &expire
+                && committed
+                && expired_at.is_none_or(|at| at.elapsed() >= expire.every)
+            {
+                expired_at = Some(std::time::Instant::now());
+                let table = shared.current().table.clone();
+                match table::expire_snapshots(shared.catalog.as_ref(), &table, expire).await {
+                    Ok(table) => {
+                        let _ = shared.advance(table);
+                    }
+                    Err(error) => eprintln!("warning: {error}; tried again later"),
+                }
             }
         }
         for reply in flushes {

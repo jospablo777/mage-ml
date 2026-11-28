@@ -32,6 +32,13 @@ partition_by:
 | `create_table` | Create the table from the first messages when it does not exist |
 | `columns` | Types of columns when the table is created: `long`, `int`, `double`, `float`, `string`, `boolean`, `date`, `timestamp`, `timestamptz`, `decimal(10, 2)` |
 | `partition_by` | The new table's partitions: columns, `year`, `month`, `day` or `hour` of a time column, `bucket(16, id)`, `truncate(4, name)` |
+| `expire_snapshots` | `{older_than: 1d, keep: 100, every: 10m}`: after a commit, at most once per `every` (10 minutes by default), snapshots older than `older_than` leave the table's metadata, but for the newest `keep` (1 by default) |
+
+A stream commits often, and every commit is a snapshot that stays in the table's metadata,
+which each commit rewrites: `expire_snapshots` keeps it small. Time travel reaches back
+`older_than`. Expired snapshots' files stay in storage until the catalog's or Spark's
+`remove_orphan_files` deletes them. With `delivery: exactly_once`, expire with the
+catalog's maintenance instead.
 
 ## Messages
 

@@ -268,3 +268,70 @@ async fn exactly_once_keeps_positions_with_the_rows_and_fences_a_lost_partition(
         Some("3")
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn old_snapshots_leave_the_metadata_but_the_newest_stay() {
+    let warehouse = tempfile::tempdir().unwrap();
+    let mut config = config(&warehouse, "lake.expiring");
+    // Everything older than now goes, but for the newest 2, after every commit.
+    config["expire_snapshots"] = serde_json::json!({"older_than": "0s", "keep": 2, "every": "0s"});
+    let sink = IcebergSink::new(&config, "orders.lake").unwrap();
+    for n in 0..5 {
+        let message = format!(r#"{{"id": {n}, "region": "eu"}}"#);
+        let (b, m) = batch(0, n, &[message.as_str()]);
+        sink.write(&b, &m).await.unwrap();
+        // Snapshot times are in milliseconds: the next commit is strictly newer.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    sink.flush().await;
+
+    let settings = Settings::new(&config).unwrap();
+    let catalog = settings.catalog().await.unwrap();
+    let table = catalog.load_table(&settings.ident).await.unwrap();
+    assert_eq!(table.metadata().snapshots().count(), 2);
+    // The rows of the expired snapshots are still in the table.
+    assert_eq!(rows(&config).await.len(), 5);
+}
+
+#[test]
+fn expiry_settings_are_checked_and_exactly_once_refuses_them() {
+    let warehouse = tempfile::tempdir().unwrap();
+    let base = config(&warehouse, "lake.t");
+    let with = |value: Value| {
+        let mut c = base.clone();
+        c["expire_snapshots"] = value;
+        Settings::new(&c).map(|s| s.expire)
+    };
+    assert_eq!(
+        with(serde_json::json!({"older_than": "1d"})).unwrap(),
+        Some(table::Expire {
+            older_than: std::time::Duration::from_secs(86400),
+            keep: 1,
+            every: std::time::Duration::from_secs(600),
+        })
+    );
+    for (bad, expected) in [
+        (serde_json::json!({"keep": 3}), "older_than is required"),
+        (serde_json::json!({"older_than": "soon"}), "such as 1d"),
+        (
+            serde_json::json!({"older_than": "1d", "keep": 0}),
+            "1 or more",
+        ),
+        (
+            serde_json::json!({"older_than": "1d", "keep_last": 3}),
+            "unknown setting keep_last",
+        ),
+    ] {
+        let error = with(bad).unwrap_err();
+        assert!(error.message.contains(expected), "{error:?}");
+    }
+    let mut c = base.clone();
+    c["expire_snapshots"] = serde_json::json!({"older_than": "1d"});
+    assert!(
+        IcebergTransaction::new(&c, "s")
+            .err()
+            .unwrap()
+            .message
+            .contains("at-least-once")
+    );
+}

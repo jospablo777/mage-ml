@@ -859,9 +859,11 @@ partition_by: ["day(ts)", "bucket(16, customer_id)"]
   (`mageml.batches`, partition and offsets).
 - Every commit is a snapshot and a manifest: a commit every 5 seconds makes about 17,000 a
   day, and reads plan over every manifest. Size the stream's batches to commit about once a
-  minute for a table others read, and run your catalog's maintenance, Spark
-  (`CALL system.expire_snapshots`, `rewrite_manifests`, `rewrite_data_files`) or Trino
-  (`ALTER TABLE ... EXECUTE expire_snapshots`, `optimize`), on a schedule.
+  minute for a table others read. `expire_snapshots: {older_than: 1d, keep: 100}` expires
+  old snapshots after commits (at-least-once delivery); compact files and manifests with
+  your catalog's maintenance, Spark (`CALL system.rewrite_manifests`,
+  `rewrite_data_files`, `remove_orphan_files`) or Trino (`ALTER TABLE ... EXECUTE
+  optimize`), on a schedule.
 - Credentials (`token`, `credential`, `s3.secret-access-key`, ...) come from the
   environment: written in the file, they stop the export. Services use REST catalogs; in the
   editor, the sink writes with pyiceberg and takes any catalog it loads.

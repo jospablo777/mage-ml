@@ -12,3 +12,7 @@ create_table: false
 #   event_time: timestamptz
 # partition_by:
 #   - day(event_time)
+# Old snapshots leave the table's metadata after commits; the newest 100 stay.
+# expire_snapshots:
+#   older_than: 1d
+#   keep: 100

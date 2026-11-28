@@ -54,8 +54,15 @@ impl IcebergTransaction {
     /// The transaction of stream `stream` (stable across restarts: the pipeline's uuid) into
     /// the table of `config`, an Iceberg sink's settings.
     pub fn new(config: &Value, stream: &str) -> Result<Arc<IcebergTransaction>, ConnectorError> {
+        let settings = Settings::new(config)?;
+        if settings.expire.is_some() {
+            return Err(ConnectorError::fatal(
+                "Iceberg expire_snapshots runs with at-least-once delivery for now; expire the \
+                 table's snapshots with the catalog's maintenance under exactly_once.",
+            ));
+        }
         Ok(Arc::new(IcebergTransaction {
-            settings: Settings::new(config)?,
+            settings,
             stream: stream.to_string(),
             instance: uuid::Uuid::new_v4().simple().to_string(),
             names: OnceLock::new(),

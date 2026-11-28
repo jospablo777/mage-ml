@@ -77,6 +77,28 @@ class IcebergSinkTest(TestCase):
         with self.assertRaisesRegex(ValueError, 'first messages have no ts; give its type'):
             sink.batch_write([dict(id=1)])
 
+    def test_old_snapshots_leave_the_metadata_but_the_newest_stay(self):
+        import time
+
+        sink = self.sink(table='lake.expiring', create_table=True, expire_snapshots=dict(
+            older_than='0s', keep=2, every='0s',
+        ))
+        for n in range(5):
+            sink.batch_write([dict(id=n)])
+            time.sleep(0.005)
+        table = sink.catalog.load_table('lake.expiring')
+        self.assertEqual(len(table.metadata.snapshots), 2)
+        self.assertEqual(len(table.scan().to_arrow()), 5)
+
+        for bad, message in [
+            (dict(keep=2), 'older_than is required'),
+            (dict(older_than='soon'), 'such as 1d'),
+            (dict(older_than='1d', keep=0), '1 or more'),
+            (dict(older_than='1d', keep_last=3), 'unknown setting keep_last'),
+        ]:
+            with self.assertRaisesRegex(ValueError, message):
+                self.sink(table='lake.x', expire_snapshots=bad)
+
     def test_partition_fields_read_as_transforms_of_columns(self):
         self.assertEqual(partition_field('region'), ('identity', None, 'region'))
         self.assertEqual(partition_field('day(ts)'), ('day', None, 'ts'))
