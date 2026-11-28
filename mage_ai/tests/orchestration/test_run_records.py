@@ -104,6 +104,21 @@ class RunRecordsTest(DBTestCase):
         self.assertEqual(len(outputs[self.transform_uuid]['output_0']['sha256']), 64)
         self.assertGreater(outputs[self.transform_uuid]['output_0']['bytes'], 0)
 
+    def test_project_catalogs_are_not_code(self):
+        before = run_records.code_digest(self.pipeline)
+        for name in run_records.SKIPPED_FILES:
+            (self.project / name).write_text('datasets: []\n')
+            self.addCleanup((self.project / name).unlink)
+        self.assertEqual(run_records.code_digest(self.pipeline), before)
+        files, _ = run_records.source_files(self.pipeline)
+        self.assertFalse(run_records.SKIPPED_FILES & set(files))
+        # The same name in a folder of the project is code.
+        (self.project / 'run_records_conf').mkdir(exist_ok=True)
+        nested = self.project / 'run_records_conf' / 'datasets.yaml'
+        nested.write_text('a: 1\n')
+        self.addCleanup(lambda: (nested.unlink(), nested.parent.rmdir()))
+        self.assertNotEqual(run_records.code_digest(self.pipeline), before)
+
     def test_two_runs_compare_by_code_variables_and_outputs(self):
         first = self.run_pipeline(rows=3)
         self.set_multiplier(3)

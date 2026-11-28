@@ -51,6 +51,9 @@ SKIPPED_FOLDERS = {
     '__pycache__', 'node_modules', 'venv', 'target', 'mage_data', 'site-packages', 'dist',
     'build', 'pipelines',
 }
+# Catalogs at the project's root that no run reads: registering a dataset or a data product
+# changes no pipeline's code, and must not make every partition stale.
+SKIPPED_FILES = {'datasets.yaml', 'global_data_products.yaml'}
 MAX_FILE_BYTES = 1024 * 1024
 MAX_FILES = 5000
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
@@ -111,6 +114,8 @@ def _project_files(repo_path: str) -> Iterable[str]:
             f for f in folders if not f.startswith('.') and f not in SKIPPED_FOLDERS
         ]
         for name in files:
+            if root == repo_path and name in SKIPPED_FILES:
+                continue
             if os.path.splitext(name)[1].lower() in CODE_SUFFIXES:
                 yield os.path.join(root, name)
 
