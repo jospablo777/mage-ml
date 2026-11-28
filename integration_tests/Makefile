@@ -46,6 +46,8 @@ export MAGE_TEST_CLICKHOUSE_USER ?= mage
 export MAGE_TEST_CLICKHOUSE_PASSWORD ?= test
 export MAGE_TEST_KAFKA_PORT ?= 19092
 export MAGE_TEST_KAFKA_BOOTSTRAP ?= 127.0.0.1:$(MAGE_TEST_KAFKA_PORT)
+export MAGE_TEST_SPARK_PORT ?= 15002
+export MAGE_TEST_SPARK_REMOTE ?= sc://127.0.0.1:$(MAGE_TEST_SPARK_PORT)
 export MAGE_TEST_MONGODB_PORT ?= 17017
 export MAGE_TEST_MONGODB_URL ?= mongodb://127.0.0.1:$(MAGE_TEST_MONGODB_PORT)/?directConnection=true
 export MAGE_TEST_TRINO_HOST ?= 127.0.0.1
@@ -89,7 +91,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-pinot test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-iceberg test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-pinot test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-iceberg test-spark test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -178,6 +180,9 @@ test-activemq: up
 
 test-iceberg: up
 	cd .. && $(PYTHON) -m pytest integration_tests/iceberg $(PYTEST_ARGS)
+
+test-spark: up
+	cd .. && $(PYTHON) -m pytest integration_tests/spark $(PYTEST_ARGS)
 
 test-streaming: up
 	cd .. && $(PYTHON) -m pytest integration_tests/streaming $(PYTEST_ARGS)

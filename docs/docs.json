@@ -561,6 +561,7 @@
               "production/server-health",
               "production/export-a-service",
               "production/stream-services",
+              "production/spark-streams",
               "production/services-page",
               "production/pipeline-services",
               "production/service-console",

@@ -932,6 +932,78 @@ def preview_change(
         raise typer.Exit(code=1)
 
 
+SPARK_ENV_DEFAULT = typer.Option(
+    [], '--env', help='a variable the settings read, as NAME=value; repeatable.',
+)
+
+
+@app.command('spark-stream')
+def spark_stream_run(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the streaming pipeline.'),
+    remote: str = typer.Option(..., '--remote', help='the Spark Connect server, sc://host:15002.'),
+    checkpoint: str = typer.Option(
+        ..., '--checkpoint', help='where Spark keeps the positions: a durable path it writes.',
+    ),
+    env: List[str] = SPARK_ENV_DEFAULT,
+    check: bool = typer.Option(False, '--check', help='say what differs, then stop.'),
+    every: float = typer.Option(10, '--every', help='seconds between progress lines.'),
+):
+    """
+    Run a streaming pipeline on Spark Structured Streaming over Spark Connect: its Kafka
+    source, Python stream blocks (by the engine's own worker code) and Kafka sink. Positions
+    live in the checkpoint. Prints the query's progress until it stops or Ctrl-C stops it.
+    """
+    import time
+
+    from mage_ai.pipeline_services import spark_stream
+
+    project_path = os.path.abspath(project_path)
+    _run_records_setup(project_path, pipeline_uuid)
+    environ = dict(os.environ)
+    for text in env:
+        name, _, value = text.partition('=')
+        if not name or not _:
+            print(f'[red]--env {_e(text)}: use NAME=value.[/red]')
+            raise typer.Exit(code=2)
+        environ[name] = value
+    try:
+        stream = spark_stream.plan(project_path, pipeline_uuid, environ=environ)
+    except spark_stream.SparkStreamError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    for note in stream.notes:
+        typer.echo(note)
+    if check:
+        typer.echo(f'{pipeline_uuid} can run on Spark.')
+        return
+    try:
+        spark, query = spark_stream.start(stream, remote, checkpoint)
+    except spark_stream.SparkStreamError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    problem = spark_stream.python_version_check(spark)
+    if problem:
+        query.stop()
+        print(f'[red]{_e(problem)}[/red]')
+        raise typer.Exit(code=2)
+    typer.echo(f'Started {pipeline_uuid} on {remote} (query {query.id}).')
+    try:
+        while query.isActive:
+            time.sleep(every)
+            line = spark_stream.progress_line(query.lastProgress)
+            if line:
+                typer.echo(line)
+    except KeyboardInterrupt:
+        query.stop()
+        typer.echo('Stopped; the next run continues from the checkpoint.')
+        return
+    error = query.exception()
+    if error is not None:
+        print(f'[red]The query stopped: {_e(str(error).splitlines()[0])}[/red]')
+        raise typer.Exit(code=1)
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the MageML project.'),

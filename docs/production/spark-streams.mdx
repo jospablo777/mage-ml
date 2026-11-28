@@ -1,0 +1,61 @@
+---
+title: "Streams on Spark"
+sidebarTitle: "Streams on Spark"
+icon: "bolt"
+description: "Run a streaming pipeline on Spark Structured Streaming over Spark Connect, with the same blocks the stream engine runs."
+---
+
+A streaming pipeline runs on MageML's stream engine by default, one small service per
+pipeline. Teams that run Spark can run the same pipeline on Spark Structured Streaming
+instead, over [Spark Connect](https://spark.apache.org/docs/latest/spark-connect-overview.html).
+The pipeline does not change: its Python blocks run through the engine's own worker code,
+inside Spark's `mapInArrow`, so a block gives the same messages on both.
+
+```bash
+uv pip install "mage-ml[spark]"
+mage spark-stream . orders_clean \
+  --remote sc://spark.example.com:15002 \
+  --checkpoint s3a://lake/checkpoints/orders_clean \
+  --env KAFKA_BOOTSTRAP=kafka.internal:9092
+```
+
+It starts the query on the server and prints its progress every 10 seconds
+(`batch 12: 500 rows in, 410/s arriving, 2,300/s processed, 450 rows out`). Ctrl-C stops
+it; the next run continues from the checkpoint. A block that fails stops the query with the
+block's name and reason.
+
+## What runs on Spark
+
+| Pipeline | On Spark |
+| --- | --- |
+| Kafka source: `bootstrap_server`, `topic` or `topics`, `auto_offset_reset`, `security_protocol`, `sasl_config` (PLAIN, SCRAM) | `readStream.format("kafka")` with `kafka.bootstrap.servers`, `subscribe`, `startingOffsets`, `kafka.security.protocol`, `kafka.sasl.*` |
+| `batch_size` | `maxOffsetsPerTrigger` |
+| `timeout_ms` | the trigger interval |
+| Python stream transformers: the message list or a DataFrame, pipeline variables | `mapInArrow`, by the engine's worker code |
+| One Kafka sink: `bootstrap_server`, `topic`, `security_protocol`, `sasl_config` | `writeStream.format("kafka")` |
+| The source's position, committed after the sinks | Spark's checkpoint, written after the sink |
+
+`mage spark-stream --check` says whether a pipeline can run, without starting it. A pipeline
+with anything else is refused with the list: other sources and sinks, more than one sink,
+dead letters, exactly-once delivery, event time, keyed state, SQL, window, lookup, Rust and
+R stream blocks. Those run on the engine. Broadcast values are set through the stream
+service's API, which Spark does not have: blocks read an empty `kwargs['broadcast']`.
+
+## Positions
+
+Spark keeps the stream's positions in its checkpoint, never in the consumer group. A first
+run starts where `auto_offset_reset` says (`earliest` or `latest`), whatever the group
+committed on the engine. The checkpoint must be durable (object storage, HDFS): a lost
+checkpoint starts the stream over. Delivery is at least once, as on the engine: a batch
+that fails is read again.
+
+## The Spark server
+
+- Spark 4 with Spark Connect, and the Kafka connector
+  (`org.apache.spark:spark-sql-kafka-0-10_2.13`) in its jars or `--packages`.
+- Its Python workers run your Python's minor version (Spark refuses a Python UDF
+  otherwise) with `pyarrow`, and the packages your blocks import. The command checks the
+  version and pyarrow when it starts the query.
+- Settings that read variables (`{{ env_var('KAFKA_BOOTSTRAP') }}`, secrets) are filled in
+  from the environment of the command, and `--env` sets or overrides them: the addresses
+  Spark reaches can differ from yours.

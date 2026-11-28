@@ -5,7 +5,8 @@
 A streaming pipeline [exports](export-a-service.md) like any other. The service
 runs it from its start, with no trigger: it reads its source without end, runs the
 transformers on each batch, and moves the source's position on only once every sink took
-the batch. The engine is written in Rust; blocks run in Python, Rust or R.
+the batch. The engine is written in Rust; blocks run in Python, Rust or R. The same
+pipeline can also run on [Spark Structured Streaming](spark-streams.md).
 
 ## What runs
 
@@ -856,8 +857,11 @@ partition_by: ["day(ts)", "bucket(16, customer_id)"]
   a YAML list, `bucket(16, id)` is read whole all the same.
 - Each snapshot's summary names the stream (`mageml.stream`) and its batches
   (`mageml.batches`, partition and offsets).
-- Every commit is a snapshot. Expire snapshots and compact small files with your catalog's
-  maintenance, Spark (`CALL system.expire_snapshots`, `rewrite_data_files`) or pyiceberg.
+- Every commit is a snapshot and a manifest: a commit every 5 seconds makes about 17,000 a
+  day, and reads plan over every manifest. Size the stream's batches to commit about once a
+  minute for a table others read, and run your catalog's maintenance, Spark
+  (`CALL system.expire_snapshots`, `rewrite_manifests`, `rewrite_data_files`) or Trino
+  (`ALTER TABLE ... EXECUTE expire_snapshots`, `optimize`), on a schedule.
 - Credentials (`token`, `credential`, `s3.secret-access-key`, ...) come from the
   environment: written in the file, they stop the export. Services use REST catalogs; in the
   editor, the sink writes with pyiceberg and takes any catalog it loads.

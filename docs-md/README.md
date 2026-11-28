@@ -359,6 +359,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Server health](production/server-health.md)
 - [Export pipelines as a service](production/export-a-service.md)
 - [Stream services](production/stream-services.md)
+- [Streams on Spark](production/spark-streams.md)
 - [Services in the app](production/services-page.md)
 - [Pipeline services: run pipelines without Mage](production/pipeline-services.md)
 - [Service console](production/service-console.md)

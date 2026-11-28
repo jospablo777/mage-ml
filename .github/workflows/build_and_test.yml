@@ -317,9 +317,9 @@ jobs:
           - id: ml
             name: "Integration: ML and HTTP services"
             # minio: exported services copy audit records to S3 (models/test_audit_store.py).
-            services: feast mlflow api minio
+            services: feast mlflow api minio kafka spark
             # The deploy test builds a service image and deploys it to the runner's Docker.
-            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models integration_tests/lineage
+            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models integration_tests/lineage integration_tests/spark
             r: false
             # Its Rust block test is warmed first, with the shared Rust blocks cache: built
             # inside the test with every feature (MAGE_RUST_FEATURES), it passed 900 s.
@@ -390,7 +390,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra mssql --extra geo --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra spark --extra ibm-mq --extra db2 --extra mssql --extra geo --extra integrations
       # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R

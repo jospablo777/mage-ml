@@ -229,6 +229,8 @@ snowflake = [
 spark = [
   "boto3>=1.42,<2",
   "botocore>=1.42,<2",
+  # Streaming pipelines on Spark Structured Streaming over Spark Connect (spark_stream.py).
+  "pyspark-client>=4.3,<5",
 ]
 streaming = [
   "confluent-avro~=1.8.0",

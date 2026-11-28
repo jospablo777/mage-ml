@@ -4604,6 +4604,7 @@ all = [
     { name = "pymongo" },
     { name = "pymssql" },
     { name = "pyodbc" },
+    { name = "pyspark-client" },
     { name = "redshift-connector" },
     { name = "requests-aws4auth" },
     { name = "skops" },
@@ -4728,6 +4729,7 @@ snowflake = [
 spark = [
     { name = "boto3" },
     { name = "botocore" },
+    { name = "pyspark-client" },
 ]
 streaming = [
     { name = "confluent-avro" },
@@ -4902,6 +4904,7 @@ requires-dist = [
     { name = "pymongo", marker = "extra == 'streaming'", specifier = ">=4.6.3,<5" },
     { name = "pymssql", marker = "extra == 'mssql'", specifier = ">=2.4.6,<3" },
     { name = "pyodbc", marker = "extra == 'all'", specifier = ">=5.2,<6" },
+    { name = "pyspark-client", marker = "extra == 'spark'", specifier = ">=4.3,<5" },
     { name = "python-dateutil", specifier = ">=2.9" },
     { name = "pytz", specifier = ">=2022.2.1" },
     { name = "pyyaml", specifier = "~=6.0" },
@@ -7973,6 +7976,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/a5/6baf003f72c04985eaf37d3e213f537533b0768a655715c0578e9e058a8e/pyroaring-1.2.0-cp314-cp314t-win_amd64.whl", hash = "sha256:d0cb2d7269071f459df994765d54595dae131a7a44966732b0d7cf703b9f511e", size = 311922, upload-time = "2026-10-02T23:14:01.725Z" },
     { url = "https://files.pythonhosted.org/packages/7b/0a/15c75789ed9bb7a9fcb9f531639c4d05a48dc8812ad3431149308de071bb/pyroaring-1.2.0-cp314-cp314t-win_arm64.whl", hash = "sha256:18dced8d2e917c2385a1ed2ca1ee1281ec787b0f0827011ec28544920c99e23c", size = 264192, upload-time = "2026-10-02T23:14:02.975Z" },
 ]
+
+[[package]]
+name = "pyspark-client"
+version = "4.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "googleapis-common-protos" },
+    { name = "grpcio" },
+    { name = "grpcio-status" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+    { name = "pyyaml" },
+    { name = "zstandard" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c9/e9/10590e3cbeb912a1ba8180335296d9ef6be7674b02fcb9a58b9f51212f99/pyspark_client-4.3.0.tar.gz", hash = "sha256:7294e24ffbb896a94e3f9a4bab4b022e1f0500b3c57f76eab7b02f6de029769f", size = 1745601, upload-time = "2026-10-30T15:31:21.467Z" }
 
 [[package]]
 name = "pytest"

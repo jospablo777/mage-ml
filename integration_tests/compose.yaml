@@ -178,6 +178,17 @@ services:
       timeout: 10s
       retries: 60
 
+  # Spark Connect 4.3 in local mode, for streaming pipelines on Spark (ADR-0047). It reaches
+  # Kafka on the compose network (kafka:9092).
+  spark:
+    build: services/spark
+    mem_limit: 2g
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "${MAGE_TEST_SPARK_PORT:-15002}:15002"
+
   # RabbitMQ 4.3, data in memory. It sets its memory watermark from the container limit.
   # The password has characters that a URL must quote.
   rabbitmq:

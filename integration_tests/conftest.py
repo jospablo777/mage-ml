@@ -472,6 +472,15 @@ def kafka_bootstrap():
     return server
 
 
+@pytest.fixture(scope='session')
+def spark_remote():
+    """A Spark Connect server (services/spark) that reaches Kafka as kafka:9092."""
+    remote = os.getenv('MAGE_TEST_SPARK_REMOTE')
+    if not remote:
+        pytest.skip('Spark Connect is not configured: MAGE_TEST_SPARK_REMOTE unset')
+    return remote
+
+
 @pytest.fixture
 def kafka_topic(kafka_bootstrap):
     """A topic with 2 partitions, used by one test and deleted after it."""
