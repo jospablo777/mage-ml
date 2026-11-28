@@ -821,6 +821,33 @@ config:
 - A missing table is made from the first batch (MergeTree, nullable columns, objects and lists
   as JSON text), with MageML's column names; a new field adds a column.
 
+`mirror` keeps a change capture source's tables ([PostgreSQL](#postgresql-changes) or
+[MySQL](#mysql-changes)), as the PostgreSQL sink's mirror does:
+
+```yaml
+connector_type: clickhouse
+profile: warehouse
+config:
+  table_name: "copy_{_mage_table}"   # each change into the table of its source table
+mirror:
+  key: {orders: [id], customers: [id]}
+  deletes: delete
+```
+
+- A table the sink makes is a `ReplacingMergeTree(_mage_version, _mage_is_deleted)` ordered
+  by the key: ClickHouse keeps each key's latest change and drops deleted keys when it
+  merges. Read with `FINAL` (`SELECT * FROM copy_orders FINAL`) for one row per key and no
+  deleted keys before a merge.
+- `_mage_version` is the change's commit time in microseconds, 0 for copied rows: a change
+  always beats a copy, also when the copy runs again. Of a key's changes in one batch, the
+  last is written.
+- Numbers with a fraction are `Decimal(76, 30)`, so DECIMAL and NUMERIC values copy exactly;
+  the key's columns are not Nullable.
+- Only `deletes: delete`: ClickHouse replaces whole rows, and a PostgreSQL delete carries only
+  the key, so a soft delete would lose the row's other columns.
+- An existing table needs `_mage_version` and `_mage_is_deleted`; the sink says so when they
+  are missing.
+
 ### Elasticsearch and OpenSearch
 
 The `elasticsearch` and `opensearch` sinks write each batch through the bulk API, in requests

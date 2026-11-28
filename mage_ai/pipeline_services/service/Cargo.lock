@@ -3844,6 +3844,7 @@ dependencies = [
 name = "mage-connector-clickhouse"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "mage-stream-core",
  "mage-stream-ports",
  "serde_json",

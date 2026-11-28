@@ -1338,6 +1338,27 @@ class ClickHouseSinkExportTest(StreamExportTestCase):
                         if v['name'] == 'CH_PASSWORD')
         self.assertTrue(password['secret'])
 
+    def test_a_mirror_exports_and_soft_deletes_are_refused(self):
+        (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
+            version: 0.1.1
+            default:
+              CLICKHOUSE_HOST: ch.example.com
+        '''))
+        self.stream(sink='''
+            connector_type: clickhouse
+            config:
+              table_name: "copy_{_mage_table}"
+            mirror:
+              key: {orders: [id]}
+        ''')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]['config']
+        self.assertEqual(sink['mirror'], {'key': {'orders': ['id']}})
+        self.assertEqual(sink['table'], 'copy_{_mage_table}')
+        sink_file = next(Path(self.repo_path, 'data_exporters').glob('*sink.yaml'))
+        sink_file.write_text(sink_file.read_text() + '  deletes: soft\n')
+        self.assertIn('a ClickHouse mirror takes deletes: delete', self.problems())
+
     def test_a_missing_table_or_profile_is_refused(self):
         self.stream(sink='connector_type: clickhouse\nprofile: nowhere\nconfig: {}\n')
         problems = self.problems()

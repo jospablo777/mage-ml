@@ -1662,9 +1662,10 @@ def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
     """
     MageML's ClickHouse sink names an io_config.yaml profile and export settings
     (`config: {table_name: ...}`): the profile's connection, with its variables kept as
-    references, and the table become the engine's sink settings.
+    references, and the table become the engine's sink settings. `mirror` keeps a change
+    capture source's tables (ADR-0049).
     """
-    unknown = sorted(set(config) - {'profile', 'config'})
+    unknown = sorted(set(config) - {'profile', 'config', 'mirror'})
     if unknown:
         problems.append(f'{where}: unknown ClickHouse sink settings {", ".join(unknown)}.')
     export_config = config.get('config') or {}
@@ -1702,6 +1703,16 @@ def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
     }
     if not settings['host']:
         problems.append(f'{where}: profile {profile} has no CLICKHOUSE_HOST.')
+    mirror = config.get('mirror')
+    if mirror is not None:
+        if not isinstance(mirror, dict) or not mirror.get('key'):
+            problems.append(f'{where}: mirror is {{key: [id], deletes: delete}}.')
+        elif (mirror.get('deletes') or 'delete') != 'delete':
+            problems.append(
+                f'{where}: a ClickHouse mirror takes deletes: delete; ClickHouse replaces '
+                'whole rows, and a soft delete would lose the columns a delete does not carry.'
+            )
+        settings['mirror'] = mirror
     return {k: v for k, v in settings.items() if v is not None}
 
 

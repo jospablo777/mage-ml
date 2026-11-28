@@ -10,6 +10,7 @@ publish.workspace = true
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
 serde_json = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 tokio = { version = "1.47", features = ["rt", "sync"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 

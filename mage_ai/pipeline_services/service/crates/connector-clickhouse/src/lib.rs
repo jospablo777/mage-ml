@@ -12,9 +12,15 @@
 //! values, objects and lists as JSON text), and a new field adds a column. Column names
 //! follow MageML's Python sinks.
 //!
+//! With `mirror` the table is kept as a change capture source's table is (mirror.rs,
+//! ADR-0049), and `table` may name `{_mage_table}` and `{_mage_schema}`: each change goes to
+//! the table of its source table.
+//!
 //! Settings: `host`, `port` (8123, or 8443 with `secure: true`), `username`, `password`,
 //! `database`, `table`, `secure`, `auto_clean_name`, `case_sensitive`,
-//! `allow_reserved_words`.
+//! `allow_reserved_words`, `mirror`.
+
+mod mirror;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,7 +32,6 @@ use mage_stream_ports::{
     BatchMeta, BoxFuture, ConnectorError, RecordBatch, Sink, SinkCapabilities, read_envelope,
 };
 use serde_json::Value;
-use serde_json::value::RawValue;
 use tokio::sync::Mutex;
 
 fn text(config: &Value, key: &str) -> Option<String> {
@@ -61,6 +66,31 @@ fn ch_type(kind: Kind) -> &'static str {
     }
 }
 
+/// A mirror's column type: numbers with a fraction and no exponent are exact decimals
+/// (change capture's DECIMAL and NUMERIC), the key's columns are not Nullable (ClickHouse
+/// sorts by them), and the version and the deleted flag are the engine's.
+fn mirror_type(column: &str, kind: Kind, exponent: bool, key: bool) -> String {
+    if column == mirror::VERSION {
+        return "UInt64".into();
+    }
+    if column == mirror::DELETED {
+        return "UInt8".into();
+    }
+    let base = match kind {
+        Kind::Double if !exponent => "Decimal(76, 30)",
+        Kind::Boolean => "Bool",
+        Kind::BigInt => "Int64",
+        Kind::Double => "Float64",
+        Kind::Numeric => "Int256",
+        Kind::Json | Kind::Text => "String",
+    };
+    if key {
+        base.to_string()
+    } else {
+        format!("Nullable({base})")
+    }
+}
+
 fn position_text(position: &Position) -> String {
     match position {
         Position::Offset(o) => o.to_string(),
@@ -80,6 +110,7 @@ struct Settings {
     case_sensitive: bool,
     auto_clean: bool,
     allow_reserved: bool,
+    mirror: Option<mirror::Mirror>,
 }
 
 impl Settings {
@@ -111,6 +142,7 @@ impl Settings {
             case_sensitive: flag(config, "case_sensitive", false),
             auto_clean: flag(config, "auto_clean_name", true),
             allow_reserved: flag(config, "allow_reserved_words", false),
+            mirror: mirror::Mirror::from_config(config)?,
         })
     }
 
@@ -122,8 +154,8 @@ impl Settings {
         }
     }
 
-    fn full_table(&self) -> String {
-        format!("{}.{}", quote(&self.database), quote(&self.table))
+    fn full_table(&self, table: &str) -> String {
+        format!("{}.{}", quote(&self.database), quote(table))
     }
 }
 
@@ -192,14 +224,14 @@ impl Client {
         }
     }
 
-    fn columns(&self) -> Result<BTreeMap<String, String>, ConnectorError> {
+    fn columns(&self, table: &str) -> Result<BTreeMap<String, String>, ConnectorError> {
         let text = self.run(
             "SELECT name, type FROM system.columns WHERE database = {db:String} AND table = \
              {table:String} FORMAT JSONCompact",
             None,
             &[
                 ("param_db", &self.settings.database),
-                ("param_table", &self.settings.table),
+                ("param_table", table),
             ],
         )?;
         let parsed: Value = serde_json::from_str(&text)
@@ -214,21 +246,66 @@ impl Client {
             .unwrap_or_default())
     }
 
+    /// A batch's rows, each into its table (the one `table` names, or each change's own).
     fn write(&self, values: &[Vec<u8>], token: &str) -> Result<(), ConnectorError> {
         let settings = &self.settings;
-        let mut kinds: BTreeMap<String, Option<Kind>> = BTreeMap::new();
-        let mut names: BTreeMap<String, String> = BTreeMap::new();
-        let mut body = Vec::with_capacity(values.iter().map(|v| v.len() + 1).sum());
+        // table -> (the source table, for a mirror's key by table; its changes)
+        let mut groups: BTreeMap<String, (String, Vec<mirror::Change>)> = BTreeMap::new();
         for (row, value) in values.iter().enumerate() {
             let text = std::str::from_utf8(value).map_err(|_| {
                 ConnectorError::fatal(format!("ClickHouse: row {row} is not UTF-8"))
             })?;
-            let fields: BTreeMap<String, Box<RawValue>> =
-                serde_json::from_str(text).map_err(|_| {
-                    ConnectorError::fatal(format!(
-                        "ClickHouse: row {row} is not a JSON object; the sink writes objects"
-                    ))
-                })?;
+            let fields: mirror::Change = serde_json::from_str(text).map_err(|_| {
+                ConnectorError::fatal(format!(
+                    "ClickHouse: row {row} is not a JSON object; the sink writes objects"
+                ))
+            })?;
+            let table =
+                mirror::routed(&settings.table, &fields).unwrap_or_else(|| settings.table.clone());
+            let source = Some(mirror::source_table(&fields))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| table.clone());
+            groups
+                .entry(table)
+                .or_insert_with(|| (source, Vec::new()))
+                .1
+                .push(fields);
+        }
+        let routed = settings.table.contains('{');
+        for (table, (source, changes)) in groups {
+            let (rows, key) = match &settings.mirror {
+                Some(mirror) => {
+                    let key = mirror.key_of(&source)?.to_vec();
+                    (mirror::rows(changes, &key)?, key)
+                }
+                None => (changes, Vec::new()),
+            };
+            // Each table's insert has a token of its own.
+            let token = if routed {
+                format!("{token}:{table}")
+            } else {
+                token.to_string()
+            };
+            self.write_table(&table, &rows, &key, &token)?;
+        }
+        Ok(())
+    }
+
+    fn write_table(
+        &self,
+        table: &str,
+        rows: &[mirror::Change],
+        key: &[String],
+        token: &str,
+    ) -> Result<(), ConnectorError> {
+        let settings = &self.settings;
+        let mirrored = settings.mirror.is_some();
+        let mut kinds: BTreeMap<String, Option<Kind>> = BTreeMap::new();
+        // Columns with a number written with an exponent: a float's, never an exact decimal.
+        let mut exponents: std::collections::BTreeSet<String> = Default::default();
+        let mut names: BTreeMap<String, String> = BTreeMap::new();
+        let mut body = Vec::with_capacity(rows.len() * 128);
+        for fields in rows {
             // The row with each key renamed to its column; values are left as they are.
             body.push(b'{');
             for (index, (key, raw)) in fields.iter().enumerate() {
@@ -253,6 +330,9 @@ impl Client {
                 body.push(b':');
                 body.extend_from_slice(raw.get().as_bytes());
                 let kind = Kind::of(raw.get());
+                if kind == Some(Kind::Double) && raw.get().contains(['e', 'E']) {
+                    exponents.insert(column.clone());
+                }
                 let entry = kinds.entry(column).or_insert(None);
                 *entry = match (*entry, kind) {
                     (Some(a), Some(b)) => Some(a.merge(b)),
@@ -261,39 +341,78 @@ impl Client {
             }
             body.extend_from_slice(b"}\n");
         }
-        let columns = self.columns()?;
+        let key_columns: Vec<String> = key.iter().map(|k| settings.column(k)).collect();
+        let type_of = |column: &String, kind: &Option<Kind>| {
+            let kind = kind.unwrap_or(Kind::Text);
+            if mirrored {
+                mirror_type(
+                    column,
+                    kind,
+                    exponents.contains(column),
+                    key_columns.contains(column),
+                )
+            } else {
+                ch_type(kind).to_string()
+            }
+        };
+        let columns = self.columns(table)?;
         if columns.is_empty() {
             let definitions: Vec<String> = kinds
                 .iter()
-                .map(|(c, k)| format!("{} {}", quote(c), ch_type(k.unwrap_or(Kind::Text))))
+                .map(|(c, k)| format!("{} {}", quote(c), type_of(c, k)))
                 .collect();
+            let engine = if mirrored {
+                format!(
+                    "ReplacingMergeTree({}, {}) ORDER BY ({})",
+                    quote(mirror::VERSION),
+                    quote(mirror::DELETED),
+                    key_columns
+                        .iter()
+                        .map(|c| quote(c))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                "MergeTree ORDER BY tuple()".to_string()
+            };
             self.run(
                 &format!(
-                    "CREATE TABLE IF NOT EXISTS {} ({}) ENGINE = MergeTree ORDER BY tuple() \
+                    "CREATE TABLE IF NOT EXISTS {} ({}) ENGINE = {engine} \
                      SETTINGS non_replicated_deduplication_window = 1000",
-                    settings.full_table(),
+                    settings.full_table(table),
                     definitions.join(", ")
                 ),
                 None,
                 &[],
             )?;
         } else {
+            if mirrored {
+                let missing: Vec<&str> = [mirror::VERSION, mirror::DELETED]
+                    .into_iter()
+                    .filter(|c| !columns.contains_key(*c))
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(ConnectorError::fatal(format!(
+                        "ClickHouse mirror: {} has no {}; a mirror's table is a \
+                         ReplacingMergeTree({}, {}) ordered by the key. Drop it to let the \
+                         sink make it, or add them.",
+                        settings.full_table(table),
+                        missing.join(" or "),
+                        mirror::VERSION,
+                        mirror::DELETED
+                    )));
+                }
+            }
             let missing: Vec<String> = kinds
                 .iter()
                 .filter(|(c, _)| !columns.contains_key(*c))
-                .map(|(c, k)| {
-                    format!(
-                        "ADD COLUMN IF NOT EXISTS {} {}",
-                        quote(c),
-                        ch_type(k.unwrap_or(Kind::Text))
-                    )
-                })
+                .map(|(c, k)| format!("ADD COLUMN IF NOT EXISTS {} {}", quote(c), type_of(c, k)))
                 .collect();
             if !missing.is_empty() {
                 self.run(
                     &format!(
                         "ALTER TABLE {} {}",
-                        settings.full_table(),
+                        settings.full_table(table),
                         missing.join(", ")
                     ),
                     None,
@@ -302,7 +421,10 @@ impl Client {
             }
         }
         self.run(
-            &format!("INSERT INTO {} FORMAT JSONEachRow", settings.full_table()),
+            &format!(
+                "INSERT INTO {} FORMAT JSONEachRow",
+                settings.full_table(table)
+            ),
             Some(&body),
             &[
                 ("insert_deduplication_token", token),
@@ -401,5 +523,27 @@ mod tests {
         assert_eq!(quote("a`b"), "`a\\`b`");
         assert_eq!(ch_type(Kind::Numeric), "Nullable(Int256)");
         assert_eq!(ch_type(Kind::Json), "Nullable(String)");
+    }
+
+    #[test]
+    fn a_mirror_keeps_decimals_exact_and_its_key_not_null() {
+        assert_eq!(
+            mirror_type("price", Kind::Double, false, false),
+            "Nullable(Decimal(76, 30))"
+        );
+        assert_eq!(
+            mirror_type("ratio", Kind::Double, true, false),
+            "Nullable(Float64)"
+        );
+        assert_eq!(mirror_type("id", Kind::BigInt, false, true), "Int64");
+        assert_eq!(mirror_type("code", Kind::Text, false, true), "String");
+        assert_eq!(
+            mirror_type("_mage_version", Kind::BigInt, false, false),
+            "UInt64"
+        );
+        assert_eq!(
+            mirror_type("_mage_is_deleted", Kind::BigInt, false, false),
+            "UInt8"
+        );
     }
 }
