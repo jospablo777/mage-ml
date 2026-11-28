@@ -44,6 +44,16 @@ use tokio::sync::Mutex;
 use tokio_postgres::types::Type;
 use tokio_postgres::{Client, Config};
 
+/// Change capture writes numbers with every digit (DECIMAL and NUMERIC): in a mirror or a
+/// history, a number with a fraction and no exponent makes a NUMERIC column, which keeps them;
+/// a DOUBLE PRECISION one keeps about 15 digits. Other sinks make doubles, as MageML's do.
+fn exact(kind: Option<Kind>, raw: &str, change_capture: bool) -> Option<Kind> {
+    match kind {
+        Some(Kind::Double) if change_capture && !raw.contains(['e', 'E']) => Some(Kind::Numeric),
+        other => other,
+    }
+}
+
 fn text(config: &Value, key: &str) -> Option<String> {
     match config.get(key)? {
         Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
@@ -384,7 +394,11 @@ impl PgSink {
                         keys.insert(column.clone(), key.clone());
                     }
                 }
-                let kind = Kind::of(raw.get());
+                let kind = exact(
+                    Kind::of(raw.get()),
+                    raw.get(),
+                    settings.mirror.is_some() || settings.history.is_some(),
+                );
                 let entry = kinds.entry(column).or_insert(None);
                 *entry = match (*entry, kind) {
                     (Some(a), Some(b)) => Some(a.merge(b)),
@@ -929,6 +943,17 @@ mod tests {
         assert_eq!(Kind::BigInt.merge(Kind::Numeric), Kind::Numeric);
         assert_eq!(Kind::BigInt.merge(Kind::Text), Kind::Text);
         assert_eq!(Kind::Json.merge(Kind::BigInt), Kind::Json);
+    }
+
+    #[test]
+    fn change_capture_keeps_every_digit_of_a_decimal() {
+        let digits = "12345678901234.5678";
+        assert_eq!(exact(Kind::of(digits), digits, true), Some(Kind::Numeric));
+        assert_eq!(exact(Kind::of("2.50"), "2.50", true), Some(Kind::Numeric));
+        // An exponent is a float's; other sinks make doubles.
+        assert_eq!(exact(Kind::of("1e21"), "1e21", true), Some(Kind::Double));
+        assert_eq!(exact(Kind::of("2.50"), "2.50", false), Some(Kind::Double));
+        assert_eq!(exact(Kind::of("7"), "7", true), Some(Kind::BigInt));
     }
 
     #[test]
