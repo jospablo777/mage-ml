@@ -509,16 +509,30 @@ class PythonWorkersTest(DBTestCase):
                 if json.loads(m.read_text()).get('source') == str(folder.resolve())]
         self.assertEqual(left, [])
 
-    def test_a_worker_being_prepared_is_not_deleted(self):
-        self.worker()
+    def test_a_delete_waits_for_a_running_prepare_and_refuses_one_that_goes_on(self):
+        import threading
+
+        folder = self.worker()
         key = (str(Path(self.repo_path).resolve()), 'tools')
+        job = dict(name='tools', lines=[], problems=[], state='running')
         with environments._prepare_jobs_lock:
-            environments._prepare_jobs[key] = dict(name='tools', lines=[], problems=[],
-                                                   state='running')
+            environments._prepare_jobs[key] = job
         try:
-            with self.assertRaisesRegex(environments.PipelineEnvironmentError,
-                                        'is being prepared'):
-                python_workers.delete(self.repo_path, 'tools')
+            # Still running when the wait ends: refused, nothing removed.
+            with patch.object(python_workers, 'PREPARE_WAIT_SECONDS', 0.3):
+                with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                            'is being prepared'):
+                    python_workers.delete(self.repo_path, 'tools')
+            self.assertTrue(folder.exists())
+
+            # A prepare that ends while the delete waits: then deleted.
+            def finish():
+                with environments._prepare_jobs_lock:
+                    job['state'] = 'completed'
+
+            threading.Timer(0.3, finish).start()
+            python_workers.delete(self.repo_path, 'tools')
+            self.assertFalse(folder.exists())
         finally:
             with environments._prepare_jobs_lock:
                 environments._prepare_jobs.pop(key, None)

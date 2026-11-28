@@ -1215,6 +1215,20 @@ def wait_for_prepares(timeout: float = 600) -> bool:
     return False
 
 
+def wait_for_prepare(repo_path: str, alias: str, timeout: float = 120) -> bool:
+    """Waits until a running prepare of the worker ends; whether none runs now."""
+    key = (str(Path(repo_path).resolve()), normalized_alias(alias))
+    deadline = time.time() + timeout
+    while True:
+        with _prepare_jobs_lock:
+            job = _prepare_jobs.get(key)
+            if not job or job['state'] != 'running':
+                return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.1)
+
+
 def prepare_job(repo_path: str, alias: str) -> Optional[Dict]:
     key = (str(Path(repo_path).resolve()), normalized_alias(alias))
     with _prepare_jobs_lock:

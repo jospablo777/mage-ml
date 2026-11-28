@@ -1160,6 +1160,10 @@ def _held_reason(name: str, latest: str, uv_reason: str, listed: List[str]) -> s
 # ---- removing a worker ------------------------------------------------------------------
 
 
+# How long a delete waits for a running prepare of the worker.
+PREPARE_WAIT_SECONDS = 120
+
+
 def delete(repo_path: str, alias: str) -> Dict:
     """Removes the worker's folder and its prepared environments; refused while a block
     runs in it, naming those blocks."""
@@ -1171,9 +1175,9 @@ def delete(repo_path: str, alias: str) -> Dict:
             f'Python worker {worker.alias} runs blocks of {len(used)} pipeline'
             f'{"" if len(used) == 1 else "s"}: {where}. Choose another worker for them '
             'first.')
-    job = environments.prepare_job(repo_path, worker.alias)
-    if job and job['state'] == 'running':
-        # Its environment would be written after the folder is gone, and left behind.
+    # A prepare that runs would write its environment after the folder is gone, and leave it
+    # behind: the delete waits for it (they take seconds), up to PREPARE_WAIT_SECONDS.
+    if not environments.wait_for_prepare(repo_path, worker.alias, PREPARE_WAIT_SECONDS):
         raise PipelineEnvironmentError(
             f'Python worker {worker.alias} is being prepared; delete it when that ends.')
     source = str(Path(worker.definition).resolve())
