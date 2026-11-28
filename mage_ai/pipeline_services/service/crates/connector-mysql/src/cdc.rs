@@ -43,6 +43,11 @@ const READ_AHEAD: usize = 10_000;
 /// The server sends a heartbeat this often while the log is quiet; nothing for three of them
 /// is a lost connection.
 const HEARTBEAT: Duration = Duration::from_secs(30);
+/// How often an idle source asks whether it is caught up ([`Source::caught_up`]).
+const PROBE_EVERY: Duration = Duration::from_secs(1);
+/// A transaction takes its time before it is in the log: a caught-up time is moved back by
+/// this much, so one committing at the probe is never counted as read.
+const CAUGHT_UP_MARGIN_MICROS: i64 = 1_000_000;
 
 /// How a source groups messages into batches.
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +71,17 @@ struct LogPosition {
 }
 
 impl LogPosition {
+    /// For ordering: the file's sequence number (`binlog.000012`), then the offset.
+    fn order(&self) -> (u64, u64) {
+        let sequence = self
+            .file
+            .rsplit('.')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
+        (sequence, self.offset)
+    }
+
     fn text(&self) -> String {
         format!("{}:{}", self.file, self.offset)
     }
@@ -157,6 +173,16 @@ pub struct MySqlCdcSource {
     reader: Option<Reader>,
     pending: Option<Pending>,
     paused: bool,
+    /// The end of the last transaction read from the log.
+    read_through: Option<LogPosition>,
+    /// The server's log position and clock (Unix microseconds) when it was asked; once the
+    /// log was read through it with nothing left for the sinks, the clock is the caught-up
+    /// time.
+    probe: Option<(LogPosition, i64)>,
+    probed_at: Instant,
+    /// A connection of its own for the probes.
+    prober: Option<Conn>,
+    caught_up: Option<i64>,
 }
 
 impl MySqlCdcSource {
@@ -179,7 +205,60 @@ impl MySqlCdcSource {
             reader: None,
             pending: None,
             paused: false,
+            read_through: None,
+            probe: None,
+            probed_at: Instant::now(),
+            prober: None,
+            caught_up: None,
         })
+    }
+
+    /// Nothing read is waiting for the sinks.
+    fn settled(&self) -> bool {
+        self.pending.is_none() && self.committed == self.delivered && self.copy_last.is_none()
+    }
+
+    /// A probe the log was read through, with everything in the sinks: caught up.
+    fn settle_probe(&mut self) {
+        let Some((at, clock)) = &self.probe else {
+            return;
+        };
+        let read = self
+            .read_through
+            .as_ref()
+            .is_some_and(|r| r.order() >= at.order());
+        if read && self.settled() {
+            let through = clock - CAUGHT_UP_MARGIN_MICROS;
+            self.caught_up = Some(self.caught_up.map_or(through, |t| t.max(through)));
+            self.probe = None;
+        }
+    }
+
+    /// With nothing left for the sinks: the server's log position and clock, which the
+    /// stream is caught up through once it read that far. A failed probe is tried again
+    /// later; it never stops the stream.
+    async fn probe(&mut self) {
+        if self.probe.is_some() || !self.settled() || self.probed_at.elapsed() < PROBE_EVERY {
+            return;
+        }
+        self.probed_at = Instant::now();
+        if self.prober.is_none() {
+            self.prober = connect(&self.settings).await.ok();
+        }
+        let Some(conn) = self.prober.as_mut() else {
+            return;
+        };
+        let position = log_position(conn).await;
+        let clock: Result<Option<i64>, _> = conn
+            .query_first("SELECT CAST(UNIX_TIMESTAMP(NOW(6)) * 1000000 AS SIGNED)")
+            .await;
+        match (position, clock) {
+            (Ok((file, offset)), Ok(Some(clock))) => {
+                self.probe = Some((LogPosition { file, offset }, clock));
+                self.settle_probe();
+            }
+            _ => self.prober = None,
+        }
     }
 
     pub fn with_position_record(mut self, record: Arc<dyn PositionRecord>) -> MySqlCdcSource {
@@ -354,6 +433,7 @@ impl MySqlCdcSource {
         let settings = self.settings.clone();
         let conn = connect(&settings).await?;
         let (send, changes) = tokio::sync::mpsc::channel(READ_AHEAD);
+        self.read_through = Some(start.clone());
         let task = tokio::spawn(async move {
             if let Err(error) = read_log(conn, settings, start, &send).await {
                 let _ = send.send(Err(error)).await;
@@ -377,12 +457,14 @@ impl MySqlCdcSource {
             match tokio::time::timeout(wait, reader.changes.recv()).await {
                 Ok(Some(Ok(Change::Row(value)))) => self.push(value),
                 Ok(Some(Ok(Change::End(position)))) => {
+                    self.read_through = Some(position.clone());
                     // Nothing waits for the sinks: the end can be saved now.
                     if self.pending.is_none() && self.committed == self.delivered {
                         self.save(position)?;
                     } else {
                         self.ends.insert(self.delivered, position);
                     }
+                    self.settle_probe();
                 }
                 Ok(Some(Err(error))) => {
                     self.reader = None;
@@ -392,7 +474,12 @@ impl MySqlCdcSource {
                     self.reader = None;
                     return Err(ConnectorError::retryable("MySQL: the log reader stopped"));
                 }
-                Err(_) => return Ok(self.take()?.unwrap_or(SourceEvent::Idle)),
+                Err(_) => {
+                    if self.pending.is_none() {
+                        self.probe().await;
+                    }
+                    return Ok(self.take()?.unwrap_or(SourceEvent::Idle));
+                }
             }
         }
     }
@@ -404,6 +491,8 @@ impl MySqlCdcSource {
         self.reader = None;
         self.pending = None;
         self.ends.clear();
+        self.probe = None;
+        self.read_through = None;
         SourceEvent::Revoking {
             partition: PARTITION,
             epoch: AssignmentEpoch(self.epoch),
@@ -536,6 +625,7 @@ impl Source for MySqlCdcSource {
                     return CommitOutcome::Failed(error);
                 }
             }
+            self.settle_probe();
             CommitOutcome::Committed
         })
     }
@@ -559,6 +649,10 @@ impl Source for MySqlCdcSource {
             .map(|t| (t.estimate.unwrap_or(0) - t.copied).max(0))
             .sum();
         BTreeMap::from([(PARTITION.0, left)])
+    }
+
+    fn caught_up(&self) -> Option<i64> {
+        self.caught_up
     }
 
     fn copy_progress(&self) -> Vec<TableCopy> {
@@ -1006,6 +1100,16 @@ mod tests {
     }
 
     #[test]
+    fn positions_order_by_file_sequence_then_offset() {
+        let at = |file: &str, offset| LogPosition {
+            file: file.into(),
+            offset,
+        };
+        assert!(at("binlog.000010", 4).order() > at("binlog.000009", 99_999).order());
+        assert!(at("binlog.000010", 500).order() > at("binlog.000010", 400).order());
+    }
+
+    #[test]
     fn a_message_ends_with_the_change_captures_fields() {
         let ended = String::from_utf8(suffix(
             b"delete",
@@ -1193,6 +1297,17 @@ mod tests {
         assert_eq!(again.len(), 1, "{again:?}");
         assert_eq!(again[0]["item"], "apple pie");
         assert_ne!(saved.0.lock().unwrap().clone().unwrap(), saved_at);
+        // Nothing more to read and everything acknowledged: caught up through about now.
+        let until = Instant::now() + Duration::from_secs(15);
+        while restarted.caught_up().is_none() && Instant::now() < until {
+            restarted.next_event().await.unwrap();
+        }
+        let now = chrono::Utc::now().timestamp_micros();
+        let through = restarted.caught_up().expect("caught up within 15 s");
+        assert!(
+            through <= now && through > now - 20_000_000,
+            "{through} {now}"
+        );
         restarted.close().await;
         sql(&mut admin, &format!("DROP TABLE {table}, {other}")).await;
     }

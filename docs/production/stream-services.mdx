@@ -712,6 +712,9 @@ sslmode: verify-full          # disable, prefer (the default), require, verify-c
   changes made while the copy started come again, and a mirror's upserts by key make that
   harmless. Copied rows carry the starting position as `_mage_binlog`. A copy cut short
   starts again.
+- When the log is quiet and the sinks took everything, the source says how far it is
+  caught up (the server's clock, less a second), so a [history](#postgresql) moves on and
+  lookups `as_of` a later time answer, as with PostgreSQL.
 - One reader keeps one position, so the stream runs one instance. It runs on the engine
   (the Run tab and exported services), not in MageML's Python executor. DDL is not
   replicated.
