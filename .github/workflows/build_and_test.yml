@@ -616,6 +616,7 @@ jobs:
           REPORT=results-ml-spark.xml PYTEST_ARGS='-v --timeout=900'
           PYTHON='uv run --no-sync --with "pyspark[connect]==4.3.0" python'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
+      - name: Run the scheduler soak test
         if: matrix.id == 'soak'
         run: make -C integration_tests test-soak SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
       # The same with block fusion: chains run as stages, through crashes and retries.
