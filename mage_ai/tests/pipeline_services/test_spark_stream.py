@@ -5,6 +5,7 @@ batches, as mapInArrow runs them. integration_tests/spark runs them on a Spark C
 """
 import json
 import os
+import sys
 import tempfile
 import textwrap
 from pathlib import Path
@@ -96,7 +97,8 @@ class SparkPlanTest(StreamExportTestCase):
         self.assertEqual(plan['sinks'][0]['after'], f'{self.pipeline.uuid}_clean')
         self.assertIn('{"env": "KAFKA_PASSWORD"}', json.dumps(plan))
         dockerfile = (folder / 'Dockerfile').read_text()
-        self.assertIn('FROM python:3.12-slim', dockerfile)
+        # The client's Python, which Spark's workers must run too.
+        self.assertIn(f'FROM python:{sys.version_info[0]}.{sys.version_info[1]}-slim', dockerfile)
         self.assertRegex(dockerfile, r'pyspark-client==4\.\d+\.\d+ pyarrow==\d+')
         readme = (folder / 'README.md').read_text()
         for name in ('KAFKA_BOOTSTRAP', 'KAFKA_PASSWORD', 'KAFKA_USER', 'MAGE_SPARK_REMOTE'):
