@@ -269,6 +269,11 @@ pub struct PgCdcSource {
     paused: bool,
     broken: bool,
     warned_truncate: bool,
+    /// The named tables by their ids, read at the start: a table renamed since stays in the
+    /// publication, and its changes come under its new name.
+    named_ids: HashMap<u32, String>,
+    /// Named tables found renamed, by id, with their new names; each is warned of once.
+    renamed: HashMap<u32, String>,
     copy: Option<Copy>,
     /// The initial copy's tables, from its start until the stream restarts.
     copy_tables: Vec<CopyTable>,
@@ -306,6 +311,8 @@ impl PgCdcSource {
             paused: false,
             broken: false,
             warned_truncate: false,
+            named_ids: HashMap::new(),
+            renamed: HashMap::new(),
             copy: None,
             copy_tables: Vec::new(),
             copy_last: None,
@@ -426,6 +433,25 @@ impl PgCdcSource {
             return Ok(());
         }
         let names: Vec<String> = missing.iter().map(|t| qualified(t)).collect();
+        let gone: Vec<String> = client
+            .query(
+                "SELECT n FROM unnest($1::text[]) AS t(n) WHERE to_regclass(n) IS NULL",
+                &[&names],
+            )
+            .await
+            .map_err(|e| classify("reading the tables", e))?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        if !gone.is_empty() {
+            return Err(ConnectorError::fatal(format!(
+                "PostgreSQL: {}, named in tables, {} not exist in {} (renamed or dropped?). \
+                 Name the tables as they are now.",
+                gone.join(", "),
+                if gone.len() == 1 { "does" } else { "do" },
+                s.database
+            )));
+        }
         let statement = format!(
             "ALTER PUBLICATION {} ADD TABLE {}",
             identifier(&s.publication),
@@ -454,6 +480,32 @@ impl PgCdcSource {
             s.publication
         );
         Ok(())
+    }
+
+    async fn read_named_ids(
+        &self,
+        client: &Client,
+    ) -> Result<HashMap<u32, String>, ConnectorError> {
+        let names: Vec<String> = self.settings.tables.iter().map(|t| qualified(t)).collect();
+        if names.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let rows = client
+            .query(
+                "SELECT n, to_regclass(n)::oid::int8 FROM unnest($1::text[]) WITH ORDINALITY \
+                 AS t(n, i) ORDER BY i",
+                &[&names],
+            )
+            .await
+            .map_err(|e| classify("reading the tables' ids", e))?;
+        Ok(rows
+            .iter()
+            .zip(&self.settings.tables)
+            .filter_map(|(row, table)| {
+                let id: Option<i64> = row.get(1);
+                id.map(|id| (id as u32, table.clone()))
+            })
+            .collect())
     }
 
     /// What the copy reads at this start: every table until a copy was done, then the tables
@@ -503,6 +555,7 @@ impl PgCdcSource {
             self.prepare(&client).await?;
         }
         self.publish_named(&client).await?;
+        self.named_ids = self.read_named_ids(&client).await?;
         let tables = self.to_copy(&client).await?;
         let copy = !tables.is_empty();
         if copy {
@@ -839,6 +892,18 @@ impl PgCdcSource {
                 let full = format!("{namespace}.{name}");
                 let selected =
                     self.settings.tables.is_empty() || self.settings.tables.contains(&full);
+                if !selected
+                    && let Some(named) = self.named_ids.get(&id)
+                    && !self.renamed.contains_key(&id)
+                {
+                    eprintln!(
+                        "warning: PostgreSQL stream source on {}: {named} was renamed to \
+                         {full}; its changes are not read under the new name. Name {full} in \
+                         tables: the next start copies it, then follows it.",
+                        self.label()
+                    );
+                    self.renamed.insert(id, full.clone());
+                }
                 let mut suffix = b",\"_mage_schema\":".to_vec();
                 suffix.extend(serde_json::to_vec(&namespace).unwrap_or_default());
                 suffix.extend_from_slice(b",\"_mage_table\":");
@@ -2081,6 +2146,80 @@ mod tests {
             .batch_execute(&format!(
                 "SELECT pg_drop_replication_slot('{slot}'); DROP PUBLICATION {slot}; \
                  DROP TABLE {first}, {added}, {other}"
+            ))
+            .await
+            .unwrap();
+    }
+
+    /// A named table renamed while the stream runs stays in the publication; its changes come
+    /// under the new name, which the stream does not read: it says so, once.
+    #[tokio::test]
+    async fn a_renamed_table_is_named_in_a_warning() {
+        let Some(mut config) = crate::history::tests::server() else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let id = std::process::id();
+        let (table, moved) = (format!("cdc_renamed_{id}"), format!("cdc_moved_{id}"));
+        let slot = format!("cdc_renamed_{id}");
+        config["tables"] = serde_json::json!([format!("public.{table}")]);
+        config["replication_slot"] = slot.clone().into();
+        config["publication_name"] = slot.clone().into();
+        let admin = plain_client(&Settings::new(&config).unwrap(), "test")
+            .await
+            .unwrap();
+        let wal_level: String = admin.query_one("SHOW wal_level", &[]).await.unwrap().get(0);
+        if wal_level != "logical" {
+            eprintln!("the test server's wal_level is {wal_level}, not logical: skipped");
+            return;
+        }
+        admin
+            .batch_execute(&format!(
+                "DROP TABLE IF EXISTS {table}, {moved}; \
+                 CREATE TABLE {table} (id integer PRIMARY KEY, v text); \
+                 INSERT INTO {table} VALUES (1, 'a')"
+            ))
+            .await
+            .unwrap();
+        let limits = BatchLimits {
+            max_records: 100,
+            max_bytes: 1 << 20,
+            max_wait: Duration::from_millis(200),
+        };
+        let mut source = PgCdcSource::new(&config, limits).unwrap();
+        source.next_event().await.unwrap();
+        admin
+            .batch_execute(&format!(
+                "ALTER TABLE {table} RENAME TO {moved}; UPDATE {moved} SET v = 'b' WHERE id = 1"
+            ))
+            .await
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(15);
+        while source.renamed.is_empty() && Instant::now() < until {
+            if let SourceEvent::Batch { meta, .. } = source.next_event().await.unwrap() {
+                acknowledge(&mut source, &meta).await;
+            }
+        }
+        assert_eq!(
+            source.renamed.values().cloned().collect::<Vec<_>>(),
+            [format!("public.{moved}")]
+        );
+        source.close().await;
+        // Started again with the old name: the stream stops and says so.
+        let error = PgCdcSource::new(&config, limits)
+            .unwrap()
+            .next_event()
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("(renamed or dropped?)"),
+            "{}",
+            error.message
+        );
+        admin
+            .batch_execute(&format!(
+                "SELECT pg_drop_replication_slot('{slot}'); DROP PUBLICATION {slot}; \
+                 DROP TABLE {moved}"
             ))
             .await
             .unwrap();

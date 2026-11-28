@@ -669,6 +669,10 @@ sslmode: verify-full
   `_mage_operation: snapshot` and the slot's position as `_mage_lsn`. The copy is done once:
   the pipeline's state keeps that it finished, with the tables named, and a copy cut short
   starts again. It runs on the engine (the Run tab and exported services).
+- A named table renamed while the stream runs stays in the publication, but its changes come
+  under the new name, which the stream does not read: the service log says so once. Name
+  the table as it is now; a start that names a table that no longer exists stops and says
+  which.
 - A table added to `tables` later is added to the publication at the next start (with
   `create_slot: false` the stream stops and names the `ALTER PUBLICATION` to run), copied,
   then followed. The tables copied before are not copied again.

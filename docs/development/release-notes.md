@@ -61,6 +61,9 @@
   tables with those synced marked, the blocks updated, and the Run panel to restart it.
 - The MySQL source says in the service log when a TRUNCATE, DROP or rename of a table it
   reads goes by, as these are not replicated.
+- The PostgreSQL source says in the service log when a table it reads is renamed (its
+  changes would come under a name it does not read), and a start naming a table that no
+  longer exists stops and names it.
 - Fixed: a MySQL source without `tables` (every table of the database) read a table made
   after it started only after a restart, without the rows before.
 - Fixed: a table added to a PostgreSQL source's `tables` after its publication was made got
