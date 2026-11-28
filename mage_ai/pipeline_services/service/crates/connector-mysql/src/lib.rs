@@ -27,6 +27,7 @@ use mysql_async::{Conn, OptsBuilder, SslOpts};
 use serde_json::Value;
 
 pub mod cdc;
+mod ddl;
 mod gtid;
 mod values;
 

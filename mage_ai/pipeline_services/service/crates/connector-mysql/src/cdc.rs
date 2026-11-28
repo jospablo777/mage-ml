@@ -34,6 +34,7 @@ use mysql_common::binlog::events::{EventData, OptionalMetadataField, RowsEventDa
 use mysql_common::binlog::row::BinlogRow;
 use serde_json::Value;
 
+use crate::ddl::{self, Ddl, Name};
 use crate::gtid::{Gtid, GtidSet, uuid};
 use crate::values::{Kind, kind_of, write_binlog, write_text};
 use crate::{LogSettings, Settings, classify, connect, log_position, log_status, quote, tables};
@@ -844,6 +845,81 @@ struct Table {
     sets: Vec<Vec<String>>,
 }
 
+/// The tables whose changes the log is read for: the named ones, or every table of the
+/// database, one made after the stream started too (a new table's rows all come in the log).
+struct Selection {
+    named: Vec<Name>,
+    database: Option<String>,
+}
+
+impl Selection {
+    async fn new(conn: &mut Conn, settings: &Settings) -> Result<Selection, ConnectorError> {
+        Ok(Selection {
+            named: tables(conn, settings).await?,
+            database: settings
+                .tables
+                .is_empty()
+                .then(|| settings.database.clone()),
+        })
+    }
+
+    fn has(&self, db: &str, table: &str) -> bool {
+        match &self.database {
+            Some(database) => database == db,
+            None => self.named.iter().any(|(d, t)| d == db && t == table),
+        }
+    }
+
+    /// What to say of a statement that changes a table read without row changes.
+    fn warning(&self, change: &Ddl) -> Option<String> {
+        let text = |(db, table): &Name| format!("{db}.{table}");
+        match change {
+            Ddl::Truncate(table) if self.has(&table.0, &table.1) => Some(format!(
+                "TRUNCATE of {} is not replicated; truncate the destination too.",
+                text(table)
+            )),
+            Ddl::Drop(table) if self.has(&table.0, &table.1) => Some(format!(
+                "DROP TABLE of {} is not replicated; the destination keeps its rows.",
+                text(table)
+            )),
+            Ddl::DropDatabase(db)
+                if self.database.as_deref() == Some(db.as_str())
+                    || self.named.iter().any(|(d, _)| d == db) =>
+            {
+                Some(format!(
+                    "DROP DATABASE {db} is not replicated; the destination keeps its rows."
+                ))
+            }
+            Ddl::Rename(from, to) => match (self.has(&from.0, &from.1), self.has(&to.0, &to.1)) {
+                (true, false) => Some(format!(
+                    "{} was renamed to {}, which the stream does not read: its changes from \
+                     now on are not read. Add {} to the source's tables to read them.",
+                    text(from),
+                    text(to),
+                    text(to)
+                )),
+                (false, true) => Some(format!(
+                    "{} was renamed to {}, which the stream reads: its rows from before were \
+                     not copied, only its changes from now on are read. Delete the stream's \
+                     state to copy the tables again.",
+                    text(from),
+                    text(to)
+                )),
+                (true, true) => Some(format!(
+                    "{} was renamed to {}: its changes from now on come as {}'s; the rows \
+                     the destination has stay under {}.",
+                    text(from),
+                    text(to),
+                    text(to),
+                    text(from)
+                )),
+                (false, false) => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// The binary log from `start`, as changes and transaction ends.
 async fn read_log(
     mut conn: Conn,
@@ -852,7 +928,7 @@ async fn read_log(
     gtids: Option<GtidSet>,
     send: &tokio::sync::mpsc::Sender<Result<Change, ConnectorError>>,
 ) -> Result<(), ConnectorError> {
-    let wanted: Vec<(String, String)> = tables(&mut conn, &settings).await?;
+    let wanted = Selection::new(&mut conn, &settings).await?;
     // The server sends a heartbeat when the log is quiet (nanoseconds).
     conn.query_drop(format!(
         "SET @master_heartbeat_period = {}",
@@ -928,6 +1004,14 @@ async fn read_log(
                 transaction = None;
             }
             Some(EventData::QueryEvent(query)) => {
+                for change in ddl::read(&query.query(), &query.schema()) {
+                    if let Some(warning) = wanted.warning(&change) {
+                        eprintln!(
+                            "warning: MySQL stream source on {}: {warning}",
+                            settings.label()
+                        );
+                    }
+                }
                 if !query.query_raw().eq_ignore_ascii_case(b"BEGIN") && end > 0 {
                     // A statement of its own (DDL), or a COMMIT outside InnoDB.
                     found.push(Change::End(
@@ -953,7 +1037,7 @@ async fn read_log(
             Some(EventData::TableMapEvent(map)) => {
                 let db = map.database_name().into_owned();
                 let name = map.table_name().into_owned();
-                let selected = wanted.iter().any(|(d, t)| *d == db && *t == name);
+                let selected = wanted.has(&db, &name);
                 let mut enums = Vec::new();
                 let mut sets = Vec::new();
                 if selected {
@@ -1203,6 +1287,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ddl_on_a_table_read_is_named_in_a_warning() {
+        let name = |db: &str, table: &str| (db.to_string(), table.to_string());
+        let listed = Selection {
+            named: vec![name("shop", "orders")],
+            database: None,
+        };
+        let warning = |selection: &Selection, statement: &str| {
+            ddl::read(statement, "shop")
+                .iter()
+                .filter_map(|change| selection.warning(change))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        assert_eq!(
+            warning(&listed, "TRUNCATE orders"),
+            "TRUNCATE of shop.orders is not replicated; truncate the destination too."
+        );
+        assert!(warning(&listed, "DROP TABLE `orders`").starts_with("DROP TABLE of shop.orders"));
+        assert!(warning(&listed, "DROP DATABASE shop").starts_with("DROP DATABASE shop"));
+        assert!(
+            warning(&listed, "RENAME TABLE orders TO old")
+                .contains("Add shop.old to the source's tables")
+        );
+        // A swap: the listed name now has another table's rows, never copied.
+        let swap = warning(&listed, "RENAME TABLE orders TO old, new TO orders");
+        assert!(
+            swap.contains("its rows from before were not copied"),
+            "{swap}"
+        );
+        assert_eq!(warning(&listed, "TRUNCATE other"), "");
+        assert_eq!(warning(&listed, "DROP DATABASE audit"), "");
+
+        // All of a database: a rename inside it moves the changes to the new name.
+        let all = Selection {
+            named: vec![],
+            database: Some("shop".into()),
+        };
+        assert!(all.has("shop", "made_later"));
+        assert!(!all.has("audit", "events"));
+        assert!(
+            warning(&all, "ALTER TABLE orders RENAME TO old")
+                .contains("its changes from now on come as shop.old's")
+        );
+    }
+
     /// Each message, with its text as written under `_raw` (parsing loses a number's
     /// trailing zeros).
     fn messages(batch: &mage_stream_ports::RecordBatch) -> Vec<Value> {
@@ -1237,6 +1367,87 @@ mod tests {
             }
         }
         found
+    }
+
+    /// I-595: with no tables named, a table made after the stream started is read from its
+    /// first row (it was read only after a restart, without the rows before it).
+    #[tokio::test]
+    async fn a_table_made_after_the_start_is_read_when_the_whole_database_is() {
+        let Some(mut config) = crate::tests::server() else {
+            eprintln!("MAGE_TEST_MYSQL_URL is not set: skipped");
+            return;
+        };
+        let mut admin = connect(&Settings::new(&config).unwrap()).await.unwrap();
+        if !LogSettings::read(&mut admin)
+            .await
+            .unwrap()
+            .problems()
+            .is_empty()
+        {
+            eprintln!("the test server is not ready for change capture: skipped");
+            return;
+        }
+        let database = format!("cdc_all_{}", std::process::id());
+        sql(
+            &mut admin,
+            &format!(
+                "DROP DATABASE IF EXISTS {database}; CREATE DATABASE {database}; \
+                 CREATE TABLE {database}.first (id INT PRIMARY KEY)"
+            ),
+        )
+        .await;
+        config["database"] = database.clone().into();
+        config["snapshot"] = "never".into();
+        let limits = BatchLimits {
+            max_records: 100,
+            max_bytes: 1 << 20,
+            max_wait: Duration::from_millis(200),
+        };
+        let mut source = MySqlCdcSource::new(&config, limits).unwrap();
+        assert!(matches!(
+            source.next_event().await.unwrap(),
+            SourceEvent::Assigned { .. }
+        ));
+        // The reader starts with the first ask after Assigned, and lists the tables then:
+        // let it start before the new table is made.
+        let until = Instant::now() + Duration::from_millis(1500);
+        while Instant::now() < until {
+            assert!(matches!(
+                source.next_event().await.unwrap(),
+                SourceEvent::Idle
+            ));
+        }
+        sql(
+            &mut admin,
+            &format!(
+                "INSERT INTO {database}.first VALUES (1); \
+                 CREATE TABLE {database}.later (id INT PRIMARY KEY, item VARCHAR(10)); \
+                 INSERT INTO {database}.later VALUES (1, 'tea'), (2, 'cake'); \
+                 TRUNCATE {database}.first"
+            ),
+        )
+        .await;
+        let found = read(&mut source, 3).await;
+        let tables: Vec<(String, i64)> = found
+            .iter()
+            .map(|m| {
+                (
+                    m["_mage_table"].as_str().unwrap().to_string(),
+                    m["id"].as_i64().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            tables,
+            [
+                ("first".into(), 1),
+                ("later".into(), 1),
+                ("later".into(), 2)
+            ]
+        );
+        assert_eq!(found[1]["item"], "tea");
+        source.close().await;
+        sql(&mut admin, &format!("DROP DATABASE {database}")).await;
     }
 
     #[tokio::test]

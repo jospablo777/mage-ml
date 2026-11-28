@@ -54,6 +54,10 @@
   table, versioned by commit time, deletes applied, decimals exact.
 - The Ingestion page syncs into ClickHouse too: the destination's check, its database made
   when missing, a mirror table per source table.
+- The MySQL source says in the service log when a TRUNCATE, DROP or rename of a table it
+  reads goes by, as these are not replicated.
+- Fixed: a MySQL source without `tables` (every table of the database) read a table made
+  after it started only after a restart, without the rows before.
 
 ### Streams
 

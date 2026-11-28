@@ -718,9 +718,14 @@ sslmode: verify-full          # disable, prefer (the default), require, verify-c
 - When the log is quiet and the sinks took everything, the source says how far it is
   caught up (the server's clock, less a second), so a [history](#postgresql) moves on and
   lookups `as_of` a later time answer, as with PostgreSQL.
+- Without `tables`, every table of the database is read, a table made after the stream
+  started too (from its first row).
+- DDL is not replicated. New and changed columns come with the rows (each change names its
+  columns). TRUNCATE, DROP TABLE, DROP DATABASE and renames of a table the stream reads are
+  not: the service log says so when one happens, with what to do (truncate the destination
+  too; add a renamed table's new name to `tables`).
 - One reader keeps one position, so the stream runs one instance. It runs on the engine
-  (the Run tab and exported services), not in MageML's Python executor. DDL is not
-  replicated.
+  (the Run tab and exported services), not in MageML's Python executor.
 
 ### PostgreSQL
 
