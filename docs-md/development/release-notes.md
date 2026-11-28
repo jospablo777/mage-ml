@@ -47,6 +47,8 @@
 - MySQL change capture on the stream engine (`connector_type: mysql`): the binary log read as
   a replica, an initial copy without a global lock, the same messages as the PostgreSQL
   source (so a PostgreSQL mirror takes either), and the position saved after the sinks.
+- The Ingestion page takes a MySQL source: it checks the binary log's settings and the
+  user's grants, and syncs the chosen tables into PostgreSQL.
 
 ### Streams
 

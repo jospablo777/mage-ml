@@ -74,7 +74,7 @@ test('a database sync is checked, reviewed and created as a pipeline', async ({ 
   test.setTimeout(120_000);
   const [host, port, database, user, password] = SERVER.split(':');
   await page.goto('/ingestion');
-  await expect(page.getByText('Copy a PostgreSQL database and keep it in step'))
+  await expect(page.getByText('Copy a database into PostgreSQL and keep it in step'))
     .toBeVisible({ timeout: 60_000 });
   await page.getByLabel('Source host').fill(host);
   await page.getByLabel('Source port').fill(port);

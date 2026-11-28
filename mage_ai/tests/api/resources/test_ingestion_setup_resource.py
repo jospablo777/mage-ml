@@ -42,6 +42,11 @@ class IngestionSetupResourceTest(AsyncDBTestCase):
             schema='raw', prefix='copy_',
         ))['ingestion_setup']
         self.assertIn('raw.copy_<table>', reviewed['review'][1])
+        # A MySQL source's review says where its changes come from.
+        mysql = (await self.call(
+            action='review', kind='mysql', tables=[dict(table='shop.orders', key=['id'])],
+        ))['ingestion_setup']
+        self.assertIn('(the binary log)', mysql['review'][0])
 
         refused = await self.call(action='drop')
         self.assertIn('action is check_source', str(refused['error']))

@@ -10,9 +10,10 @@ class IngestionSetupResource(GenericResource):
     """
     Guided ingestion (data_preparation/ingestion.py, ADR-0045): POST /api/ingestion_setups
     with an action: check_source (source), check_destination (destination, schema), sample
-    (source, table), review (tables, deletes, schema, prefix) or create (name, source,
-    destination, tables, deletes, schema, prefix), which writes the streaming pipeline.
-    Passwords are used to connect and stored as secrets; responses never hold them.
+    (source, table), review (tables, deletes, schema, prefix, kind) or create (name, source,
+    destination, tables, deletes, schema, prefix), which writes the streaming pipeline. A
+    source's `kind` is postgres or mysql. Passwords are used to connect and stored as
+    secrets; responses never hold them.
     """
 
     @classmethod
@@ -37,7 +38,10 @@ class IngestionSetupResource(GenericResource):
             elif action == 'sample':
                 result = await asyncio.to_thread(ingestion.sample, source, payload.get('table'))
             elif action == 'review':
-                result = dict(review=ingestion.review(tables, deletes, schema, prefix))
+                result = dict(review=ingestion.review(
+                    tables, deletes, schema, prefix,
+                    payload.get('kind') or source.get('kind') or 'postgres',
+                ))
             elif action == 'create':
                 result = await asyncio.to_thread(
                     ingestion.create, get_repo_path(user=user), payload.get('name'), source,

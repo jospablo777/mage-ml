@@ -1,6 +1,7 @@
 """
-Guided ingestion (ADR-0045): a PostgreSQL database's tables copied into another and kept in
-sync, set up after checks and a review, as a streaming pipeline the project keeps.
+Guided ingestion (ADR-0045): a PostgreSQL or MySQL database's tables copied into PostgreSQL
+and kept in sync, set up after checks and a review, as a streaming pipeline the project
+keeps. A source's `kind` is postgres (the default) or mysql (ADR-0048, ingestion_mysql.py).
 
 1. check_source: can the source be read by change capture (logical replication, a role
    that may replicate, a free slot), and its tables with their keys and sizes.
@@ -23,6 +24,16 @@ NAME = re.compile(r'[^a-z0-9_]+')
 
 class IngestionError(Exception):
     pass
+
+
+SOURCE_KINDS = ('postgres', 'mysql')
+
+
+def _kind(connection: Dict[str, Any]) -> str:
+    kind = (connection or {}).get('kind') or 'postgres'
+    if kind not in SOURCE_KINDS:
+        raise IngestionError(f'A source is one of {", ".join(SOURCE_KINDS)}, not {kind}.')
+    return kind
 
 
 def _connect(connection: Dict[str, Any]):
@@ -97,6 +108,10 @@ def _tables(cursor, names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 
 def check_source(connection: Dict[str, Any]) -> Dict[str, Any]:
     """The source's readiness for change capture, and its tables with keys and sizes."""
+    if _kind(connection) == 'mysql':
+        from mage_ai.data_preparation import ingestion_mysql
+
+        return ingestion_mysql.check_source(connection)
     db = _connect(connection)
     try:
         with db.cursor() as cursor:
@@ -168,6 +183,10 @@ def check_destination(connection: Dict[str, Any], schema: str) -> Dict[str, Any]
 
 def sample(connection: Dict[str, Any], table: str, rows: int = SAMPLE_ROWS) -> Dict[str, Any]:
     """The first rows of a table, values as text."""
+    if _kind(connection) == 'mysql':
+        from mage_ai.data_preparation import ingestion_mysql
+
+        return ingestion_mysql.sample(connection, table, rows)
     from psycopg2 import sql
 
     schema, _, name = table.partition('.')
@@ -193,12 +212,14 @@ def sample(connection: Dict[str, Any], table: str, rows: int = SAMPLE_ROWS) -> D
     return dict(table=table, columns=columns, rows=values)
 
 
-def review(tables: List[Dict[str, Any]], deletes: str, schema: str, prefix: str) -> List[str]:
+def review(tables: List[Dict[str, Any]], deletes: str, schema: str, prefix: str,
+           kind: str = 'postgres') -> List[str]:
     """What the sync will do, in sentences."""
     names = ', '.join(t['table'] for t in tables)
+    how = 'the binary log' if kind == 'mysql' else 'logical replication'
     lines = [
         f'Copies every row of {names} first, then keeps each table in step with its changes '
-        f'as they happen (logical replication).',
+        f'as they happen ({how}).',
         f'Writes each table to {schema}.{prefix}<table>, upserting rows by '
         + '; '.join(f"{t['table']} by {', '.join(t['key'])}" for t in tables) + '.',
         'A row deleted in the source is deleted in the copy.' if deletes == 'delete' else
@@ -239,12 +260,17 @@ def _validate(tables: List[Dict[str, Any]], deletes: str) -> None:
 def _from_source(source: Dict[str, Any], tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The chosen tables as the source has them now; refused when one cannot be mirrored."""
     names = [t['table'] for t in tables]
-    db = _connect(source)
-    try:
-        with db.cursor() as cursor:
-            found = {t['table']: t for t in _tables(cursor, names)}
-    finally:
-        db.close()
+    if _kind(source) == 'mysql':
+        from mage_ai.data_preparation import ingestion_mysql
+
+        found = ingestion_mysql.chosen(source, names)
+    else:
+        db = _connect(source)
+        try:
+            with db.cursor() as cursor:
+                found = {t['table']: t for t in _tables(cursor, names)}
+        finally:
+            db.close()
     for name in names:
         if name not in found:
             raise IngestionError(f'{name} is not a table of the source.')
@@ -290,10 +316,13 @@ def create(
             create_secret(secret, connection['password'])
         return "{{ mage_secret_var('" + secret + "') }}"
 
-    def connection_yaml(connection: Dict[str, Any], role: str, user_key: str) -> Dict:
+    kind = _kind(source)
+
+    def connection_yaml(connection: Dict[str, Any], role: str, user_key: str,
+                        port: int = 5432) -> Dict:
         settings = {
             'host': connection['host'],
-            'port': int(connection.get('port') or 5432),
+            'port': int(connection.get('port') or port),
             'database': connection['database'],
             user_key: connection['user'],
         }
@@ -313,16 +342,27 @@ def create(
         pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
         return block
 
-    read = write_block('source', 'data_loader', dict(
-        connector_type='postgres',
-        **connection_yaml(source, 'source', 'user'),
-        replication_slot=f'mageml_{ident}',
-        publication_name=f'mageml_{ident}',
-        tables=[t['table'] for t in tables],
-        snapshot='initial',
-        batch_size=5000,
-        batch_timeout=1,
-    ))
+    if kind == 'mysql':
+        # The stream keeps its binary log position in its state (ADR-0048).
+        read = write_block('source', 'data_loader', dict(
+            connector_type='mysql',
+            **connection_yaml(source, 'source', 'user', port=3306),
+            tables=[t['table'] for t in tables],
+            snapshot='initial',
+            batch_size=5000,
+            batch_timeout=1,
+        ))
+    else:
+        read = write_block('source', 'data_loader', dict(
+            connector_type='postgres',
+            **connection_yaml(source, 'source', 'user'),
+            replication_slot=f'mageml_{ident}',
+            publication_name=f'mageml_{ident}',
+            tables=[t['table'] for t in tables],
+            snapshot='initial',
+            batch_size=5000,
+            batch_timeout=1,
+        ))
     write = write_block('copy', 'data_exporter', dict(
         connector_type='postgres',
         **connection_yaml(destination, 'destination', 'username'),
@@ -338,6 +378,6 @@ def create(
         # For the run panel, which names the sinks a start writes to.
         blocks=[dict(uuid=b.uuid, type=getattr(b.type, 'value', b.type))
                 for b in (read, write)],
-        review=review(tables, deletes, schema, prefix),
+        review=review(tables, deletes, schema, prefix, kind),
         created_by=user,
     )

@@ -19,6 +19,7 @@ import { UNIT } from '@oracle/styles/units/spacing';
 type ConnectionType = {
   database: string;
   host: string;
+  kind?: 'postgres' | 'mysql';
   password: string;
   port: string;
   sslmode: string;
@@ -113,8 +114,9 @@ function Step({ children, title }: { children: any; title: string }) {
   );
 }
 
-// Guided ingestion (ADR-0045): a PostgreSQL database's tables copied into another and kept
-// in step, set up after checks and a review, as a streaming pipeline the project keeps.
+// Guided ingestion (ADR-0045, ADR-0048): a PostgreSQL or MySQL database's tables copied into
+// PostgreSQL and kept in step, set up after checks and a review, as a streaming pipeline the
+// project keeps.
 function Ingestion() {
   const [source, setSource] = useState<ConnectionType>(EMPTY);
   const [destination, setDestination] = useState<ConnectionType>(EMPTY);
@@ -135,7 +137,22 @@ function Ingestion() {
   const [created, setCreated] = useState<{ blocks: BlockType[]; pipeline_uuid: string }>(null);
   const [error, setError] = useState<string>(null);
 
-  const target = sameServer ? source : destination;
+  const kind = source.kind || 'postgres';
+  // A MySQL source goes into PostgreSQL: another server.
+  const same = sameServer && kind === 'postgres';
+  const target = same ? { ...source, kind: undefined } : destination;
+  const chooseKind = (next: 'postgres' | 'mysql') => {
+    const port = { mysql: '3306', postgres: '5432' };
+    setSource({
+      ...source,
+      kind: next,
+      port: source.port === port[kind] || !source.port ? port[next] : source.port,
+    });
+    setSourceFound(null);
+    setDestinationFound(null);
+    setReview(null);
+    setChosen({});
+  };
   const tables = (sourceFound?.tables || []).filter(t => chosen[t.table]);
 
   const [call, { isLoading }] = useMutation(api.ingestion_setups.useCreate(), {
@@ -166,12 +183,13 @@ function Ingestion() {
 
   return (
     <div style={{ maxWidth: UNIT * 140 }}>
-      <Headline level={4}>Copy a PostgreSQL database and keep it in step</Headline>
+      <Headline level={4}>Copy a database into PostgreSQL and keep it in step</Headline>
       <Spacing mb={3} mt={1}>
         <Text default>
           The tables you choose are copied first, then every insert, update and delete
-          follows within seconds, by logical replication. The result is a streaming pipeline
-          you can read, run from its Run tab and export as a service.
+          follows within seconds, read from PostgreSQL&apos;s logical replication or
+          MySQL&apos;s binary log. The result is a streaming pipeline you can read, run here
+          or from its Run tab, and export as a service.
         </Text>
       </Spacing>
 
@@ -180,6 +198,17 @@ function Ingestion() {
       )}
 
       <Step title="1. Source">
+        <Spacing mb={1} style={{ width: UNIT * 24 }}>
+          <Text muted small>Database</Text>
+          <Select
+            aria-label="Source type"
+            onChange={e => chooseKind(e.target.value as 'postgres' | 'mysql')}
+            value={kind}
+          >
+            <option value="postgres">PostgreSQL</option>
+            <option value="mysql">MySQL</option>
+          </Select>
+        </Spacing>
         <ConnectionForm connection={source} name="Source" setConnection={setSource} />
         <Button
           loading={isLoading}
@@ -257,13 +286,15 @@ function Ingestion() {
       )}
 
       {tables.length > 0 && (
-        <Step title="3. Destination">
-          <Checkbox
-            checked={sameServer}
-            label="The same server as the source"
-            onClick={() => setSameServer(!sameServer)}
-          />
-          {!sameServer && (
+        <Step title="3. Destination: PostgreSQL">
+          {kind === 'postgres' && (
+            <Checkbox
+              checked={sameServer}
+              label="The same server as the source"
+              onClick={() => setSameServer(!sameServer)}
+            />
+          )}
+          {!same && (
             <Spacing mt={1}>
               <ConnectionForm
                 connection={destination}
@@ -319,7 +350,9 @@ function Ingestion() {
         <Step title="4. Review">
           <Button
             loading={isLoading}
-            onClick={() => call({ ingestion_setup: { action: 'review', ...choices } } as any)}
+            onClick={() => call({
+              ingestion_setup: { action: 'review', kind, ...choices },
+            } as any)}
           >
             Review what the sync will do
           </Button>

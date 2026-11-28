@@ -1,19 +1,19 @@
 # Copy a database and keep it in step
 
-*Guided ingestion: a PostgreSQL database's tables copied into another and kept in sync by change capture.*
+*Guided ingestion: a PostgreSQL or MySQL database's tables copied into PostgreSQL and kept in sync by change capture.*
 
-The **Ingestion** page, in the left navigation, sets up a sync from a PostgreSQL database to
-another: the tables you choose are copied, then every insert, update and delete follows
-within seconds. It checks both servers, shows a sample, says what the sync will do, and
+The **Ingestion** page, in the left navigation, sets up a sync from a PostgreSQL or MySQL
+database into PostgreSQL: the tables you choose are copied, then every insert, update and
+delete follows within seconds. It checks both servers, shows a sample, says what the sync will do, and
 creates a streaming pipeline you can read, run from its Run tab and export as a service.
 
 ## Steps
 
 | Step | What it checks or asks |
 | --- | --- |
-| Source | `wal_level` is `logical`, the user may replicate (`REPLICATION`), a replication slot is free; then each table with its primary key and size |
+| Source | PostgreSQL: `wal_level` is `logical`, the user may replicate (`REPLICATION`), a replication slot is free. MySQL: the binary log is on with `binlog_format=ROW`, `binlog_row_image=FULL` and `binlog_row_metadata=FULL`, compression and partial JSON off, and the user has REPLICATION SLAVE and REPLICATION CLIENT. Then each table with its primary key and size |
 | Tables | Choose them. A table cannot be chosen, and says why, without a primary key (rows upsert and delete by it), or with `REPLICA IDENTITY NOTHING` (once published, its updates and deletes would fail on the source) or `USING INDEX` (its deletes would not carry the key). Two tables of the same name in different schemas go in separate syncs, as both would be written to one table. **Sample** shows its first rows |
-| Destination | The same server or another; the schema, and a prefix for the copies' names; whether a deleted row is deleted or kept with `_mage_deleted_at` |
+| Destination | PostgreSQL: the same server as a PostgreSQL source, or another; the schema, and a prefix for the copies' names; whether a deleted row is deleted or kept with `_mage_deleted_at` |
 | Review | What the sync will do, in sentences: copy, keys, deletes, new columns, restarts |
 | Create | The pipeline; the passwords become project secrets |
 | Run | Start it on the local engine from the page and watch the copy table by table, as on the pipeline's Run tab |
@@ -76,3 +76,27 @@ mirror:
 
 See [stream services](../../production/stream-services.md#postgresql-changes) for the source and
 the sink's mirror mode in detail.
+
+## From MySQL
+
+Choose **MySQL** as the source's database. The pipeline's source reads the binary log
+instead of a replication slot:
+
+```yaml
+# source
+connector_type: mysql
+host: db.example.com
+port: 3306
+database: shop
+user: replicator
+password: "{{ mage_secret_var('sync_shop_source_password') }}"
+tables: [shop.orders, shop.customers]
+snapshot: initial
+```
+
+- The copy reads the binary log's position first, then the tables in one consistent
+  snapshot, without a global lock; then the changes from that position. Copied rows and
+  later changes write the same values, and decimals keep every digit in the copy.
+- MySQL keeps no reader's position: the stream saves where it is in its own state once the
+  destination committed, and a restart continues from there.
+- See [stream services](../../production/stream-services.md#mysql-changes) for the source in detail.

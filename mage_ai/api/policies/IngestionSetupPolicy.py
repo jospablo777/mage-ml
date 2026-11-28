@@ -27,8 +27,8 @@ IngestionSetupPolicy.allow_read(
 )
 
 IngestionSetupPolicy.allow_write(
-    ['action', 'deletes', 'destination', 'name', 'prefix', 'schema', 'source', 'table',
-     'tables'],
+    ['action', 'deletes', 'destination', 'kind', 'name', 'prefix', 'schema', 'source',
+     'table', 'tables'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
