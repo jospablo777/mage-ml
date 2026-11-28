@@ -54,4 +54,7 @@ Stored DataFrames compare in Rust (Polars), about 100 ms for a million rows:
 - Floats within a relative 1e-9 count as equal. Other outputs (numbers, lists, objects)
   compare as equal or different.
 
+Under each output, **Explore** opens the run's output or the preview's in
+[ColumnAtlas](../blocks/column-atlas.md), to look at the rows behind the counts.
+
 The last 10 previews of a pipeline are kept, with their outputs.

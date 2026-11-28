@@ -22,6 +22,7 @@ export function sourceKey(source: AtlasSource): string {
     source.block_uuid,
     source.variable_uuid,
     source.block_run_id ?? '',
+    source.preview_id ?? '',
   ].join('|');
 }
 

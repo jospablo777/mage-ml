@@ -113,6 +113,23 @@ class ChangePreviewTest(DBTestCase):
         self.assertEqual(list(stored['double']), [0, 20, 40, 60, 80])
         self.assertEqual(previews.listed(self.pipeline)[0]['state'], 'done')
 
+        # Both outputs open in ColumnAtlas: the run's by its block run, the preview's by id.
+        from mage_ai.column_atlas.sources import parse_source, resolve
+
+        base_source = parse_source(dict(
+            pipeline_uuid=self.pipeline.uuid, block_uuid=self.transform_uuid,
+            block_run_id=transform['baseline_block_run_id'],
+        ))
+        preview_source = parse_source(dict(
+            pipeline_uuid=self.pipeline.uuid, block_uuid=self.transform_uuid,
+            preview_id=preview['id'],
+        ))
+        self.assertNotEqual(base_source.key, preview_source.key)
+        self.assertNotEqual(resolve(base_source, self.repo_path).path,
+                            resolve(preview_source, self.repo_path).path)
+        self.assertIn(previews.partition(preview['id']),
+                      resolve(preview_source, self.repo_path).path)
+
     def test_the_same_code_previews_nothing_and_a_failing_block_says_why(self):
         self.baseline()
         preview = self.preview()
@@ -150,6 +167,21 @@ class ChangePreviewTest(DBTestCase):
         # Its own change still runs, on the baseline's output of what it reads.
         self.assertEqual(rows['edited']['status'], 'run')
         self.assertIn("reads query's output from the baseline run", rows['edited']['reason'])
+
+    def test_a_preview_source_must_name_a_preview_of_the_pipeline(self):
+        from mage_ai.column_atlas.errors import AtlasError
+        from mage_ai.column_atlas.sources import parse_source, resolve
+
+        for bad in ('../x', 'a b', 7):
+            with self.assertRaises(AtlasError):
+                parse_source(dict(pipeline_uuid='p', block_uuid='b', preview_id=bad))
+        with self.assertRaises(AtlasError):
+            parse_source(dict(pipeline_uuid='p', block_uuid='b', preview_id='a1',
+                              block_run_id=3))
+        with self.assertRaisesRegex(AtlasError, 'preview does not exist'):
+            resolve(parse_source(dict(pipeline_uuid=self.pipeline.uuid,
+                                      block_uuid=self.transform_uuid, preview_id='nope1')),
+                    self.repo_path)
 
     def test_a_pipeline_without_a_completed_run_cannot_be_previewed(self):
         with self.assertRaisesRegex(previews.PreviewError, 'no completed run'):

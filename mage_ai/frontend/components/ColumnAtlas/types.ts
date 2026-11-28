@@ -26,6 +26,8 @@ export interface AtlasSource {
   block_run_id?: number | null;
   block_uuid: string;
   pipeline_uuid: string;
+  // A change preview's output, in the preview's own partition.
+  preview_id?: string;
   variable_uuid: string;
 }
 

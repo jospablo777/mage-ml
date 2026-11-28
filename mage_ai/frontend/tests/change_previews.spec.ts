@@ -97,4 +97,16 @@ test('a preview shows the changed rows of the changed block before it ships', as
   await expect(page.getByText('Changed values: score 7')).toBeVisible();
   await expect(page.getByText(/previews never run exporters/)).toBeVisible();
   await expect(page.getByRole('img', { name: 'output_0 rows' })).toBeVisible();
+
+  // Both outputs open in ColumnAtlas: the preview's scores are tripled (id 7: 105), the
+  // run's doubled, with ids 8 and 9 (id 9: 90).
+  await page.getByRole('link', { exact: true, name: 'this preview' }).click();
+  await expect(page.getByRole('gridcell', { exact: true, name: '105' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole('link', { exact: true, name: `run ${runID}` }).click();
+  await expect(page.getByRole('gridcell', { exact: true, name: '90' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole('gridcell', { exact: true, name: '105' })).toHaveCount(0);
 });

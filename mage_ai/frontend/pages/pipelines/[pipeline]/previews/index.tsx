@@ -13,6 +13,7 @@ import PrivateRoute from '@components/shared/PrivateRoute';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
+import { ColumnAtlasOutput } from '@components/ColumnAtlas';
 import dark from '@oracle/styles/themes/dark';
 import { PADDING_UNITS, UNIT } from '@oracle/styles/units/spacing';
 import { PageNameEnum } from '@components/PipelineDetailPage/constants';
@@ -41,6 +42,7 @@ type DiffType = {
 };
 
 type BlockPreviewType = {
+  baseline_block_run_id?: number;
   block_uuid: string;
   error?: string;
   outputs?: { [name: string]: { detail?: string; diff?: DiffType; result: string } };
@@ -191,9 +193,13 @@ function headline(preview: ChangePreviewType): string {
   return `The changed blocks output the same data as run ${preview.baseline_run_id}`;
 }
 
+// An output a preview compared, explored in ColumnAtlas: the run's or the preview's.
+type ExploredType = { block: string; name: string; side: 'run' | 'preview' };
+
 function PipelinePreviews({ pipeline }: { pipeline: { uuid: string } }) {
   const pipelineUUID = pipeline.uuid;
   const [errors, setErrors] = useState<ErrorsType>(null);
+  const [explored, setExplored] = useState<ExploredType>(null);
   const [selected, setSelected] = useState<string>(null);
   const { data: listed, mutate: refreshList } = api.change_previews.list(
     { pipeline_uuid: pipelineUUID },
@@ -280,13 +286,62 @@ function PipelinePreviews({ pipeline }: { pipeline: { uuid: string } }) {
                     {block.error || block.reason}
                   </Text>
                 )}
-                {Object.entries(block.outputs || {}).map(([name, output]) => output.diff
-                  ? <Comparison diff={output.diff} key={name} name={name} />
-                  : (
-                    <Text key={name} small>
-                      {name}: {output.result}{output.detail ? `, ${output.detail}` : ''}
-                    </Text>
-                  ))}
+                {Object.entries(block.outputs || {}).map(([name, output]) => {
+                  const shown = explored?.block === block.block_uuid && explored?.name === name;
+                  const sides: [ExploredType['side'], string, boolean][] = [
+                    ['run', `run ${preview.baseline_run_id}`, !!block.baseline_block_run_id],
+                    ['preview', 'this preview', true],
+                  ];
+                  return (
+                    <div key={name}>
+                      {output.diff
+                        ? <Comparison diff={output.diff} name={name} />
+                        : (
+                          <Text small>
+                            {name}: {output.result}{output.detail ? `, ${output.detail}` : ''}
+                          </Text>
+                        )}
+                      <FlexContainer alignItems="center">
+                        <Text muted xsmall>Explore {name} of</Text>
+                        {sides.filter(([, , available]) => available).map(([side, label]) => (
+                          <Spacing key={side} ml={1}>
+                            <Link
+                              bold={shown && explored.side === side}
+                              onClick={() => setExplored(shown && explored.side === side
+                                ? null
+                                : { block: block.block_uuid, name, side })}
+                              preventDefault
+                              xsmall
+                            >
+                              {label}
+                            </Link>
+                          </Spacing>
+                        ))}
+                      </FlexContainer>
+                      {shown && (
+                        <Spacing mt={1}>
+                          <ColumnAtlasOutput
+                            fallback={<Text muted small>This output cannot be explored.</Text>}
+                            key={`${explored.side}-${preview.id}`}
+                            source={explored.side === 'run'
+                              ? {
+                                block_run_id: block.baseline_block_run_id,
+                                block_uuid: block.block_uuid,
+                                pipeline_uuid: pipelineUUID,
+                                variable_uuid: name,
+                              }
+                              : {
+                                block_uuid: block.block_uuid,
+                                pipeline_uuid: pipelineUUID,
+                                preview_id: preview.id,
+                                variable_uuid: name,
+                              }}
+                          />
+                        </Spacing>
+                      )}
+                    </div>
+                  );
+                })}
               </Spacing>
             ))}
           </Spacing>

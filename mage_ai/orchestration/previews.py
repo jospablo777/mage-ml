@@ -377,6 +377,7 @@ def run(pipeline, preview_id: str, log: Callable[[str], None] = print) -> Dict[s
                 f'{", ".join(sorted(missing))}; run the pipeline again, then preview.'
             )
         variables = baseline.get_variables()
+        baseline_block_runs = {b.block_uuid: b.id for b in baseline.block_runs}
         failed: Set[str] = set()
         for row in rows:
             if row['status'] != 'run':
@@ -409,6 +410,8 @@ def run(pipeline, preview_id: str, log: Callable[[str], None] = print) -> Dict[s
             row.update(
                 status='previewed',
                 outputs=compare_outputs(pipeline, block, base_part, part, preview.get('keys')),
+                # The run's outputs of the block, to open next to the preview's.
+                baseline_block_run_id=baseline_block_runs.get(block.uuid),
             )
             write(pipeline, preview)
         preview.update(state='done', finished_at=_now())

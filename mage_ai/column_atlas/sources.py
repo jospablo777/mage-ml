@@ -32,11 +32,14 @@ class Source:
     block_uuid: str
     variable_uuid: str
     block_run_id: Optional[int] = None
+    # A change preview's output (orchestration/previews.py), in the preview's partition.
+    preview_id: Optional[str] = None
 
     @property
     def key(self) -> str:
         return '|'.join([
             self.pipeline_uuid, self.block_uuid, self.variable_uuid, str(self.block_run_id or ''),
+            self.preview_id or '',
         ])
 
 
@@ -70,15 +73,30 @@ def parse_source(payload: Any) -> Source:
             raise AtlasInvalidRequest('Invalid block run')
         if block_run_id < 1:
             raise AtlasInvalidRequest('Invalid block run')
+    preview_id = payload.get('preview_id')
+    if preview_id is not None:
+        if not isinstance(preview_id, str) or not preview_id.isalnum() or len(preview_id) > 64:
+            raise AtlasInvalidRequest('Invalid preview')
+        if block_run_id is not None:
+            raise AtlasInvalidRequest('A source is a block run or a preview, not both')
     return Source(
         pipeline_uuid=_name(payload.get('pipeline_uuid'), 'pipeline'),
         block_uuid=_name(payload.get('block_uuid'), 'block'),
         variable_uuid=variable_uuid,
         block_run_id=block_run_id,
+        preview_id=preview_id,
     )
 
 
-def _partition(source: Source) -> Optional[str]:
+def _partition(source: Source, pipeline) -> Optional[str]:
+    if source.preview_id is not None:
+        from mage_ai.orchestration import previews
+
+        try:
+            previews.read(pipeline, source.preview_id)
+        except previews.PreviewError:
+            raise AtlasUnavailable('The preview does not exist')
+        return previews.partition(source.preview_id)
     if source.block_run_id is None:
         return None
     from mage_ai.orchestration.db.models.schedules import BlockRun
@@ -106,7 +124,7 @@ def resolve(source: Source, repo_path: str) -> ResolvedSource:
         pipeline = None
     if pipeline is None or pipeline.get_block(source.block_uuid) is None:
         raise AtlasUnavailable('The block does not exist')
-    partition = _partition(source)
+    partition = _partition(source, pipeline)
     variable = pipeline.variable_manager.get_variable_object(
         source.pipeline_uuid,
         source.block_uuid,
@@ -138,5 +156,6 @@ def source_dict(source: Source) -> Dict[str, Any]:
         block_run_id=source.block_run_id,
         block_uuid=source.block_uuid,
         pipeline_uuid=source.pipeline_uuid,
+        preview_id=source.preview_id,
         variable_uuid=source.variable_uuid,
     )
