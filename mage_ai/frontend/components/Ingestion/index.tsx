@@ -8,7 +8,9 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import Select from '@oracle/elements/Inputs/Select';
+import BlockType from '@interfaces/BlockType';
 import Spacing from '@oracle/elements/Spacing';
+import StreamRun from '@components/StreamRun';
 import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
@@ -130,7 +132,7 @@ function Ingestion() {
   const [deletes, setDeletes] = useState('delete');
   const [name, setName] = useState('');
   const [review, setReview] = useState<string[]>(null);
-  const [created, setCreated] = useState<string>(null);
+  const [created, setCreated] = useState<{ blocks: BlockType[]; pipeline_uuid: string }>(null);
   const [error, setError] = useState<string>(null);
 
   const target = sameServer ? source : destination;
@@ -155,7 +157,7 @@ function Ingestion() {
         setReview(found.review);
       } else if (found.action === 'create') {
         setReview(found.review);
-        setCreated(found.pipeline_uuid);
+        setCreated(found);
       }
     },
   });
@@ -361,19 +363,27 @@ function Ingestion() {
           {created && (
             <Spacing mt={2}>
               <Text>
-                Created {created}. The passwords are kept as project secrets.
+                Created {created.pipeline_uuid}. The passwords are kept as project secrets.
+                Start it here and watch the copy, or
                 {' '}
                 <NextLink
-                  as={`/pipelines/${created}/edit`}
+                  as={`/pipelines/${created.pipeline_uuid}/edit`}
                   href="/pipelines/[pipeline]/edit"
                   legacyBehavior
                   passHref
                 >
-                  <Link>Open it and start it from its Run tab</Link>
+                  <Link>open it in the editor</Link>
                 </NextLink>
+                .
               </Text>
             </Spacing>
           )}
+        </Step>
+      )}
+
+      {created && (
+        <Step title="6. Run">
+          <StreamRun blocks={created.blocks} pipelineUUID={created.pipeline_uuid} />
         </Step>
       )}
     </div>

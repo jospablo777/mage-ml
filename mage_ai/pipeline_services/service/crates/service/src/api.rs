@@ -1572,7 +1572,7 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
             ),
             (
                 "messages_out",
-                "Messages a stream's blocks produced since the service started.",
+                "Messages a stream handed to its sinks since the service started.",
             ),
             (
                 "batches",

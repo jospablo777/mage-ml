@@ -8,8 +8,10 @@ import { expect, test } from './base';
 /*
  * Guided ingestion: the page checks a PostgreSQL source, lists its tables with their keys
  * (a table without one cannot be chosen), samples one, checks the destination, says what
- * the sync will do, and creates the pipeline. Needs a server with logical replication:
- * MAGE_E2E_POSTGRES=host:port:database:user:password.
+ * the sync will do, creates the pipeline, and starts it there, the copy's progress table by
+ * table. Needs a server with logical replication,
+ * MAGE_E2E_POSTGRES=host:port:database:user:password, and an engine built with the
+ * PostgreSQL connector (MAGE_ENGINE_PATH on the server).
  */
 
 const SERVER = process.env.MAGE_E2E_POSTGRES;
@@ -19,15 +21,19 @@ const PIPELINE = `ui_sync_${SUFFIX}`;
 const PYTHON = process.env.MAGE_E2E_PYTHON
   || path.resolve(__dirname, '../../../.venv/bin/python');
 
-function sql(statements: string) {
+// Runs the statements; the first column of the last one's rows, one per line.
+function sql(statements: string): string {
   const [host, port, database, user, password] = SERVER.split(':');
-  execFileSync(PYTHON, ['-c', `
+  return execFileSync(PYTHON, ['-c', `
 import psycopg2, sys
 db = psycopg2.connect(host=sys.argv[1], port=sys.argv[2], dbname=sys.argv[3], user=sys.argv[4],
                       password=sys.argv[5], sslmode='disable')
 db.autocommit = True
-db.cursor().execute(sys.argv[6])
-`, host, port, database, user, password, statements]);
+cursor = db.cursor()
+cursor.execute(sys.argv[6])
+if cursor.description:
+    print('\\n'.join(str(row[0]) for row in cursor.fetchall()))
+`, host, port, database, user, password, statements]).toString().trim();
 }
 
 let apiContext: APIRequestContext;
@@ -51,9 +57,17 @@ test.afterAll(async () => {
   if (!SERVER) {
     return;
   }
+  await api.call('DELETE', `pipelines/${PIPELINE}/stream_runs/current`).catch(() => null);
   await api.deletePipeline(PIPELINE).catch(() => null);
   await apiContext.dispose();
-  sql(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+  // The sync's slots (a run from the page reads with <slot>_dev_<user>) and publication.
+  sql(`
+    SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots
+      WHERE slot_name LIKE 'mageml_${PIPELINE}%';
+    DROP PUBLICATION IF EXISTS mageml_${PIPELINE};
+    DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE;
+    DROP SCHEMA IF EXISTS ${SCHEMA}_copy CASCADE;
+  `);
 });
 
 test('a database sync is checked, reviewed and created as a pipeline', async ({ page }) => {
@@ -96,6 +110,23 @@ test('a database sync is checked, reviewed and created as a pipeline', async ({ 
   await page.getByLabel('Pipeline name').fill(PIPELINE);
   await page.getByRole('button', { name: 'Create the pipeline' }).click();
   await expect(page.getByText(`Created ${PIPELINE}.`, { exact: false })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open it and start it from its Run tab' }))
+  await expect(page.getByRole('link', { name: 'open it in the editor' }))
     .toHaveAttribute('href', `/pipelines/${PIPELINE}/edit`);
+
+  // Started from the page: the sink it writes to is named first, and the copy shows table
+  // by table until it is done.
+  const asked = [];
+  page.on('dialog', (dialog) => {
+    asked.push(dialog.message());
+    dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Start on the local engine' }).click();
+  await expect(page.getByText('Initial copy done: 1 table, 2 rows'))
+    .toBeVisible({ timeout: 90_000 });
+  expect(asked[0]).toContain(`${PIPELINE}_copy`);
+  await expect(page.getByRole('list', { name: 'Initial copy' })
+    .getByRole('listitem', { name: `${SCHEMA}.orders` })).toContainText('Done, 2 rows');
+  expect(sql(`SELECT item FROM ${SCHEMA}_copy.copy_orders ORDER BY id`)).toBe('tea\ncake');
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(page.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 60_000 });
 });

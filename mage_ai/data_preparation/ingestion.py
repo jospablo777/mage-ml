@@ -323,7 +323,7 @@ def create(
         batch_size=5000,
         batch_timeout=1,
     ))
-    write_block('copy', 'data_exporter', dict(
+    write = write_block('copy', 'data_exporter', dict(
         connector_type='postgres',
         **connection_yaml(destination, 'destination', 'username'),
         schema=schema,
@@ -335,6 +335,9 @@ def create(
     ), [read])
     return dict(
         pipeline_uuid=pipeline.uuid,
+        # For the run panel, which names the sinks a start writes to.
+        blocks=[dict(uuid=b.uuid, type=getattr(b.type, 'value', b.type))
+                for b in (read, write)],
         review=review(tables, deletes, schema, prefix),
         created_by=user,
     )

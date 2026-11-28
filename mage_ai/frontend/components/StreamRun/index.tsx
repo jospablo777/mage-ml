@@ -8,6 +8,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
+import { TableCopyType, copyHeadline, tableCopyWords } from './copy';
 import { publishStreamBlocks } from './badges';
 import dark from '@oracle/styles/themes/dark';
 import { BORDER_RADIUS } from '@oracle/styles/units/borders';
@@ -49,6 +50,7 @@ export type StreamRunType = {
   batches?: number;
   blocks?: StreamRunBlockType[];
   connections?: ConnectionsType;
+  copy?: TableCopyType[];
   dead_lettered_messages?: number;
   error?: string;
   exit_code?: number;
@@ -123,6 +125,25 @@ const FactsStyle = styled.div`
   grid-template-columns: auto minmax(0, 1fr);
 `;
 
+// One row per table, the columns the same on every row.
+const CopyRowStyle = styled.div`
+  align-items: center;
+  display: grid;
+  gap: ${UNIT * 1.5}px;
+  grid-template-columns: minmax(0, 1fr) minmax(${UNIT * 10}px, ${UNIT * 30}px) ${UNIT * 26}px;
+  margin-top: ${UNIT * 0.5}px;
+`;
+
+const BarStyle = styled.div`
+  border-radius: 2px;
+  height: 4px;
+  overflow: hidden;
+
+  ${props => `
+    background-color: ${(props.theme.borders || dark.borders).light};
+  `}
+`;
+
 const LogStyle = styled.pre`
   font-family: ${MONO_FONT_FAMILY_REGULAR};
   font-size: 12px;
@@ -192,6 +213,35 @@ function headline(run: StreamRunType): string {
     .replace(/^./, c => c.toUpperCase());
   return `${state} · ${last(run.rate_in).toLocaleString()} in/s · `
     + `${last(run.rate_out).toLocaleString()} out/s · lag ${lag.toLocaleString()}`;
+}
+
+function CopyProgress({ copy }: { copy: TableCopyType[] }) {
+  return (
+    <>
+      <Text bold>{copyHeadline(copy)}</Text>
+      <div aria-label="Initial copy" role="list">
+        {copy.map(table => {
+          const share = table.done ? 1 : (table.estimate
+            ? Math.min(table.copied / table.estimate, 1) : 0);
+          return (
+            <CopyRowStyle aria-label={table.table} key={table.table} role="listitem">
+              <NameStyle title={table.table}>
+                <Text monospace small>{table.table}</Text>
+              </NameStyle>
+              <BarStyle>
+                <div style={{
+                  backgroundColor: table.done ? dark.accent.positive : dark.accent.info,
+                  height: '100%',
+                  width: `${(share * 100).toFixed(1)}%`,
+                }} />
+              </BarStyle>
+              <Text muted={!table.done && !table.copied} small>{tableCopyWords(table)}</Text>
+            </CopyRowStyle>
+          );
+        })}
+      </div>
+    </>
+  );
 }
 
 const RESULT_WORDS = {
@@ -421,6 +471,12 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
       {connections && (
         <PanelStyle>
           <ConnectionChecks connections={connections} />
+        </PanelStyle>
+      )}
+
+      {running && !!run?.copy?.length && (
+        <PanelStyle>
+          <CopyProgress copy={run.copy} />
         </PanelStyle>
       )}
 

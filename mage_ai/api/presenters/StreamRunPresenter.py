@@ -9,6 +9,7 @@ class StreamRunPresenter(BasePresenter):
         'batches',
         'blocks',
         'connections',
+        'copy',
         'dead_lettered_batches',
         'dead_lettered_messages',
         'error',

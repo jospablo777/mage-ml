@@ -17,6 +17,7 @@ creates a streaming pipeline you can read, run from its Run tab and export as a 
 | Destination | The same server or another; the schema, and a prefix for the copies' names; whether a deleted row is deleted or kept with `_mage_deleted_at` |
 | Review | What the sync will do, in sentences: copy, keys, deletes, new columns, restarts |
 | Create | The pipeline; the passwords become project secrets |
+| Run | Start it on the local engine from the page and watch the copy table by table, as on the pipeline's Run tab |
 
 ## What the pipeline is
 
@@ -55,6 +56,20 @@ mirror:
   (`pg_class.reltuples`; a table never analyzed counts 0), and the log says when the copy
   starts, about how many rows it has, and when it ends. The stream's page and lag alerts
   show it like any other lag.
+- The Run panel (on the Ingestion page after **Create**, and on the pipeline's Run tab)
+  shows the copy table by table: rows read against the table's estimate, **Waiting** for a
+  table not reached yet, and **Done** once every row of the table is in the destination.
+  `GET /v1/streams/{pipeline}` on the engine has the same as `copy`:
+
+  ```json
+  "copy": [
+    {"table": "public.orders", "estimate": 1200, "copied": 1200, "done": true},
+    {"table": "public.customers", "estimate": null, "copied": 310, "done": false}
+  ]
+  ```
+
+  The list stays until the stream restarts; a restart after the copy finished copies
+  nothing and has none.
 - The slot moves on only after the destination committed a batch: after a stop, the sync
   continues from the last change it wrote, and a change it repeats writes the same row.
 - A column added in the source is added to the copy with its next change. `TRUNCATE` is not

@@ -51,11 +51,14 @@ pub struct StreamStatus {
     pub lag: BTreeMap<u32, i64>,
     /// Partitions this instance reads now.
     pub assigned: usize,
-    /// The last minute, one value per second, oldest first: messages read, messages the
-    /// blocks made, and the total lag.
+    /// The last minute, one value per second, oldest first: messages read, messages handed
+    /// to the sinks (as `messages_out`), and the total lag.
     pub rate_in: VecDeque<u64>,
     pub rate_out: VecDeque<u64>,
     pub lag_history: VecDeque<i64>,
+    /// The source's initial copy, table by table, when it makes one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub copy: Vec<TableCopyStatus>,
     /// Each block's numbers, in the order the blocks first ran.
     pub blocks: Vec<BlockStatus>,
     /// The last messages at each tap point (`source`, and each block whose output the stream
@@ -68,6 +71,16 @@ pub struct StreamStatus {
     /// every [`ERROR_LOG_EVERY`].
     #[serde(skip)]
     pub error_logged: Option<(String, std::time::Instant)>,
+}
+
+/// A table of the source's initial copy: rows by the server's estimate (when it has one),
+/// rows read, and whether every sink took them all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TableCopyStatus {
+    pub table: String,
+    pub estimate: Option<i64>,
+    pub copied: i64,
+    pub done: bool,
 }
 
 /// How often an error that keeps coming back is written to the log again.
@@ -470,6 +483,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let mut batch_traces = crate::stream_trace::BatchTraces::new(&parts.name, sink_after.clone());
     let sink_fed: std::collections::BTreeSet<String> =
         sink_after.iter().flatten().cloned().collect();
+    // A sink follows the source itself: its messages are written as read.
+    let source_fed = sink_after.iter().any(Option::is_none);
     for (index, (sink, _)) in parts.sinks.iter().enumerate() {
         writers.push(spawn_writer(
             sink.clone(),
@@ -609,14 +624,23 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             tap(&status, block, batch);
                         }
                     }
-                    // The messages of the blocks sinks follow: a tapped run returns every
-                    // block's output, and counts the same as one that is not.
-                    let rows: usize = output
-                        .outputs
-                        .iter()
-                        .filter(|(block, _)| sink_fed.contains(block.as_str()))
-                        .map(|(_, batch)| batch.num_rows())
-                        .sum();
+                    // The messages handed to the sinks: those of the blocks sinks follow (a
+                    // tapped run returns every block's output, and counts the same as one that
+                    // is not), and the source's own when a sink follows the source.
+                    let direct = match inputs.get(&id) {
+                        Some((input, _)) if source_fed && !id.is_timer() => on_time
+                            .get(&id)
+                            .map_or(input, |(kept, _, _)| kept)
+                            .num_rows(),
+                        _ => 0,
+                    };
+                    let rows: usize = direct
+                        + output
+                            .outputs
+                            .iter()
+                            .filter(|(block, _)| sink_fed.contains(block.as_str()))
+                            .map(|(_, batch)| batch.num_rows())
+                            .sum::<usize>();
                     count(&status, |s| {
                         s.messages_out += rows as u64;
                         for stats in &output.blocks {
@@ -749,6 +773,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     }
                 }
                 let lag = parts.source.lag();
+                let copy = parts.source.copy_progress();
                 count(&status, |s| {
                     let total_lag: i64 = lag.values().sum();
                     push_bounded(&mut s.rate_in, s.messages_in.saturating_sub(last_in));
@@ -758,6 +783,17 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     last_out = s.messages_out;
                     s.lag = lag;
                     s.assigned = assigned.len();
+                    if !copy.is_empty() {
+                        s.copy = copy
+                            .into_iter()
+                            .map(|t| TableCopyStatus {
+                                table: t.table,
+                                estimate: t.estimate,
+                                copied: t.copied,
+                                done: t.done,
+                            })
+                            .collect();
+                    }
                 });
                 // Nothing more to read: sinks that keep how far they are move on (a history's
                 // progress, which lookups as of a later time wait for).
@@ -1903,7 +1939,8 @@ mod tests {
         );
     }
 
-    /// A memory source that is caught up through `through` once all it has is acknowledged.
+    /// A memory source that is caught up through `through` once all it has is acknowledged,
+    /// and reports it as the initial copy of one table.
     struct CaughtUpSource {
         inner: MemorySource,
         handle: mage_connector_local::MemorySourceHandle,
@@ -1929,6 +1966,15 @@ mod tests {
         }
         fn caught_up(&self) -> Option<i64> {
             (self.handle.committed() == vec![self.total]).then_some(self.through)
+        }
+        fn copy_progress(&self) -> Vec<mage_stream_ports::TableCopy> {
+            let committed = self.handle.committed().first().copied().unwrap_or(0);
+            vec![mage_stream_ports::TableCopy {
+                table: "public.dimension".into(),
+                estimate: Some(self.total as i64),
+                copied: committed as i64,
+                done: committed == self.total,
+            }]
         }
         fn capabilities(&self) -> mage_stream_ports::SourceCapabilities {
             self.inner.capabilities()
@@ -1977,6 +2023,7 @@ mod tests {
         let handle = source.handle();
         let sink = Arc::new(ToldSink::default());
         let shutdown = CancellationToken::new();
+        let status = SharedStatus::default();
         let stream = tokio::spawn(run(
             StreamParts {
                 name: "dimension".into(),
@@ -1996,7 +2043,7 @@ mod tests {
                 time: None,
                 transaction: None,
             },
-            SharedStatus::default(),
+            status.clone(),
             shutdown.clone(),
         ));
         // Three ticks: told once, as the time does not move.
@@ -2006,6 +2053,19 @@ mod tests {
         assert_eq!(
             *sink.told.lock().unwrap(),
             vec![(1_764_000_000_000_000, 10)]
+        );
+        // The status says how far the source's copy is, table by table, and a stream without
+        // blocks counts what it handed its sink as out.
+        let reported = serde_json::to_value(&*status.lock().unwrap()).unwrap();
+        assert_eq!(
+            (&reported["messages_in"], &reported["messages_out"]),
+            (&serde_json::json!(10), &serde_json::json!(10))
+        );
+        assert_eq!(
+            reported["copy"],
+            serde_json::json!([
+                {"table": "public.dimension", "estimate": 10, "copied": 10, "done": true}
+            ])
         );
     }
 

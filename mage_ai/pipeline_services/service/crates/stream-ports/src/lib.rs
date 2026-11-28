@@ -98,6 +98,18 @@ pub enum AckKind {
     None,
 }
 
+/// A table of a source's initial copy, in the order the tables are read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableCopy {
+    pub table: String,
+    /// Its rows by the server's estimate, when the server has one.
+    pub estimate: Option<i64>,
+    /// Rows read so far.
+    pub copied: i64,
+    /// Every row was read and every sink took it.
+    pub done: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceCapabilities {
     /// A restart reads unacknowledged messages again.
@@ -136,6 +148,11 @@ pub trait Source: Send {
     /// source with nothing left to read). The stream hands it to the sinks on idle ticks.
     fn caught_up(&self) -> Option<i64> {
         None
+    }
+    /// The tables of the source's initial copy, while it copies them and after, until the
+    /// stream restarts; empty for sources that copy nothing.
+    fn copy_progress(&self) -> Vec<TableCopy> {
+        Vec::new()
     }
     fn capabilities(&self) -> SourceCapabilities;
     fn close(&mut self) -> BoxFuture<'_, ()>;

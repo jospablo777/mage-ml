@@ -23,7 +23,7 @@
 //! `sslrootcert`.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,6 +34,7 @@ use mage_stream_ports::check::ConnectionReport;
 use mage_stream_ports::{
     AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, ConnectorError,
     Envelope, EnvelopeBuilder, PartitionId, Position, Source, SourceCapabilities, SourceEvent,
+    TableCopy,
 };
 use serde_json::Value;
 use tokio_postgres::{Client, Config, SimpleQueryMessage};
@@ -207,12 +208,20 @@ pub trait CopyRecord: Send + Sync {
 /// snapshot and sends each row's message here. Receiving is safe to cancel (the stream
 /// drops a pending read on its ticks), and the bound keeps the copy from reading ahead.
 struct Copy {
-    rows: tokio::sync::mpsc::Receiver<Result<Vec<u8>, ConnectorError>>,
+    /// Each row's message with the index of its table.
+    rows: tokio::sync::mpsc::Receiver<Result<(usize, Vec<u8>), ConnectorError>>,
     task: tokio::task::JoinHandle<()>,
-    /// The tables' rows by the server's estimate (pg_class.reltuples), and rows copied:
-    /// what is left is the source's lag while it copies.
-    estimate: i64,
+}
+
+/// A table of the initial copy, in the order the copy reads them.
+struct CopyTable {
+    table: String,
+    /// Rows by the server's estimate (pg_class.reltuples), none when the table was never
+    /// analyzed: what is left of them is the source's lag while it copies.
+    estimate: Option<i64>,
     copied: i64,
+    /// Once every row was read: the position of its last row, done when the sinks took it.
+    last: Option<u64>,
 }
 
 impl Drop for Copy {
@@ -258,6 +267,8 @@ pub struct PgCdcSource {
     broken: bool,
     warned_truncate: bool,
     copy: Option<Copy>,
+    /// The initial copy's tables, from its start until the stream restarts.
+    copy_tables: Vec<CopyTable>,
     /// The last copied row's position, until the sinks took it.
     copy_last: Option<u64>,
     record: Option<Arc<dyn CopyRecord>>,
@@ -293,6 +304,7 @@ impl PgCdcSource {
             broken: false,
             warned_truncate: false,
             copy: None,
+            copy_tables: Vec::new(),
             copy_last: None,
             record: None,
             probe: None,
@@ -388,7 +400,9 @@ impl PgCdcSource {
                 None => false,
             };
         if copy {
-            self.copy = Some(self.begin_copy(&client).await?);
+            let (copy, tables) = self.begin_copy(&client).await?;
+            self.copy = Some(copy);
+            self.copy_tables = tables;
         }
         self.client = Some(client);
         if !copy {
@@ -423,7 +437,7 @@ impl PgCdcSource {
     /// Starts the initial copy: the tables (the publication's when none are named) are read
     /// in one read-only snapshot, after the slot was made, so changes made while they are
     /// copied come after them and a mirror ends as the source is.
-    async fn begin_copy(&self, client: &Client) -> Result<Copy, ConnectorError> {
+    async fn begin_copy(&self, client: &Client) -> Result<(Copy, Vec<CopyTable>), ConnectorError> {
         let s = &self.settings;
         let tables: Vec<String> = if s.tables.is_empty() {
             client
@@ -456,16 +470,28 @@ impl PgCdcSource {
             ))
         })?;
         let names: Vec<String> = tables.iter().map(|t| qualified(t)).collect();
-        // An estimate only: a table never analyzed counts 0, and none fails the copy.
-        let estimate: i64 = client
-            .query_one(
-                "SELECT coalesce(sum(greatest(c.reltuples, 0)), 0)::bigint \
-                 FROM unnest($1::text[]) AS t(name) JOIN pg_class c ON c.oid = to_regclass(t.name)",
+        // Estimates only: a table never analyzed has none, and none fails the copy.
+        let estimates: Vec<Option<i64>> = client
+            .query(
+                "SELECT CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint END \
+                 FROM unnest($1::text[]) WITH ORDINALITY AS t(name, n) \
+                 LEFT JOIN pg_class c ON c.oid = to_regclass(t.name) ORDER BY t.n",
                 &[&names],
             )
             .await
-            .map(|r| r.get(0))
-            .unwrap_or(0);
+            .map(|rows| rows.iter().map(|r| r.get(0)).collect())
+            .unwrap_or_default();
+        let progress: Vec<CopyTable> = tables
+            .iter()
+            .enumerate()
+            .map(|(index, table)| CopyTable {
+                table: table.clone(),
+                estimate: estimates.get(index).copied().flatten(),
+                copied: 0,
+                last: None,
+            })
+            .collect();
+        let estimate: i64 = progress.iter().filter_map(|t| t.estimate).sum();
         eprintln!(
             "PostgreSQL stream source on {}: copying {} table(s), about {estimate} rows, then \
              following their changes",
@@ -475,16 +501,20 @@ impl PgCdcSource {
         let reader = self.client().await?;
         let (send, rows) = tokio::sync::mpsc::channel(COPY_FETCH * 2);
         let task = tokio::spawn(async move {
-            if let Err(error) = copy_tables(&reader, tables.into(), lsn, &send).await {
+            if let Err(error) = copy_tables(&reader, &tables, lsn, &send).await {
                 let _ = send.send(Err(error)).await;
             }
         });
-        Ok(Copy {
-            rows,
-            task,
-            estimate,
-            copied: 0,
-        })
+        Ok((Copy { rows, task }, progress))
+    }
+
+    /// The copy reads the table at `index` now: the tables before it were read through the
+    /// last position handed over.
+    fn copy_reached(&mut self, index: usize) {
+        let delivered = self.delivered;
+        for table in self.copy_tables.iter_mut().take(index) {
+            table.last.get_or_insert(delivered);
+        }
     }
 
     /// The next rows of the initial copy, as a batch when one is full or waited long
@@ -497,8 +527,11 @@ impl PgCdcSource {
             let wait = self.wait();
             let copy = self.copy.as_mut().expect("copying");
             match tokio::time::timeout(wait, copy.rows.recv()).await {
-                Ok(Some(Ok(value))) => {
-                    copy.copied += 1;
+                Ok(Some(Ok((index, value)))) => {
+                    self.copy_reached(index);
+                    if let Some(table) = self.copy_tables.get_mut(index) {
+                        table.copied += 1;
+                    }
                     self.push(value)
                 }
                 Ok(Some(Err(error))) => {
@@ -506,7 +539,8 @@ impl PgCdcSource {
                     return Err(error);
                 }
                 Ok(None) => {
-                    let copied = copy.copied;
+                    self.copy_reached(self.copy_tables.len());
+                    let copied: i64 = self.copy_tables.iter().map(|t| t.copied).sum();
                     self.copy = None;
                     eprintln!(
                         "PostgreSQL stream source on {}: copied {copied} rows; following changes",
@@ -938,17 +972,17 @@ impl PgCdcSource {
 /// position `lsn`), in one read-only snapshot, values written as changes write them.
 async fn copy_tables(
     client: &Client,
-    mut tables: VecDeque<String>,
+    tables: &[String],
     lsn: u64,
-    send: &tokio::sync::mpsc::Sender<Result<Vec<u8>, ConnectorError>>,
+    send: &tokio::sync::mpsc::Sender<Result<(usize, Vec<u8>), ConnectorError>>,
 ) -> Result<(), ConnectorError> {
     client
         .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL TIME ZONE 'UTC'")
         .await
         .map_err(|e| classify("starting the initial copy", e))?;
-    while let Some(table) = tables.pop_front() {
+    for (index, table) in tables.iter().enumerate() {
         let statement = client
-            .prepare(&format!("SELECT * FROM {}", qualified(&table)))
+            .prepare(&format!("SELECT * FROM {}", qualified(table)))
             .await
             .map_err(|e| classify(&format!("reading {table} to copy it"), e))?;
         let columns: Vec<(Vec<u8>, u32)> = statement
@@ -960,7 +994,7 @@ async fn copy_tables(
                 (key, c.type_().oid())
             })
             .collect();
-        let (namespace, name) = table.split_once('.').unwrap_or(("public", &table));
+        let (namespace, name) = table.split_once('.').unwrap_or(("public", table));
         let mut suffix = b",\"_mage_operation\":\"snapshot\",\"_mage_schema\":".to_vec();
         suffix.extend(serde_json::to_vec(namespace).unwrap_or_default());
         suffix.extend_from_slice(b",\"_mage_table\":");
@@ -969,7 +1003,7 @@ async fn copy_tables(
         client
             .batch_execute(&format!(
                 "DECLARE mage_copy NO SCROLL CURSOR FOR SELECT * FROM {}",
-                qualified(&table)
+                qualified(table)
             ))
             .await
             .map_err(|e| classify(&format!("copying {table}"), e))?;
@@ -997,7 +1031,7 @@ async fn copy_tables(
                     }
                 }
                 out.extend_from_slice(&suffix);
-                if send.send(Ok(out)).await.is_err() {
+                if send.send(Ok((index, out))).await.is_err() {
                     // The stream stopped reading.
                     return Ok(());
                 }
@@ -1414,12 +1448,29 @@ impl Source for PgCdcSource {
         self.caught_up
     }
 
-    /// While the initial copy runs: the rows left by the tables' estimate.
+    /// While the initial copy runs: the rows left by the tables' estimates.
     fn lag(&self) -> BTreeMap<u32, i64> {
-        self.copy
-            .as_ref()
-            .map(|c| BTreeMap::from([(PARTITION.0, (c.estimate - c.copied).max(0))]))
-            .unwrap_or_default()
+        if self.copy.is_none() {
+            return BTreeMap::new();
+        }
+        let left = self
+            .copy_tables
+            .iter()
+            .map(|t| (t.estimate.unwrap_or(0) - t.copied).max(0))
+            .sum();
+        BTreeMap::from([(PARTITION.0, left)])
+    }
+
+    fn copy_progress(&self) -> Vec<TableCopy> {
+        self.copy_tables
+            .iter()
+            .map(|t| TableCopy {
+                table: t.table.clone(),
+                estimate: t.estimate,
+                copied: t.copied,
+                done: t.last.is_some_and(|last| self.committed >= last),
+            })
+            .collect()
     }
 
     fn resume(&mut self, _partition: PartitionId) {
@@ -1749,7 +1800,9 @@ mod tests {
         };
         let id = std::process::id();
         let table = format!("cdc_copy_lag_{id}");
-        config["tables"] = serde_json::json!([format!("public.{table}")]);
+        let second = format!("cdc_copy_lag_second_{id}");
+        config["tables"] =
+            serde_json::json!([format!("public.{table}"), format!("public.{second}")]);
         config["replication_slot"] = format!("cdc_copy_lag_{id}").into();
         config["publication_name"] = format!("cdc_copy_lag_{id}").into();
         config["snapshot"] = "initial".into();
@@ -1766,21 +1819,38 @@ mod tests {
                 "DROP TABLE IF EXISTS {table}; \
                  CREATE TABLE {table} (id integer PRIMARY KEY, v text); \
                  INSERT INTO {table} SELECT n, 'row ' || n FROM generate_series(1, 1200) n; \
-                 ANALYZE {table}"
+                 DROP TABLE IF EXISTS {second}; \
+                 CREATE TABLE {second} (id integer PRIMARY KEY); \
+                 INSERT INTO {second} SELECT n FROM generate_series(1, 300) n; \
+                 ANALYZE {table}; ANALYZE {second}"
             ))
             .await
             .unwrap();
+        // Batches end at the first table's last row: it is done while the second's rows wait
+        // for the sinks.
         let limits = BatchLimits {
-            max_records: 500,
+            max_records: 400,
             max_bytes: 1 << 20,
             max_wait: Duration::from_millis(200),
         };
         let mut source = PgCdcSource::new(&config, limits).unwrap();
 
         source.next_event().await.unwrap();
-        assert_eq!(source.lag(), BTreeMap::from([(0, 1200)]));
+        assert_eq!(source.lag(), BTreeMap::from([(0, 1500)]));
+        let progress = source.copy_progress();
+        assert_eq!(
+            progress
+                .iter()
+                .map(|t| (t.table.as_str(), t.estimate))
+                .collect::<Vec<_>>(),
+            [
+                (format!("public.{table}").as_str(), Some(1200)),
+                (format!("public.{second}").as_str(), Some(300)),
+            ]
+        );
         let mut copied = 0;
         let mut lags = Vec::new();
+        let mut done = Vec::new();
         for _ in 0..100 {
             if source.copy.is_none() {
                 break;
@@ -1788,14 +1858,31 @@ mod tests {
             if let SourceEvent::Batch { meta, .. } = source.next_event().await.unwrap() {
                 copied += meta.records;
                 lags.push(source.lag().get(&0).copied().unwrap_or(0));
-                acknowledge(&mut source, &meta).await;
+                for acknowledged in [false, true] {
+                    if acknowledged {
+                        acknowledge(&mut source, &meta).await;
+                    }
+                    let progress = source.copy_progress();
+                    done.push((progress[0].done, progress[1].done));
+                }
             }
         }
-        assert_eq!(copied, 1200);
+        assert_eq!(copied, 1500);
         // It falls as rows are copied, and the changes that follow have no estimate.
         assert!(lags.windows(2).all(|w| w[0] >= w[1]), "{lags:?}");
-        assert!(lags[0] < 1200, "{lags:?}");
+        assert!(lags[0] < 1500, "{lags:?}");
         assert!(source.lag().is_empty());
+        // A table is done once its rows are all read and acknowledged, in order.
+        assert!(done.contains(&(true, false)), "{done:?}");
+        assert!(!done.contains(&(false, true)), "{done:?}");
+        let progress = source.copy_progress();
+        assert_eq!(
+            progress
+                .iter()
+                .map(|t| (t.copied, t.done))
+                .collect::<Vec<_>>(),
+            [(1200, true), (300, true)]
+        );
 
         // Nothing more to read and everything acknowledged: caught up through about now.
         let until = Instant::now() + Duration::from_secs(15);
@@ -1815,7 +1902,7 @@ mod tests {
         admin
             .batch_execute(&format!(
                 "SELECT pg_drop_replication_slot('cdc_copy_lag_{id}'); \
-                 DROP PUBLICATION cdc_copy_lag_{id}; DROP TABLE {table}"
+                 DROP PUBLICATION cdc_copy_lag_{id}; DROP TABLE {table}, {second}"
             ))
             .await
             .unwrap();

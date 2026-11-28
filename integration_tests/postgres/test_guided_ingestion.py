@@ -88,6 +88,10 @@ def test_checks_tables_sample_and_the_pipeline_it_creates(
         schema=f'{schema}_copy', prefix='copy_',
     )
     assert any('_mage_deleted_at' in line for line in created['review'])
+    assert created['blocks'] == [
+        dict(uuid=f'sync_{schema}_source', type='data_loader'),
+        dict(uuid=f'sync_{schema}_copy', type='data_exporter'),
+    ]
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
     pipeline = Pipeline.get(created['pipeline_uuid'], repo_path=mage_project)

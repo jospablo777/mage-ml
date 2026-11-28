@@ -49,6 +49,19 @@ class IngestionSetupResourceTest(AsyncDBTestCase):
             failed = await self.call(action='sample', source=SOURCE, table='public.orders')
         self.assertEqual((failed['error']['code'], failed['error']['message']), (400, 'nope'))
 
+    async def test_create_answers_with_the_blocks_the_run_panel_starts(self):
+        made = dict(pipeline_uuid='sync_shop', review=['Copies every row'],
+                    blocks=[dict(uuid='sync_shop_source', type='data_loader'),
+                            dict(uuid='sync_shop_copy', type='data_exporter')])
+        with patch.object(ingestion, 'create', return_value=made):
+            found = (await self.call(
+                action='create', name='sync_shop', source=SOURCE, destination=SOURCE,
+                tables=[dict(table='public.orders', key=['id'])],
+            ))['ingestion_setup']
+        self.assertEqual(found['pipeline_uuid'], 'sync_shop')
+        self.assertEqual(found['blocks'], made['blocks'])
+        self.assertNotIn('hunter2', str(found))
+
     async def test_a_user_who_is_no_editor_cannot_set_ingestion_up(self):
         refused = await self.call(user=create_user(), action='check_source', source=SOURCE)
         self.assertEqual(refused['error']['code'], 403)

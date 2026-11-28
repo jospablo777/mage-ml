@@ -3163,6 +3163,7 @@
    "IngestionSetup": {
     "properties": {
      "action": {},
+     "blocks": {},
      "checks": {},
      "columns": {},
      "pipeline_uuid": {},
@@ -5674,6 +5675,7 @@
      "batches": {},
      "blocks": {},
      "connections": {},
+     "copy": {},
      "dead_lettered_batches": {},
      "dead_lettered_messages": {},
      "error": {},

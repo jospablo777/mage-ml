@@ -35,6 +35,9 @@
   the tables, then follows every change. Passwords become project secrets. A table that
   would break the source once published (`REPLICA IDENTITY NOTHING`) cannot be chosen.
 - While the first copy runs, the stream's lag is the rows left to copy.
+- The sync starts from the Ingestion page once created, and the Run panel shows the first
+  copy table by table: rows read against each table's estimate, and done once the
+  destination has them all.
 
 ### Streams
 
@@ -43,6 +46,10 @@
 - Temporal joins: the PostgreSQL sink keeps a table's history of versions (`history`), and
   a lookup reads the version of each key valid at a message's time (`as_of`). A history fed
   by PostgreSQL changes stays current while its table is idle.
+- Fixed: a stream started from the editor now has the project's secrets its settings read
+  with `mage_secret_var()`; before, it stopped on the missing `MAGE_SECRET_*` variables.
+- Fixed: a stream without blocks counts the messages it hands its sinks as out; it showed
+  0 out while writing.
 
 ### Scheduling
 
