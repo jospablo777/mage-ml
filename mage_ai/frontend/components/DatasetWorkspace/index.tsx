@@ -12,6 +12,11 @@ import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import { ColumnAtlasOutput } from '@components/ColumnAtlas';
+import {
+  PARTITION_COLORS,
+  PARTITION_STATES,
+  PartitionStateType,
+} from '@components/Partitions/states';
 import { UNIT } from '@oracle/styles/units/spacing';
 
 type FreshnessType = {
@@ -22,11 +27,25 @@ type FreshnessType = {
   state: 'fresh' | 'stale' | 'unknown';
 };
 
+// The partitions of a partitioned pipeline's dataset: the gaps are ranges of consecutive
+// partitions in one state, the latest listed; the strip is the latest partitions.
+type CoverageType = {
+  counts: { [state in PartitionStateType]: number };
+  error?: string;
+  gaps: { count: number; first: string; last: string; state: PartitionStateType }[];
+  gaps_total: number;
+  key: string;
+  kind: string;
+  strip: { partition: string; state: PartitionStateType }[];
+  total: number;
+};
+
 export type DatasetType = {
   block: string;
   block_run_id?: number;
   checks: { failing: string[]; state: 'passing' | 'failing' | 'unknown' };
   columns?: { name: string; type: string }[];
+  coverage?: CoverageType;
   data_through?: string;
   dependencies?: {
     downstream: { id: string; via: string }[];
@@ -71,6 +90,72 @@ function checksText(checks: DatasetType['checks']): string {
     return `Checks failing: ${checks.failing.join('; ')}`;
   }
   return checks.state === 'passing' ? 'Checks passing' : 'Checks unknown: no completed run';
+}
+
+// The point first: how many partitions are done, and the other states by count.
+export function coverageText(coverage: CoverageType): string {
+  const others = PARTITION_STATES
+    .filter(state => state !== 'done' && coverage.counts[state])
+    .map(state => `${coverage.counts[state].toLocaleString()} ${state}`);
+  return `${coverage.counts.done.toLocaleString()} of ${coverage.total.toLocaleString()} `
+    + `partitions done${others.length ? `; ${others.join(', ')}` : ''}`;
+}
+
+function Coverage({ coverage, pipeline }: { coverage: CoverageType; pipeline: string }) {
+  if (coverage.error) {
+    return <Text danger small>Partitions: {coverage.error}</Text>;
+  }
+  return (
+    <div aria-label="Partition coverage" role="group">
+      <FlexContainer alignItems="center">
+        <Text bold small>{coverageText(coverage)}</Text>
+        <Spacing ml={1}>
+          <NextLink
+            as={`/pipelines/${pipeline}/partitions`}
+            href="/pipelines/[pipeline]/partitions"
+            legacyBehavior
+            passHref
+          >
+            <Link small>Partitions</Link>
+          </NextLink>
+        </Spacing>
+      </FlexContainer>
+      <Spacing mt={1}>
+        <FlexContainer flexWrap="wrap">
+          {coverage.strip.map(cell => (
+            <div
+              key={cell.partition}
+              style={{
+                backgroundColor: PARTITION_COLORS[cell.state],
+                borderRadius: 2,
+                height: UNIT,
+                marginBottom: 2,
+                marginRight: 2,
+                width: UNIT,
+              }}
+              title={`${coverage.key} ${cell.partition}: ${cell.state}`}
+            />
+          ))}
+        </FlexContainer>
+        {coverage.strip.length < coverage.total && (
+          <Text muted xsmall>The latest {coverage.strip.length} partitions</Text>
+        )}
+      </Spacing>
+      {coverage.gaps.map(gap => (
+        <Text key={`${gap.state}-${gap.first}`} small>
+          <span style={{ color: PARTITION_COLORS[gap.state] }}>■</span>
+          {' '}
+          {gap.state[0].toUpperCase() + gap.state.slice(1)}:{' '}
+          {gap.count === 1 ? gap.first : `${gap.first} to ${gap.last} (${gap.count})`}
+        </Text>
+      ))}
+      {coverage.gaps_total > coverage.gaps.length && (
+        <Text muted small>
+          The latest {coverage.gaps.length} of {coverage.gaps_total} gaps.
+        </Text>
+      )}
+    </div>
+  );
 }
 
 function when(text?: string): string {
@@ -203,6 +288,12 @@ function Detail({ id, select }: { id: string; select: (id: string) => void }) {
           )}
         </Text>
       </Spacing>
+
+      {dataset.coverage && (
+        <Spacing mt={2}>
+          <Coverage coverage={dataset.coverage} pipeline={dataset.pipeline} />
+        </Spacing>
+      )}
 
       {(['upstream', 'downstream'] as const).map(direction => (
         <Spacing key={direction} mt={2}>

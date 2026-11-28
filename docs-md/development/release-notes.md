@@ -21,6 +21,8 @@
   it is fresh again.
 - A block output in the editor names the dataset it is published as, with its freshness,
   and opens it on the Datasets page.
+- A dataset of a partitioned pipeline shows its coverage: partitions done, and the
+  missing, failed and stale ones as ranges.
 
 ### Change previews
 

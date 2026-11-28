@@ -7,6 +7,7 @@ class DatasetPresenter(BasePresenter):
         'block_run_id',
         'checks',
         'columns',
+        'coverage',
         'data_through',
         'dependencies',
         'description',

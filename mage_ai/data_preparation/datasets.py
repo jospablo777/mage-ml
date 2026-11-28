@@ -362,6 +362,50 @@ def search(entries: List[Dict[str, Any]], query: Optional[str]) -> List[Dict[str
     return sorted(found, key=lambda e: e['id'])
 
 
+# Gaps listed at most (the latest), and partitions shown in the strip (the latest).
+COVERAGE_GAPS = 50
+COVERAGE_STRIP = 120
+
+
+def coverage(repo_path: str, entry: Dict[str, Any],
+             now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    """
+    For a dataset whose pipeline declares partitions: how many of the expected partitions
+    are done, the others as ranges of consecutive partitions in one state (missing, failed,
+    stale, queued, running), and the state of the latest ones; none when it declares none.
+    """
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.orchestration import partition_state
+    from mage_ai.orchestration.partitions import PartitionError
+
+    pipeline = Pipeline.get(entry['pipeline'], repo_path=repo_path, check_if_exists=True)
+    try:
+        if pipeline is None or pipeline.partition_declaration is None:
+            return None
+        found = partition_state.states(pipeline, now)
+    except PartitionError as error:
+        return dict(error=str(error))
+    rows = found['partitions']
+    gaps = []
+    for index, row in enumerate(rows):
+        if row['state'] == 'done':
+            continue
+        last = gaps[-1] if gaps else None
+        if last is not None and last['state'] == row['state'] and last['_end'] == index - 1:
+            last.update(last=row['partition'], count=last['count'] + 1, _end=index)
+        else:
+            gaps.append(dict(state=row['state'], first=row['partition'],
+                             last=row['partition'], count=1, _end=index))
+    for gap in gaps:
+        del gap['_end']
+    return dict(
+        key=found['key'], kind=found['kind'], total=found['total'], counts=found['counts'],
+        gaps=gaps[-COVERAGE_GAPS:], gaps_total=len(gaps),
+        strip=[dict(partition=r['partition'], state=r['state'])
+               for r in rows[-COVERAGE_STRIP:]],
+    )
+
+
 def published_by(entries: List[Dict[str, Any]], pipeline: str,
                  block: Optional[str] = None) -> List[Dict[str, Any]]:
     """The datasets a pipeline's block publishes (any block's, without one)."""

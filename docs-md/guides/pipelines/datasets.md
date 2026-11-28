@@ -15,6 +15,7 @@ datasets by name, owner or pipeline and shows each one's state:
 | Rows and columns | The stored output's Parquet footer |
 | Reads, read by | Registered datasets upstream and downstream, through the pipeline's blocks and the [pipeline dependencies](dependencies.md) |
 | The output | ColumnAtlas on the published run's output |
+| Partitions | For a [partitioned](../../orchestration/partitions.md) pipeline: how many partitions are done, the latest ones as a strip, and the others as ranges by state (`Missing: 2026-11-25 to 2026-11-27 (3)`) |
 
 Freshness and checks are separate: data can be current and its checks failing, or a run
 can publish today the data of last week. Reading the state scans no rows.

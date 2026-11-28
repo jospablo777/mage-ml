@@ -60,6 +60,40 @@ class DatasetsTest(DBTestCase):
             pipeline=self.pipeline.uuid, **entry,
         ))
 
+    def test_coverage_lists_a_partitioned_datasets_gaps_by_state(self):
+        import asyncio
+
+        from mage_ai.orchestration.db.models.schedules import PipelineRun
+        from mage_ai.orchestration.partition_runs import run_partition
+
+        entry = self.register(id='daily_totals', block=self.total_uuid)
+        self.assertIsNone(datasets.coverage(self.repo_path, entry))
+
+        asyncio.run(self.pipeline.update(dict(partitions=dict(
+            key='day', daily=dict(start='2026-11-01'),
+        ))))
+        pipeline = Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path)
+        status = PipelineRun.PipelineRunStatus
+        for day, state in [('01', status.COMPLETED), ('02', status.COMPLETED),
+                           ('03', status.FAILED)]:
+            run_partition(pipeline, f'2026-11-{day}')[0].update(
+                status=state, completed_at=datetime.now(timezone.utc),
+            )
+
+        found = datasets.coverage(self.repo_path, entry,
+                                  now=datetime(2026, 11, 7, 12, tzinfo=timezone.utc))
+        self.assertEqual((found['key'], found['kind'], found['total']), ('day', 'daily', 6))
+        self.assertEqual((found['counts']['done'], found['counts']['failed'],
+                          found['counts']['missing']), (2, 1, 3))
+        # Consecutive partitions in one state are one gap.
+        self.assertEqual(found['gaps'], [
+            dict(state='failed', first='2026-11-03', last='2026-11-03', count=1),
+            dict(state='missing', first='2026-11-04', last='2026-11-06', count=3),
+        ])
+        self.assertEqual(found['gaps_total'], 2)
+        self.assertEqual([c['state'] for c in found['strip']],
+                         ['done', 'done', 'failed', 'missing', 'missing', 'missing'])
+
     def test_a_registered_output_reports_its_rows_columns_and_data_through(self):
         raw = self.register(id='raw_sales', block=self.load_uuid, owner='ana@example.com')
         daily = self.register(

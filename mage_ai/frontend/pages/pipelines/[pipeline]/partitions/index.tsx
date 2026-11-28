@@ -12,8 +12,12 @@ import PrivateRoute from '@components/shared/PrivateRoute';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
-import dark from '@oracle/styles/themes/dark';
 import { PADDING_UNITS } from '@oracle/styles/units/spacing';
+import {
+  PARTITION_COLORS,
+  PARTITION_STATES,
+  PartitionStateType,
+} from '@components/Partitions/states';
 import { PageNameEnum } from '@components/PipelineDetailPage/constants';
 import { onSuccess } from '@api/utils/response';
 
@@ -22,7 +26,7 @@ type PartitionType = {
   partition: string;
   run_id?: number;
   stale_because: { kind: 'code' | 'upstream'; pipeline?: string }[];
-  state: 'missing' | 'queued' | 'running' | 'failed' | 'stale' | 'done';
+  state: PartitionStateType;
 };
 
 type PartitionsType = {
@@ -48,16 +52,8 @@ function scheduleText(found: PartitionsType): string {
   return 'Partitions run when you ask.';
 }
 
-// Problems first, as the headline reads them.
-const STATES: PartitionType['state'][] = ['failed', 'stale', 'missing', 'running', 'queued', 'done'];
-const COLORS = {
-  done: dark.background.success,
-  failed: dark.accent.negative,
-  missing: dark.accent.contentDefaultTransparent,
-  queued: dark.accent.infoTransparent,
-  running: dark.accent.info,
-  stale: dark.accent.warning,
-};
+const STATES = PARTITION_STATES;
+const COLORS = PARTITION_COLORS;
 const CELL = 18;
 
 const CellStyle = styled.div<{ state: PartitionType['state'] }>`

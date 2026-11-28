@@ -16,7 +16,8 @@ class DatasetResource(GenericResource):
     Datasets (data_preparation/datasets.py, ADR-0046): GET /api/datasets?query= lists the
     matching ones with their status (drafts=1: global data products' outputs to register;
     pipeline_uuid= and block_uuid=: those a block publishes, for its output in the editor);
-    GET /api/datasets/<id> returns one with its columns, runs and dependencies; POST
+    GET /api/datasets/<id> returns one with its columns, runs, dependencies and, for a
+    partitioned pipeline, its partitions' coverage; POST
     registers one in datasets.yaml; DELETE removes it.
     """
 
@@ -56,7 +57,8 @@ class DatasetResource(GenericResource):
             if entry is None:
                 return None
             return dict(entry, **datasets.status(repo_path, entry),
-                        dependencies=datasets.dependencies(repo_path, entries, entry))
+                        dependencies=datasets.dependencies(repo_path, entries, entry),
+                        coverage=datasets.coverage(repo_path, entry))
 
         try:
             found = await asyncio.to_thread(detail)
