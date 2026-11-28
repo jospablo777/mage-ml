@@ -319,7 +319,7 @@ jobs:
             # minio: exported services copy audit records to S3 (models/test_audit_store.py).
             services: feast mlflow api minio kafka spark
             # The deploy test builds a service image and deploys it to the runner's Docker.
-            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models integration_tests/lineage integration_tests/spark
+            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models integration_tests/lineage
             r: false
             # Its Rust block test is warmed first, with the shared Rust blocks cache: built
             # inside the test with every feature (MAGE_RUST_FEATURES), it passed 900 s.
@@ -390,7 +390,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra spark-connect --extra ibm-mq --extra db2 --extra mssql --extra geo --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra mssql --extra geo --extra integrations
       # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R
@@ -606,8 +606,16 @@ jobs:
           make -C integration_tests ci-tests TESTS="${{ matrix.tests }}"
           REPORT=results-${{ matrix.id }}.xml
           PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900 --durations=25'
+      # Streams on Spark (ADR-0047), with PySpark in their process only: installed, it turns
+      # on Mage's Spark integration (the Spark applications API starts a local Spark),
+      # which the other tests must not see.
+      - name: Run the Spark stream tests
+        if: matrix.id == 'ml'
+        run: >-
+          make -C integration_tests ci-tests TESTS=integration_tests/spark
+          REPORT=results-ml-spark.xml PYTEST_ARGS='-v --timeout=900'
+          PYTHON='uv run --no-sync --with "pyspark[connect]==4.3.0" python'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
-      - name: Run the scheduler soak test
         if: matrix.id == 'soak'
         run: make -C integration_tests test-soak SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
       # The same with block fusion: chains run as stages, through crashes and retries.

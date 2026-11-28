@@ -181,8 +181,12 @@ test-activemq: up
 test-iceberg: up
 	cd .. && $(PYTHON) -m pytest integration_tests/iceberg $(PYTEST_ARGS)
 
+# PySpark only for the Spark stream tests' process: installed, it turns on Mage's Spark
+# integration, which the other tests must not see.
+SPARK_PYTHON ?= uv run --no-sync --with "pyspark[connect]==4.3.0" python
+
 test-spark: up
-	cd .. && $(PYTHON) -m pytest integration_tests/spark $(PYTEST_ARGS)
+	cd .. && $(SPARK_PYTHON) -m pytest integration_tests/spark $(PYTEST_ARGS)
 
 test-streaming: up
 	cd .. && $(PYTHON) -m pytest integration_tests/streaming $(PYTEST_ARGS)

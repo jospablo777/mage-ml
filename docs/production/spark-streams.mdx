@@ -12,17 +12,19 @@ The pipeline does not change: its Python blocks run through the engine's own wor
 inside Spark's `mapInArrow`, so a block gives the same messages on both.
 
 ```bash
-uv pip install "mage-ml[spark-connect]"
-mage spark-stream . orders_clean \
+uv run --with "pyspark[connect]>=4.3" mage spark-stream . orders_clean \
   --remote sc://spark.example.com:15002 \
   --checkpoint s3a://lake/checkpoints/orders_clean \
   --env KAFKA_BOOTSTRAP=kafka.internal:9092
 ```
 
-The `spark-connect` extra installs PySpark with its Connect client (about 400 MB; the
-smaller `pyspark-client` package breaks MLflow and Great Expectations, which look for a
-local Spark when they find `pyspark`). It starts the query on the server and prints its
-progress every 10 seconds
+`uv run --with` brings PySpark for this command only (the `spark-connect` extra installs it
+for good). Keep it out of the Mage server's own environment: there PySpark turns on Mage's
+Spark pages, which start a local Spark when opened. The smaller `pyspark-client` package
+works for the command, but MLflow and Great Expectations fail next to it, as they look for a
+local Spark when they find `pyspark`.
+
+The command starts the query on the server and prints its progress every 10 seconds
 (`batch 12: 500 rows in, 410/s arriving, 2,300/s processed, 450 rows out`). Ctrl-C stops
 it; the next run continues from the checkpoint. A block that fails stops the query with the
 block's name and reason.
