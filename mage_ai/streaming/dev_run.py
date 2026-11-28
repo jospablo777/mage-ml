@@ -6,10 +6,12 @@ its connections (C3).
 The run is a development run (SAFETY.md section 3): sources read with positions of their own
 (mage_ai/streaming/development.py), and it starts only when every sink it writes was named
 by the user for this run. The engine runs the pipeline as an exported service would, from a
-box in .mage/dev/<pipeline>/, with the server's environment, as editor runs have.
+box in .mage/dev/<pipeline>/, with the server's environment and the project's secrets the
+stream reads, as editor runs have.
 """
 import atexit
 import json
+import os
 import secrets
 import socket
 import subprocess
@@ -27,6 +29,31 @@ LOG_LINES = 300
 
 class DevRunError(RuntimeError):
     pass
+
+
+def project_secrets(captured) -> Dict[str, str]:
+    """
+    The project's secrets the stream reads with mage_secret_var(), under the variables the
+    engine and its blocks read them from (MAGE_SECRET_<NAME>), as a block run in the editor
+    has them. A variable the server's environment sets wins; a secret the project does not
+    have is left out, and the engine names its variable.
+    """
+    from mage_ai.data_preparation.shared.secrets import get_secret_value
+    from mage_ai.pipeline_services.export import SECRET_VAR_TEMPLATE
+    from mage_ai.pipeline_services.secrets import secret_variable_name
+
+    values = {}
+    for path in sorted(captured.files | captured.stream_files):
+        if path.suffix not in ('.py', '.yaml', '.yml') or not path.is_file():
+            continue
+        for name in SECRET_VAR_TEMPLATE.findall(path.read_text(errors='replace')):
+            variable = secret_variable_name(name)
+            if variable in os.environ or variable in values:
+                continue
+            value = get_secret_value(name, suppress_warning=True)
+            if value is not None:
+                values[variable] = value
+    return values
 
 
 @dataclass
@@ -125,7 +152,7 @@ def start(repo_path: str, pipeline_uuid: str, confirmed_sinks: List[str],
     (folder / 'port').write_text(str(port))
     # A variable the blocks need that is not set stops the start, with its name.
     # MAGE_SERVICE_TAP keeps the last messages at each block for the editor's tap.
-    env = dict(local_run.engine_environment(box, data, port, token),
+    env = dict(local_run.engine_environment(box, data, port, token, project_secrets(captured)),
                MAGE_SERVICE_STRICT_ENV='on', MAGE_SERVICE_TAP='on',
                MAGE_SERVICE_INGEST_TOKEN=ingest_token)
     local_run._validate(binary, env)
@@ -178,7 +205,8 @@ def check_connections(repo_path: str, pipeline_uuid: str, user: Optional[str] = 
     manifest_path.write_text(json.dumps(manifest, indent=2))
     data = folder / 'data'
     data.mkdir(parents=True, exist_ok=True)
-    env = local_run.engine_environment(box, data, _free_port(), secrets.token_urlsafe(24))
+    env = local_run.engine_environment(box, data, _free_port(), secrets.token_urlsafe(24),
+                                       project_secrets(captured))
     try:
         result = subprocess.run(
             [str(binary), 'check-connections', pipeline_uuid, '--json'],
