@@ -1351,8 +1351,8 @@ class StreamRefusalTest(StreamExportTestCase):
         problems = self.problems()
         self.assertIn(
             'uses the kinesis connector; services run activemq, amazon_sqs, amplitude, '
-            'azure_event_hub, google_cloud_pubsub, ibm_mq, kafka, mongodb, nats, nats_js, '
-            'postgres, rabbitmq, webhook '
+            'azure_event_hub, google_cloud_pubsub, ibm_mq, kafka, mongodb, mysql, nats, '
+            'nats_js, postgres, rabbitmq, webhook '
             'sources now',
             problems,
         )
