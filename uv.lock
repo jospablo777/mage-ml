@@ -4604,7 +4604,6 @@ all = [
     { name = "pymongo" },
     { name = "pymssql" },
     { name = "pyodbc" },
-    { name = "pyspark-client" },
     { name = "redshift-connector" },
     { name = "requests-aws4auth" },
     { name = "skops" },
@@ -4729,6 +4728,8 @@ snowflake = [
 spark = [
     { name = "boto3" },
     { name = "botocore" },
+]
+spark-connect = [
     { name = "pyspark-client" },
 ]
 streaming = [
@@ -4904,7 +4905,7 @@ requires-dist = [
     { name = "pymongo", marker = "extra == 'streaming'", specifier = ">=4.6.3,<5" },
     { name = "pymssql", marker = "extra == 'mssql'", specifier = ">=2.4.6,<3" },
     { name = "pyodbc", marker = "extra == 'all'", specifier = ">=5.2,<6" },
-    { name = "pyspark-client", marker = "extra == 'spark'", specifier = ">=4.3,<5" },
+    { name = "pyspark-client", marker = "extra == 'spark-connect'", specifier = ">=4.3,<5" },
     { name = "python-dateutil", specifier = ">=2.9" },
     { name = "pytz", specifier = ">=2022.2.1" },
     { name = "pyyaml", specifier = "~=6.0" },
@@ -4943,7 +4944,7 @@ requires-dist = [
     { name = "werkzeug", specifier = ">=3.1.6" },
     { name = "zstandard", marker = "extra == 'streaming'", specifier = ">=0.23" },
 ]
-provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "druid", "mssql", "ibm-mq", "ibm", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
+provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "druid", "mssql", "ibm-mq", "ibm", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "spark-connect", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
 
 [package.metadata.requires-dev]
 dev = [

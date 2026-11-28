@@ -238,7 +238,7 @@ def spark_session_class():
             )
     except ImportError:
         raise SparkRunError('Spark Connect needs pyspark-client: uv pip install pyspark-client '
-                            '(or mage-ml[spark]).') from None
+                            '(or mage-ml[spark-connect]).') from None
     return SparkSession
 
 

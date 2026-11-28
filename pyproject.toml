@@ -229,7 +229,11 @@ snowflake = [
 spark = [
   "boto3>=1.42,<2",
   "botocore>=1.42,<2",
-  # Streaming pipelines on Spark Structured Streaming over Spark Connect (spark_stream.py).
+]
+# Streaming pipelines on Spark Structured Streaming over Spark Connect (spark_stream.py).
+# Not in `all`: pyspark-client is the same `pyspark` package as PySpark, without a Spark
+# home, and libraries that find it (Great Expectations) fail to import.
+spark-connect = [
   "pyspark-client>=4.3,<5",
 ]
 streaming = [

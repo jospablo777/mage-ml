@@ -12,7 +12,7 @@ The pipeline does not change: its Python blocks run through the engine's own wor
 inside Spark's `mapInArrow`, so a block gives the same messages on both.
 
 ```bash
-uv pip install "mage-ml[spark]"
+uv pip install "mage-ml[spark-connect]"
 mage spark-stream . orders_clean \
   --remote sc://spark.example.com:15002 \
   --checkpoint s3a://lake/checkpoints/orders_clean \
