@@ -57,6 +57,11 @@ class SourceFactory:
         elif connector_type == SourceType.MONGODB:
             from mage_ai.streaming.sources.mongodb import MongoSource
             return MongoSource(config, **kwargs)
+        elif connector_type == SourceType.MYSQL:
+            raise Exception(
+                'MySQL change capture runs on the stream engine (ADR-0048): start the stream '
+                'from its Run tab, or run it as a service (mage service run).',
+            )
         raise Exception(
             f'Consuming data from {connector_type} is not supported in streaming pipelines yet.',
         )

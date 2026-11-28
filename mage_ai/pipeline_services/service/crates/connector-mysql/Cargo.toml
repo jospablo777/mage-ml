@@ -1,0 +1,21 @@
+[package]
+name = "mage-connector-mysql"
+description = "MySQL change capture source for Mage pipeline service streams: the binary log in ROW format, an initial copy without a global lock, positions saved after the sinks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mage-stream-core = { path = "../stream-core" }
+mage-stream-ports = { path = "../stream-ports" }
+serde_json = { workspace = true }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
+futures-util = { version = "0.3", default-features = false }
+tokio = { version = "1.47", features = ["rt", "time", "sync", "macros"] }
+mysql_async = { version = "0.37", default-features = false, features = ["minimal-rust", "rustls-tls", "ring", "tls12", "binlog"] }
+mysql_common = { version = "0.37", default-features = false, features = ["binlog"] }
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }

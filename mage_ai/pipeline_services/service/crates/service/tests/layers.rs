@@ -64,6 +64,7 @@ const LAYERS: &[Layer] = &[
             "mage-connector-kafka",
             "mage-connector-local",
             "mage-connector-mongodb",
+            "mage-connector-mysql",
             "mage-connector-nats",
             "mage-connector-objectstore",
             "mage-connector-postgres",

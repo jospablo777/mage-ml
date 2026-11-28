@@ -37,6 +37,7 @@ mage-connector-activemq = { path = "../connector-activemq", optional = true }
 mage-connector-search = { path = "../connector-search", optional = true }
 mage-connector-influxdb = { path = "../connector-influxdb", optional = true }
 mage-connector-iceberg = { path = "../connector-iceberg", optional = true }
+mage-connector-mysql = { path = "../connector-mysql", optional = true }
 # Data contracts on block outputs, checked by the checker of MageML runs; exports turn it
 # on when a block has a contract. It builds Polars.
 mage-checks = { path = "../checks", optional = true }
@@ -92,6 +93,8 @@ object-store = ["dep:mage-connector-objectstore"]
 postgres = []
 # ClickHouse sinks.
 clickhouse = ["dep:mage-connector-clickhouse"]
+# MySQL change capture sources (ADR-0048).
+mysql = ["dep:mage-connector-mysql"]
 sqs = ["dep:mage-connector-sqs"]
 pubsub = ["dep:mage-connector-pubsub"]
 activemq = ["dep:mage-connector-activemq"]
@@ -105,7 +108,7 @@ sql = ["dep:polars"]
 # The standard connectors: the engine the mageml-engine wheel ships (ADR-0017).
 full = [
     "kafka", "rabbitmq", "nats", "mongodb", "ibm-mq", "object-store", "postgres", "clickhouse",
-    "sqs", "pubsub", "activemq", "search", "influxdb",
+    "sqs", "pubsub", "activemq", "search", "influxdb", "mysql",
 ]
 
 [dev-dependencies]

@@ -1,0 +1,17 @@
+connector_type: mysql
+# Changes of MySQL tables, read from the binary log by the stream engine. The server needs
+# binlog_format ROW, binlog_row_image FULL and binlog_row_metadata FULL; the user
+# REPLICATION SLAVE, REPLICATION CLIENT and SELECT.
+host: localhost
+port: 3306
+database: shop
+user: replicator
+password: password
+# Tables to read, as database.table or a table of database. Without them, every table of
+# database.
+tables:
+  - orders
+# initial: copy the tables' rows first, then follow their changes. never: changes only.
+snapshot: initial
+batch_size: 1000
+batch_timeout: 1.0

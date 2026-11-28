@@ -844,6 +844,8 @@ STREAM_SOURCES = {
     'nats': 'nats', 'nats_js': 'nats', 'mongodb': 'mongodb',
     # Changes by logical replication.
     'postgres': 'postgres',
+    # Changes from the binary log (ADR-0048).
+    'mysql': 'mysql',
     'amazon_sqs': 'sqs', 'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
 }
 STREAM_SINKS = {
@@ -863,7 +865,7 @@ ENGINE_FEATURES = {
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
     'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
     'pubsub': 'pubsub', 'activemq': 'activemq', 'search': 'search', 'influxdb': 'influxdb',
-    'iceberg': 'iceberg',
+    'iceberg': 'iceberg', 'mysql': 'mysql',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -881,6 +883,10 @@ POSTGRES_SOURCE_SETTINGS = {
     'host', 'port', 'database', 'user', 'password', 'replication_slot', 'publication_name',
     'tables', 'create_slot', 'batch_size', 'batch_timeout', 'start_lsn', 'connect_timeout',
     'sslmode', 'sslrootcert', 'snapshot',
+}
+MYSQL_SOURCE_SETTINGS = {
+    'host', 'port', 'database', 'user', 'username', 'password', 'tables', 'server_id',
+    'snapshot', 'sslmode', 'sslrootcert', 'connect_timeout', 'batch_size', 'batch_timeout',
 }
 # Object storage sinks: the generic one, and Mage's S3 and GCS sinks, which name a bucket.
 OBJECT_STORAGE_SETTINGS = {
@@ -1619,6 +1625,38 @@ def _postgres_source_connector(block, config: Dict, where: str, problems: List[s
     return connector
 
 
+def _mysql_source_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
+    """MySQL change capture (ADR-0048): the server, the tables, and its batches."""
+    unknown = sorted(set(config) - MYSQL_SOURCE_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown MySQL source settings {", ".join(unknown)}.')
+    if config.get('snapshot') not in (None, 'initial', 'never'):
+        problems.append(f'{where}: MySQL snapshot is initial or never.')
+    for key in ('host', 'database'):
+        if not config.get(key):
+            problems.append(f'{where}: MySQL source settings need {key}.')
+    if not (config.get('user') or config.get('username')):
+        problems.append(f'{where}: MySQL source settings need user.')
+    if _literal(config.get('password')):
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    server_id = config.get('server_id')
+    if _literal(server_id) and server_id is not None and not (
+        str(server_id).isdigit() and 0 < int(server_id) < 2 ** 32
+    ):
+        problems.append(f'{where}: server_id is a replica id from 1 to 4294967295.')
+    settings = {k: v for k, v in config.items()
+                if k in MYSQL_SOURCE_SETTINGS and k not in ('batch_size', 'batch_timeout')}
+    connector = dict(name=block.uuid, kind='mysql', config=settings)
+    if config.get('batch_size'):
+        connector['batch_size'] = config['batch_size']
+    if config.get('batch_timeout'):
+        connector['timeout_ms'] = int(float(config['batch_timeout']) * 1000)
+    return connector
+
+
 def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
                               problems: List[str]) -> Dict:
     """
@@ -1879,6 +1917,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _sqs_connector(block, config, where, problems)
     if kind == 'postgres' and role == 'source':
         return _postgres_source_connector(block, config, where, problems)
+    if kind == 'mysql':
+        return _mysql_source_connector(block, config, where, problems)
     if kind == 'postgres':
         return dict(name=block.uuid, kind='postgres',
                     config=_postgres_sink_settings(config, where, problems))

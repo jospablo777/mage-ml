@@ -44,6 +44,9 @@
 - The sync starts from the Ingestion page once created, and the Run panel shows the first
   copy table by table: rows read against each table's estimate, and done once the
   destination has them all.
+- MySQL change capture on the stream engine (`connector_type: mysql`): the binary log read as
+  a replica, an initial copy without a global lock, the same messages as the PostgreSQL
+  source (so a PostgreSQL mirror takes either), and the position saved after the sinks.
 
 ### Streams
 

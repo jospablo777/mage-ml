@@ -156,6 +156,22 @@ fn source(
                 ))),
             ))
         }
+        #[cfg(feature = "mysql")]
+        ConnectorKind::Mysql => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(
+                mage_connector_mysql::MySqlCdcSource::new(
+                    &_config,
+                    mage_connector_mysql::BatchLimits {
+                        max_records: batch.max_records,
+                        max_bytes: batch.max_bytes,
+                        max_wait: Duration::from_millis(batch.max_wait_ms),
+                    },
+                )?
+                .with_position_record(Arc::new(PositionFile(service.state_files(&pipeline.uuid)))),
+            ))
+        }
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -342,6 +358,32 @@ impl mage_connector_postgres::cdc::CopyRecord for CopyRecordFiles {
     }
 }
 
+/// Where a MySQL change capture stream keeps its binary log position (ADR-0048): a file in
+/// the pipeline's state, written after the sinks took the changes before it.
+#[cfg(feature = "mysql")]
+struct PositionFile(crate::state_files::StateFiles);
+
+#[cfg(feature = "mysql")]
+impl PositionFile {
+    const NAME: &'static str = "mysql-binlog-position.json";
+}
+
+#[cfg(feature = "mysql")]
+impl mage_connector_mysql::PositionRecord for PositionFile {
+    fn load(&self) -> Result<Option<String>, ConnectorError> {
+        self.0
+            .read(Self::NAME)
+            .map(|found| found.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+            .map_err(ConnectorError::retryable)
+    }
+
+    fn save(&self, position: &str) -> Result<(), ConnectorError> {
+        self.0
+            .write(Self::NAME, position.as_bytes())
+            .map_err(ConnectorError::retryable)
+    }
+}
+
 /// `scope` names the stream for the sinks' object names and deduplication keys (see
 /// [`sink_scope`]).
 fn sink(
@@ -443,6 +485,7 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
             "it was built without InfluxDB; build it with the influxdb feature"
         }
         ConnectorKind::Iceberg => "it was built without Iceberg; build it with the iceberg feature",
+        ConnectorKind::Mysql => "it was built without MySQL; build it with the mysql feature",
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast | ConnectorKind::Amplitude => {
             "it is a sink only"
@@ -522,13 +565,16 @@ async fn check_connector(
             Ok(found) => ConnectionReport::passed(format!("Reached the catalog: {found}.")),
             Err(error) => ConnectionReport::failed(error.message),
         },
+        #[cfg(feature = "mysql")]
+        ConnectorKind::Mysql => mage_connector_mysql::check_source(config).await,
         #[allow(unreachable_patterns)]
-        ConnectorKind::Kafka | ConnectorKind::Rabbitmq | ConnectorKind::Nats => {
-            ConnectionReport::failed(format!(
-                "This service cannot connect: {}.",
-                unavailable(kind)
-            ))
-        }
+        ConnectorKind::Kafka
+        | ConnectorKind::Rabbitmq
+        | ConnectorKind::Nats
+        | ConnectorKind::Mysql => ConnectionReport::failed(format!(
+            "This service cannot connect: {}.",
+            unavailable(kind)
+        )),
         other => ConnectionReport::not_checked(format!(
             "{} has no connection check yet; the stream's start reports what fails.",
             other.as_str()

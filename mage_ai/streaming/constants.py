@@ -16,6 +16,7 @@ class SourceType(StrEnum):
     KINESIS = 'kinesis'
     RABBITMQ = 'rabbitmq'
     MONGODB = 'mongodb'
+    MYSQL = 'mysql'
     POSTGRES = 'postgres'
 
 

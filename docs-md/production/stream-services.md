@@ -41,6 +41,7 @@ Kafka stream, or Kafka to PostgreSQL, can be
 | [`google_cloud_pubsub`](#google-cloud-pub/sub) | Acked after the sinks; deadlines extended | Competing subscribers | Publish answered | No | |
 | [`mongodb`](#mongodb) | Resume token saved in the database | One | Bulk write | Upserts with `unique_constraints` | |
 | [`postgres`](#postgresql-changes) (source) | End LSN confirmed to the slot | One | | | Position kept in the slot |
+| [`mysql`](#mysql-changes) (source) | Transaction end saved in the stream's state | One | | | Engine only |
 | [`postgres`](#postgresql) (sink) | | | Transaction committed | Upserts with `unique_constraints` | |
 | [`clickhouse`](#clickhouse) | | | Insert answered | Insert tokens | |
 | [`elasticsearch`, `opensearch`](#elasticsearch-and-opensearch) | | | Bulk answer, every document written | Same `_id` replaces the document | Messages are the documents (0.2) |
@@ -667,6 +668,51 @@ sslmode: verify-full
   the pipeline's state keeps that it finished, and a copy cut short starts again. It runs on
   the engine (the Run tab and exported services).
 
+### MySQL changes
+
+The `mysql` source reads the binary log as a replica does, and gives the same messages as
+the PostgreSQL source, so a [mirror](#postgresql), a history or a plain table takes either:
+
+```yaml
+connector_type: mysql
+host: db.example.com
+database: shop
+user: replicator              # REPLICATION SLAVE, REPLICATION CLIENT, SELECT
+password: "{{ env_var('MYSQL_PASSWORD') }}"
+tables: [orders, audit.events] # a table of database, or database.table; none: all of database
+snapshot: initial             # copy the tables first; never: changes only
+batch_size: 1000
+batch_timeout: 1.0
+sslmode: verify-full          # disable, prefer (the default), require, verify-ca
+```
+
+- The server needs `log_bin`, `binlog_format=ROW`, `binlog_row_image=FULL` (an update
+  carries the whole row), `binlog_row_metadata=FULL` (each change names its columns) and
+  `binlog_transaction_compression=OFF`. Check connections says which one is missing.
+- Each changed row reaches the blocks as a JSON object of its columns and `_mage_operation`
+  (`insert`, `update`, `delete`, or `snapshot` for copied rows), `_mage_schema` (the
+  database), `_mage_table`, `_mage_binlog` (`file:offset`), `_mage_commit_time` (to the
+  microsecond on MySQL 8) and, for deletes, `_mage_deleted_at`. Integers and floats are
+  numbers, DECIMAL a number with every digit, DATE `2026-11-28`, DATETIME
+  `2026-11-28T10:00:00.12`, TIMESTAMP in UTC with `+00:00`, TIME `-01:30:00`, YEAR and BIT
+  numbers, ENUM and SET their names, JSON JSON, binary strings base64. A zero date is null.
+  A copied row and the same row changed later read the same.
+- An update that changes the primary key is a delete of the old key, then the update.
+- The server keeps no reader's position, so the stream keeps it: once every sink took a
+  transaction's changes, the transaction's end is saved in the stream's state
+  (`mysql-binlog-position.json`), and a restart reads the log from there. With state in object
+  storage (`MAGE_SERVICE_STATE_URL`), a restart on another machine continues too. A saved
+  position the server has purged (`binlog_expire_logs_seconds`) stops the stream with the
+  reason; delete the stream's state to copy the tables again.
+- `snapshot: initial` reads the log's position, then copies the tables in one consistent
+  snapshot (no global lock, no RELOAD privilege), then reads changes from that position:
+  changes made while the copy started come again, and a mirror's upserts by key make that
+  harmless. Copied rows carry the starting position as `_mage_binlog`. A copy cut short
+  starts again.
+- One reader keeps one position, so the stream runs one instance. It runs on the engine
+  (the Run tab and exported services), not in MageML's Python executor. DDL is not
+  replicated.
+
 ### PostgreSQL
 
 A `postgres` sink takes MageML's PostgreSQL sink settings, and TLS:
@@ -738,8 +784,12 @@ mirror:
   leaves the table as it was.
 - A delete deletes the row; with `deletes: soft` it sets `_mage_deleted_at` to the
   change's commit time, and inserting the key again clears it.
-- `_mage_operation`, `_mage_schema` and `_mage_table` are not columns; `_mage_lsn` and
-  `_mage_commit_time` are, so each row says which change wrote it.
+- `_mage_operation`, `_mage_schema` and `_mage_table` are not columns; `_mage_lsn` (or
+  `_mage_binlog` from MySQL) and `_mage_commit_time` are, so each row says which change
+  wrote it.
+- A table the sink makes, in mirror or history mode, gets `NUMERIC` for a number with a
+  fraction (a `DOUBLE PRECISION` keeps about 15 digits), so DECIMAL and NUMERIC values copy
+  exactly; a number with an exponent gets `DOUBLE PRECISION`.
 - `{_mage_table}` and `{_mage_schema}` in `table` name each change's table. A table the
   sink makes gets a unique key; an existing table needs a unique index on the key, and the
   stream stops saying so when it has none.

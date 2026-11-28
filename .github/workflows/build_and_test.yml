@@ -122,7 +122,8 @@ jobs:
   rust:
     name: Rust extension
     runs-on: ubuntu-latest
-    # The pipeline service's run history on PostgreSQL (MAGE_TEST_POSTGRES_URL).
+    # The pipeline service's run history on PostgreSQL (MAGE_TEST_POSTGRES_URL), and MySQL
+    # for the change capture source (MAGE_TEST_MYSQL_URL).
     services:
       postgres:
         image: postgres:16.15-alpine
@@ -134,6 +135,16 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d test"
           --health-interval 2s --health-timeout 5s --health-retries 30
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -uroot -ptest -h127.0.0.1"
+          --health-interval 2s --health-timeout 5s --health-retries 60
     defaults:
       run:
         working-directory: rust/column_atlas
@@ -184,10 +195,17 @@ jobs:
           docker exec "$id" psql -U postgres -d test -c "ALTER SYSTEM SET wal_level = logical"
           docker restart "$id"
           timeout 60 bash -c "until docker exec $id pg_isready -U postgres -d test; do sleep 1; done"
+      # Each change names its columns in the binary log (ADR-0048); a service container takes
+      # no server options, and the setting is dynamic.
+      - name: Full row metadata on the test MySQL
+        run: |
+          id=$(docker ps -q --filter ancestor=mysql:8.4)
+          docker exec "$id" mysql -uroot -ptest -e "SET PERSIST binlog_row_metadata = FULL"
       - name: Pipeline service tests
         working-directory: mage_ai/pipeline_services/service
         env:
           MAGE_TEST_POSTGRES_URL: postgres://postgres:test@localhost:5432/test?sslmode=disable
+          MAGE_TEST_MYSQL_URL: mysql://root:test@127.0.0.1:3306/test
         run: cargo test --locked --all-features
       # The Airflow provider (packages/mageml-airflow) against the engine the tests above
       # built, in Airflow 3 in a venv of its own.

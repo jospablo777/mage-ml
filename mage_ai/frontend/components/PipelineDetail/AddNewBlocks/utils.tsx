@@ -42,6 +42,7 @@ const getDataSourceTypes = (
         DataSourceTypeEnum.KINESIS,
         DataSourceTypeEnum.RABBITMQ,
         DataSourceTypeEnum.MONGODB,
+        DataSourceTypeEnum.MYSQL,
         DataSourceTypeEnum.POSTGRES,
       ],
       [BlockTypeEnum.DATA_EXPORTER]: [

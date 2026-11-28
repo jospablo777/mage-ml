@@ -395,6 +395,8 @@ pub enum ConnectorKind {
     Influxdb,
     /// Sink: an Apache Iceberg table through a REST catalog, data files appended in commits.
     Iceberg,
+    /// Source: changes read from the binary log, the position saved after the sinks.
+    Mysql,
 }
 
 impl ConnectorKind {
@@ -418,6 +420,7 @@ impl ConnectorKind {
             ConnectorKind::Search => "search",
             ConnectorKind::Influxdb => "influxdb",
             ConnectorKind::Iceberg => "iceberg",
+            ConnectorKind::Mysql => "mysql",
         }
     }
 
@@ -431,6 +434,7 @@ impl ConnectorKind {
                 | ConnectorKind::Nats
                 | ConnectorKind::Mongodb
                 | ConnectorKind::Postgres
+                | ConnectorKind::Mysql
                 | ConnectorKind::Sqs
                 | ConnectorKind::Pubsub
                 | ConnectorKind::Activemq

@@ -1045,6 +1045,49 @@ class PostgresSourceExportTest(StreamExportTestCase):
         self.assertIn('unknown PostgreSQL source settings slot', problems)
 
 
+class MySqlSourceExportTest(StreamExportTestCase):
+    def test_mysql_change_capture_exports_to_the_engines_source(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: mysql
+            host: db.example.com
+            database: shop
+            user: replicator
+            password: "{{ env_var('MYSQL_PASSWORD') }}"
+            tables: [orders, audit.events]
+            snapshot: initial
+            server_id: 4242
+            batch_size: 500
+            batch_timeout: 2
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        source = stream['source']
+        self.assertEqual(source['kind'], 'mysql')
+        self.assertEqual(source['config']['tables'], ['orders', 'audit.events'])
+        self.assertEqual(source['config']['password'], {'$parts': [{'env': 'MYSQL_PASSWORD'}]})
+        self.assertEqual(source['config']['server_id'], 4242)
+        self.assertNotIn('batch_size', source['config'])
+        self.assertEqual(stream['batch']['max_records'], 500)
+        self.assertIn('mysql', captured.engine_features)
+
+    def test_mysql_settings_say_what_to_fix(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: mysql
+            host: db
+            database: shop
+            password: hunter2
+            snapshot: always
+            server_id: 0
+            slot: x
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('password is written in the file', problems)
+        self.assertIn('MySQL snapshot is initial or never', problems)
+        self.assertIn('server_id is a replica id', problems)
+        self.assertIn('MySQL source settings need user', problems)
+        self.assertIn('unknown MySQL source settings slot', problems)
+
+
 class SqsSourceExportTest(StreamExportTestCase):
     def test_sqs_sources_export_to_the_engines_source(self):
         self.stream(source=textwrap.dedent('''
