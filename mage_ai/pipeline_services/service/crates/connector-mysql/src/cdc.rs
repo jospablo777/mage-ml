@@ -34,8 +34,9 @@ use mysql_common::binlog::events::{EventData, OptionalMetadataField, RowsEventDa
 use mysql_common::binlog::row::BinlogRow;
 use serde_json::Value;
 
+use crate::gtid::{Gtid, GtidSet, uuid};
 use crate::values::{Kind, kind_of, write_binlog, write_text};
-use crate::{LogSettings, Settings, classify, connect, log_position, quote, tables};
+use crate::{LogSettings, Settings, classify, connect, log_position, log_status, quote, tables};
 
 const PARTITION: PartitionId = PartitionId(0);
 /// Rows a copy reads ahead, and changes the log reader reads ahead.
@@ -86,29 +87,41 @@ impl LogPosition {
         format!("{}:{}", self.file, self.offset)
     }
 
-    /// The saved form: the server it is a position of, the file and the offset.
-    fn saved(&self, source: &str) -> String {
-        serde_json::json!({"source": source, "file": self.file, "offset": self.offset}).to_string()
+    /// The saved form: the server it is a position of, the file and the offset, and with
+    /// GTIDs on, the transactions handled.
+    fn saved(&self, source: &str, gtids: Option<&GtidSet>) -> String {
+        let mut saved =
+            serde_json::json!({"source": source, "file": self.file, "offset": self.offset});
+        if let Some(gtids) = gtids {
+            saved["gtids"] = gtids.text().into();
+        }
+        saved.to_string()
     }
 
-    /// A saved position of this server; None for another server's (its settings changed).
-    fn read_saved(text: &str, source: &str) -> Option<LogPosition> {
+    /// A saved position of this server, with its GTIDs; None for another server's (its
+    /// settings changed).
+    fn read_saved(text: &str, source: &str) -> Option<(LogPosition, Option<GtidSet>)> {
         let saved: Value = serde_json::from_str(text).ok()?;
         if saved.get("source")?.as_str()? != source {
             return None;
         }
-        Some(LogPosition {
+        let position = LogPosition {
             file: saved.get("file")?.as_str()?.to_string(),
             offset: saved.get("offset")?.as_u64()?,
-        })
+        };
+        let gtids = match saved.get("gtids").and_then(Value::as_str) {
+            Some(text) => Some(GtidSet::parse(text).ok()?),
+            None => None,
+        };
+        Some((position, gtids))
     }
 }
 
 /// What the log reader found.
 enum Change {
     Row(Vec<u8>),
-    /// A transaction ended here.
-    End(LogPosition),
+    /// A transaction ended here; its GTID, with GTIDs on.
+    End(LogPosition, Option<Gtid>),
 }
 
 struct Copy {
@@ -163,6 +176,12 @@ pub struct MySqlCdcSource {
     committed: u64,
     /// Transaction ends, by the number of messages handed over when they were read.
     ends: BTreeMap<u64, LogPosition>,
+    /// Their GTIDs, with GTIDs on, by the same numbers.
+    end_gtids: BTreeMap<u64, Vec<Gtid>>,
+    /// With GTIDs on: the transactions every sink took, saved with the position, from which a
+    /// restart reads on any server of the topology.
+    gtids: Option<GtidSet>,
+    gtids_changed: bool,
     /// Where the log is read from after the copy, or now.
     start: Option<LogPosition>,
     saved: Option<LogPosition>,
@@ -197,6 +216,9 @@ impl MySqlCdcSource {
             delivered: 0,
             committed: 0,
             ends: BTreeMap::new(),
+            end_gtids: BTreeMap::new(),
+            gtids: None,
+            gtids_changed: false,
             start: None,
             saved: None,
             copy: None,
@@ -271,14 +293,25 @@ impl MySqlCdcSource {
     }
 
     fn save(&mut self, position: LogPosition) -> Result<(), ConnectorError> {
-        if self.saved.as_ref() == Some(&position) {
+        if self.saved.as_ref() == Some(&position) && !self.gtids_changed {
             return Ok(());
         }
         if let Some(record) = &self.record {
-            record.save(&position.saved(&self.source_name()))?;
+            record.save(&position.saved(&self.source_name(), self.gtids.as_ref()))?;
         }
         self.saved = Some(position);
+        self.gtids_changed = false;
         Ok(())
+    }
+
+    /// Transactions every sink took.
+    fn handled(&mut self, gtids: impl IntoIterator<Item = Gtid>) {
+        if let Some(set) = self.gtids.as_mut() {
+            for (source, gno) in gtids {
+                set.add(&source, gno);
+                self.gtids_changed = true;
+            }
+        }
     }
 
     async fn connect(&mut self) -> Result<SourceEvent, ConnectorError> {
@@ -304,15 +337,22 @@ impl MySqlCdcSource {
         self.copy = None;
         self.pending = None;
         self.ends.clear();
+        self.end_gtids.clear();
         self.copy_last = None;
         match saved {
-            Some(position) => {
+            Some((position, gtids)) => {
                 self.saved = Some(position.clone());
                 self.start = Some(position);
+                self.gtids = gtids;
             }
             None => {
-                let (file, offset) = log_position(&mut conn).await?;
-                let start = LogPosition { file, offset };
+                let status = log_status(&mut conn).await?;
+                let start = LogPosition {
+                    file: status.file,
+                    offset: status.offset,
+                };
+                self.gtids = status.gtids;
+                self.gtids_changed = true;
                 if self.settings.snapshot {
                     let (copy, progress) = self.begin_copy(&mut conn, &start).await?;
                     self.copy = Some(copy);
@@ -434,8 +474,9 @@ impl MySqlCdcSource {
         let conn = connect(&settings).await?;
         let (send, changes) = tokio::sync::mpsc::channel(READ_AHEAD);
         self.read_through = Some(start.clone());
+        let gtids = self.gtids.clone();
         let task = tokio::spawn(async move {
-            if let Err(error) = read_log(conn, settings, start, &send).await {
+            if let Err(error) = read_log(conn, settings, start, gtids, &send).await {
                 let _ = send.send(Err(error)).await;
             }
         });
@@ -456,13 +497,17 @@ impl MySqlCdcSource {
             let reader = self.reader.as_mut().expect("reading");
             match tokio::time::timeout(wait, reader.changes.recv()).await {
                 Ok(Some(Ok(Change::Row(value)))) => self.push(value),
-                Ok(Some(Ok(Change::End(position)))) => {
+                Ok(Some(Ok(Change::End(position, gtid)))) => {
                     self.read_through = Some(position.clone());
                     // Nothing waits for the sinks: the end can be saved now.
                     if self.pending.is_none() && self.committed == self.delivered {
+                        self.handled(gtid);
                         self.save(position)?;
                     } else {
                         self.ends.insert(self.delivered, position);
+                        if let Some(gtid) = gtid {
+                            self.end_gtids.entry(self.delivered).or_default().push(gtid);
+                        }
                     }
                     self.settle_probe();
                 }
@@ -491,6 +536,7 @@ impl MySqlCdcSource {
         self.reader = None;
         self.pending = None;
         self.ends.clear();
+        self.end_gtids.clear();
         self.probe = None;
         self.read_through = None;
         SourceEvent::Revoking {
@@ -617,6 +663,9 @@ impl Source for MySqlCdcSource {
                 self.copy_last = None;
             }
             if self.copy_last.is_none() {
+                let later = self.end_gtids.split_off(&(self.committed + 1));
+                let done = std::mem::replace(&mut self.end_gtids, later);
+                self.handled(done.into_values().flatten());
                 let later = self.ends.split_off(&(self.committed + 1));
                 let done = std::mem::replace(&mut self.ends, later);
                 if let Some((_, end)) = done.into_iter().next_back()
@@ -800,6 +849,7 @@ async fn read_log(
     mut conn: Conn,
     settings: Arc<Settings>,
     start: LogPosition,
+    gtids: Option<GtidSet>,
     send: &tokio::sync::mpsc::Sender<Result<Change, ConnectorError>>,
 ) -> Result<(), ConnectorError> {
     let wanted: Vec<(String, String)> = tables(&mut conn, &settings).await?;
@@ -811,34 +861,41 @@ async fn read_log(
     .await
     .map_err(|e| classify("asking for heartbeats", e))?;
     let server_id = settings.server_id.unwrap_or_else(random_server_id);
-    let mut stream = conn
-        .get_binlog_stream(
-            BinlogStreamRequest::new(server_id)
-                .with_filename(start.file.as_bytes())
-                .with_pos(start.offset),
-        )
-        .await
-        .map_err(|e| {
-            let error = classify(&format!("reading the binary log from {}", start.text()), e);
-            if error.message.contains("1236") || error.message.contains("purged") {
-                ConnectorError::fatal(format!(
-                    "{} The saved position is no longer in the server's binary log (it keeps \
-                     binlog_expire_logs_seconds of it): delete the stream's state to copy the \
-                     tables again.",
-                    error.message
-                ))
-            } else {
-                error
-            }
-        })?;
+    // With GTIDs the server sends what the set lacks, on whichever server it is now.
+    let request = match &gtids {
+        Some(set) => BinlogStreamRequest::new(server_id)
+            .with_gtid()
+            .with_gtid_set(set.sids().map_err(ConnectorError::fatal)?),
+        None => BinlogStreamRequest::new(server_id)
+            .with_filename(start.file.as_bytes())
+            .with_pos(start.offset),
+    };
+    let from = match &gtids {
+        Some(set) if !set.is_empty() => format!("the GTIDs after {}", set.text()),
+        _ => start.text(),
+    };
+    let mut stream = conn.get_binlog_stream(request).await.map_err(|e| {
+        let error = classify(&format!("reading the binary log from {from}"), e);
+        if error.message.contains("1236") || error.message.contains("purged") {
+            ConnectorError::fatal(format!(
+                "{} The saved position is no longer in the server's binary log (it keeps \
+                     binlog_expire_logs_seconds of it), or the server's GTIDs are of another \
+                     topology: delete the stream's state to copy the tables again.",
+                error.message
+            ))
+        } else {
+            error
+        }
+    })?;
     eprintln!(
-        "MySQL stream source on {}: reading changes from {} (replica id {server_id})",
+        "MySQL stream source on {}: reading changes from {from} (replica id {server_id})",
         settings.label(),
-        start.text()
     );
     let mut file = start.file.clone();
     let mut known: HashMap<u64, Table> = HashMap::new();
     let mut commit_micros: Option<i64> = None;
+    // The GTID of the transaction being read, with GTIDs on.
+    let mut transaction: Option<Gtid> = None;
     loop {
         let event = match tokio::time::timeout(HEARTBEAT * 3, stream.next()).await {
             Err(_) => {
@@ -863,26 +920,34 @@ async fn read_log(
             Some(EventData::GtidEvent(gtid)) => {
                 commit_micros =
                     Some(gtid.immediate_commit_timestamp() as i64).filter(|micros| *micros > 0);
+                transaction = Some((uuid(gtid.sid()), gtid.gno()));
             }
             Some(EventData::AnonymousGtidEvent(gtid)) => {
                 commit_micros =
                     Some(gtid.0.immediate_commit_timestamp() as i64).filter(|micros| *micros > 0);
+                transaction = None;
             }
             Some(EventData::QueryEvent(query)) => {
                 if !query.query_raw().eq_ignore_ascii_case(b"BEGIN") && end > 0 {
                     // A statement of its own (DDL), or a COMMIT outside InnoDB.
-                    found.push(Change::End(LogPosition {
-                        file: file.clone(),
-                        offset: end,
-                    }));
+                    found.push(Change::End(
+                        LogPosition {
+                            file: file.clone(),
+                            offset: end,
+                        },
+                        transaction.take(),
+                    ));
                 }
             }
             Some(EventData::XidEvent(_)) => {
                 if end > 0 {
-                    found.push(Change::End(LogPosition {
-                        file: file.clone(),
-                        offset: end,
-                    }));
+                    found.push(Change::End(
+                        LogPosition {
+                            file: file.clone(),
+                            offset: end,
+                        },
+                        transaction.take(),
+                    ));
                 }
             }
             Some(EventData::TableMapEvent(map)) => {
@@ -1093,10 +1158,20 @@ mod tests {
             file: "binlog.000003".into(),
             offset: 4567,
         };
-        let saved = at.saved("db:3306");
-        assert_eq!(LogPosition::read_saved(&saved, "db:3306"), Some(at));
+        let saved = at.saved("db:3306", None);
+        assert_eq!(
+            LogPosition::read_saved(&saved, "db:3306"),
+            Some((at.clone(), None))
+        );
         assert_eq!(LogPosition::read_saved(&saved, "other:3306"), None);
         assert_eq!(LogPosition::read_saved("not json", "db:3306"), None);
+        // With GTIDs on, the transactions handled are saved with it.
+        let gtids = GtidSet::parse("3e11fa47-71ca-11e1-9e33-c80aa9429562:1-42").unwrap();
+        let saved = at.saved("db:3306", Some(&gtids));
+        assert_eq!(
+            LogPosition::read_saved(&saved, "db:3306"),
+            Some((at, Some(gtids)))
+        );
     }
 
     #[test]
@@ -1309,6 +1384,36 @@ mod tests {
             "{through} {now}"
         );
         restarted.close().await;
+
+        // With GTIDs on, the transactions handled are saved, and a restart reads by them: a
+        // file and offset mean nothing on another server after a failover; a GTID set does.
+        let gtid_mode: Option<String> = admin.query_first("SELECT @@gtid_mode").await.unwrap();
+        if gtid_mode.as_deref() == Some("ON") {
+            let text = saved.0.lock().unwrap().clone().unwrap();
+            let mut position: Value = serde_json::from_str(&text).unwrap();
+            assert!(
+                position["gtids"].as_str().is_some_and(|g| !g.is_empty()),
+                "{text}"
+            );
+            position["file"] = "binlog.999999".into();
+            position["offset"] = 4.into();
+            *saved.0.lock().unwrap() = Some(position.to_string());
+            sql(
+                &mut admin,
+                &format!("UPDATE {table} SET item = 'after failover' WHERE id = 1"),
+            )
+            .await;
+            let mut moved = MySqlCdcSource::new(&config, limits)
+                .unwrap()
+                .with_position_record(saved.clone());
+            moved.next_event().await.unwrap();
+            let after = read(&mut moved, 1).await;
+            assert_eq!(after.len(), 1, "{after:?}");
+            assert_eq!(after[0]["item"], "after failover");
+            moved.close().await;
+        } else {
+            eprintln!("gtid_mode is not ON: the GTID restart is not tested here");
+        }
         sql(&mut admin, &format!("DROP TABLE {table}, {other}")).await;
     }
 }

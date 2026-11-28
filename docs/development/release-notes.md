@@ -46,7 +46,8 @@
   destination has them all.
 - MySQL change capture on the stream engine (`connector_type: mysql`): the binary log read as
   a replica, an initial copy without a global lock, the same messages as the PostgreSQL
-  source (so a PostgreSQL mirror takes either), and the position saved after the sinks.
+  source (so a PostgreSQL mirror takes either), and the position saved after the sinks; with
+  GTIDs on, a restart after a failover continues on the new primary.
 - The Ingestion page takes a MySQL source: it checks the binary log's settings and the
   user's grants, and syncs the chosen tables into PostgreSQL.
 - The ClickHouse sink mirrors change capture (`mirror:`): a ReplacingMergeTree per source

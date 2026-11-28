@@ -27,6 +27,7 @@ use mysql_async::{Conn, OptsBuilder, SslOpts};
 use serde_json::Value;
 
 pub mod cdc;
+mod gtid;
 mod values;
 
 pub use cdc::{BatchLimits, MySqlCdcSource, PositionRecord};
@@ -309,9 +310,43 @@ impl LogSettings {
     }
 }
 
-/// The server's current binary log file and offset (`SHOW BINARY LOG STATUS`, or `SHOW MASTER
-/// STATUS` before 8.2).
+/// Where the server's binary log is now: its file and offset, and with `gtid_mode=ON` the
+/// GTIDs it holds, read together (`SHOW BINARY LOG STATUS`, or `SHOW MASTER STATUS` before
+/// 8.2).
+pub(crate) struct LogStatus {
+    pub file: String,
+    pub offset: u64,
+    pub gtids: Option<gtid::GtidSet>,
+}
+
+pub(crate) async fn log_status(conn: &mut Conn) -> Result<LogStatus, ConnectorError> {
+    let gtid_mode: Option<String> = conn
+        .query_first("SELECT @@gtid_mode")
+        .await
+        .map_err(|e| classify("reading gtid_mode", e))?;
+    let (file, offset, executed) = log_position_and_gtids(conn).await?;
+    let gtids = if gtid_mode.as_deref() == Some("ON") {
+        Some(
+            gtid::GtidSet::parse(&executed)
+                .map_err(|e| ConnectorError::fatal(format!("MySQL Executed_Gtid_Set: {e}")))?,
+        )
+    } else {
+        None
+    };
+    Ok(LogStatus {
+        file,
+        offset,
+        gtids,
+    })
+}
+
+/// The server's current binary log file and offset.
 pub(crate) async fn log_position(conn: &mut Conn) -> Result<(String, u64), ConnectorError> {
+    let (file, offset, _) = log_position_and_gtids(conn).await?;
+    Ok((file, offset))
+}
+
+async fn log_position_and_gtids(conn: &mut Conn) -> Result<(String, u64, String), ConnectorError> {
     let row: Option<mysql_async::Row> = match conn.query_first("SHOW BINARY LOG STATUS").await {
         Ok(row) => row,
         Err(mysql_async::Error::Server(server)) if server.code == 1064 => conn
@@ -324,8 +359,12 @@ pub(crate) async fn log_position(conn: &mut Conn) -> Result<(String, u64), Conne
         .ok_or_else(|| ConnectorError::fatal("MySQL has no binary log position: is log_bin on?"))?;
     let file: Option<String> = row.get(0);
     let position: Option<u64> = row.get(1);
+    let executed: String = row
+        .get::<Option<String>, _>(4)
+        .flatten()
+        .unwrap_or_default();
     match (file, position) {
-        (Some(file), Some(position)) => Ok((file, position)),
+        (Some(file), Some(position)) => Ok((file, position, executed)),
         _ => Err(ConnectorError::fatal(
             "MySQL answered SHOW BINARY LOG STATUS without a file and position.",
         )),

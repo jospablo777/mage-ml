@@ -195,12 +195,15 @@ jobs:
           docker exec "$id" psql -U postgres -d test -c "ALTER SYSTEM SET wal_level = logical"
           docker restart "$id"
           timeout 60 bash -c "until docker exec $id pg_isready -U postgres -d test; do sleep 1; done"
-      # Each change names its columns in the binary log (ADR-0048); a service container takes
-      # no server options, and the setting is dynamic.
-      - name: Full row metadata on the test MySQL
+      # Each change names its columns in the binary log (ADR-0048), and GTIDs are on, so the
+      # change capture tests restart by GTID here (the compose MySQL tests file and offset); a
+      # service container takes no server options, and the settings are dynamic.
+      - name: Full row metadata and GTIDs on the test MySQL
         run: |
           id=$(docker ps -q --filter ancestor=mysql:8.4)
-          docker exec "$id" mysql -uroot -ptest -e "SET PERSIST binlog_row_metadata = FULL"
+          docker exec "$id" mysql -uroot -ptest -e "SET PERSIST binlog_row_metadata = FULL; \
+            SET PERSIST enforce_gtid_consistency = ON; SET PERSIST gtid_mode = OFF_PERMISSIVE; \
+            SET PERSIST gtid_mode = ON_PERMISSIVE; SET PERSIST gtid_mode = ON"
       - name: Pipeline service tests
         working-directory: mage_ai/pipeline_services/service
         env:

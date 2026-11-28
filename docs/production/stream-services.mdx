@@ -707,6 +707,10 @@ sslmode: verify-full          # disable, prefer (the default), require, verify-c
   storage (`MAGE_SERVICE_STATE_URL`), a restart on another machine continues too. A saved
   position the server has purged (`binlog_expire_logs_seconds`) stops the stream with the
   reason; delete the stream's state to copy the tables again.
+- With `gtid_mode=ON` the GTIDs of the transactions handled are saved too, and a restart asks
+  the server for the ones it lacks, so after a failover the new primary continues the
+  stream. Connect through the cluster's endpoint (the saved position belongs to the host and
+  port the stream names).
 - `snapshot: initial` reads the log's position, then copies the tables in one consistent
   snapshot (no global lock, no RELOAD privilege), then reads changes from that position:
   changes made while the copy started come again, and a mirror's upserts by key make that
